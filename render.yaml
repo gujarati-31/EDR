@@ -4,7 +4,7 @@ services:
     env: node
     plan: free
     region: oregon
-    buildCommand: "npm --prefix management-dashboard install && npm --prefix management-dashboard run build && npm --prefix backend install && npm --prefix backend run build"
+    buildCommand: "npm --prefix management-dashboard install --include=dev && npm --prefix management-dashboard run build && npm --prefix backend install --include=dev && npm --prefix backend run build"
     startCommand: "cd backend && npm start"
     envVars:
       - key: NODE_ENV
