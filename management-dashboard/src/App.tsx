@@ -49,6 +49,7 @@ export const App: React.FC = () => {
   const [appSubTab, setAppSubTab] = useState<'inventory' | 'screentime'>('inventory');
 
   const [isCapturingPhoto, setIsCapturingPhoto] = useState(false);
+  const [photoRefreshTrigger, setPhotoRefreshTrigger] = useState(0);
 
   // Connection Notification State
   const [connectionNotice, setConnectionNotice] = useState<{
@@ -153,6 +154,7 @@ export const App: React.FC = () => {
       case 'PHOTO_CAPTURED':
         loadLogs(selectedDevice?.deviceId);
         setIsCapturingPhoto(false);
+        setPhotoRefreshTrigger((prev) => prev + 1);
         break;
       case 'POLICY_UPDATED':
         if (selectedDevice && data.deviceId === selectedDevice.deviceId) {
@@ -536,13 +538,19 @@ export const App: React.FC = () => {
                   <IntruderPhotosViewer
                     deviceId={selectedDevice.deviceId}
                     isCapturing={isCapturingPhoto}
+                    refreshTrigger={photoRefreshTrigger}
                     onCaptureRequested={async () => {
                       setIsCapturingPhoto(true);
                       try {
                         await api.dispatchCommand(selectedDevice.deviceId, 'CAPTURE_PHOTO');
                         setTimeout(() => {
                           loadLogs(selectedDevice.deviceId);
+                          setPhotoRefreshTrigger((c) => c + 1);
                         }, 3000);
+                        setTimeout(() => {
+                          setIsCapturingPhoto(false);
+                          setPhotoRefreshTrigger((c) => c + 1);
+                        }, 7000);
                       } catch (e: any) {
                         setIsCapturingPhoto(false);
                         alert('Capture command failed: ' + e.message);
@@ -593,6 +601,8 @@ export const App: React.FC = () => {
                 {appSubTab === 'inventory' ? (
                   <AppManager
                     deviceId={selectedDevice.deviceId}
+                    policy={currentPolicy}
+                    onPolicyUpdated={(pol) => setCurrentPolicy(pol)}
                     onNavigateToRecordings={() => {
                       setActiveTab('evidence');
                       setEvidenceSubTab('trap_recordings');

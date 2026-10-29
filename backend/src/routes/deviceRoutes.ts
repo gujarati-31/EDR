@@ -149,10 +149,10 @@ async function checkDeviceInternetAndWake(
   // Pure network mode: device is not connected via USB ADB
   gateway.broadcastToDashboards('DEVICE_CONNECT_REQUESTED', { deviceId });
 
-  // Wait 6 seconds for device background poller to pick up connection request
+  // Wait up to 10 seconds for device background poller to pick up connection request
   const startTime = Date.now();
-  while (Date.now() - startTime < 6000) {
-    await new Promise((r) => setTimeout(r, 600));
+  while (Date.now() - startTime < 10000) {
+    await new Promise((r) => setTimeout(r, 500));
     if (gateway.isDeviceOnline(deviceId)) {
       return { success: true, message: `${device.deviceName} connected successfully!` };
     }
@@ -160,7 +160,7 @@ async function checkDeviceInternetAndWake(
 
   return {
     success: false,
-    message: 'Unable to reach phone over network (192.168.1.6). Ensure phone is on Wi-Fi and EDR Agent is active.',
+    message: `Connection request dispatched. Ensure ${device.deviceName} is connected to Wi-Fi/Mobile Data and EDR Agent is active.`,
   };
 }
 
@@ -656,6 +656,13 @@ export function createDeviceRouter(gateway: EDRWebSocketGateway) {
     const device = db.getDeviceById(deviceId);
     const targetId = device ? device.deviceId : deviceId;
 
+    // Retry grace period (up to 3 seconds) in case of brief reconnect
+    let retries = 0;
+    while (!gateway.isDeviceOnline(targetId) && retries < 6) {
+      await new Promise((r) => setTimeout(r, 500));
+      retries++;
+    }
+
     if (!gateway.isDeviceOnline(targetId)) {
       return res.status(503).json({
         success: false,
@@ -692,10 +699,17 @@ export function createDeviceRouter(gateway: EDRWebSocketGateway) {
 
   // 2. Stream a specific photo or video file on-demand directly from phone to client HTTP response
   // ZERO server disk storage: chunks are piped in transient RAM directly to res.write()
-  router.get('/:deviceId/live-media-file/:mediaId', (req, res) => {
+  router.get('/:deviceId/live-media-file/:mediaId', async (req, res) => {
     const { deviceId, mediaId } = req.params;
     const device = db.getDeviceById(deviceId);
     const targetId = device ? device.deviceId : deviceId;
+
+    // Retry grace period (up to 3 seconds) in case of brief reconnect
+    let retries = 0;
+    while (!gateway.isDeviceOnline(targetId) && retries < 6) {
+      await new Promise((r) => setTimeout(r, 500));
+      retries++;
+    }
 
     if (!gateway.isDeviceOnline(targetId)) {
       return res.status(503).send('Device is offline. Media streaming unavailable.');

@@ -16,12 +16,14 @@ interface IntruderPhotosViewerProps {
   deviceId: string;
   onCaptureRequested: () => void;
   isCapturing: boolean;
+  refreshTrigger?: number;
 }
 
 export const IntruderPhotosViewer: React.FC<IntruderPhotosViewerProps> = ({
   deviceId,
   onCaptureRequested,
   isCapturing,
+  refreshTrigger,
 }) => {
   const [photos, setPhotos] = useState<IntruderPhoto[]>([]);
   const [loading, setLoading] = useState(false);
@@ -51,7 +53,13 @@ export const IntruderPhotosViewer: React.FC<IntruderPhotosViewerProps> = ({
     if (deviceId) {
       loadPhotos();
     }
-  }, [deviceId]);
+  }, [deviceId, refreshTrigger]);
+
+  useEffect(() => {
+    if (!isCapturing && deviceId) {
+      loadPhotos();
+    }
+  }, [isCapturing]);
 
   const handleDelete = async (photoId: string) => {
     if (!confirm('Permanently delete this photo evidence record from the server?')) return;

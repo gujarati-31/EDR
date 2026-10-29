@@ -60,7 +60,7 @@ class EdrForegroundService : Service() {
         // Initialize Trap App Monitor with saved packages from storage
         TrapAppMonitor.initialize(this)
 
-        // Fallback poller: runs every 5 seconds as a safety net for the A11y instant events.
+        // Fallback poller: runs every 3 seconds as a safety net for the A11y instant events.
         // Also polls server connection status if currently disconnected to allow remote reconnect.
         monitorScheduler.scheduleWithFixedDelay({
             try {
@@ -76,7 +76,7 @@ class EdrForegroundService : Service() {
             } catch (e: Exception) {
                 // Ignore network errors while offline
             }
-        }, 5L, 5L, TimeUnit.SECONDS)
+        }, 3L, 3L, TimeUnit.SECONDS)
 
         // Connect to EDR management server
         wsClient = EdrWebSocketClient(this)
@@ -122,24 +122,30 @@ class EdrForegroundService : Service() {
 
     private fun checkServerConnectionRequest() {
         val deviceId = SyncPreferences.deviceId
-        val port = SyncPreferences.serverPort
-        val candidates = listOf("127.0.0.1", SyncPreferences.serverHost).distinct()
+        val urlList = mutableListOf<String>()
 
-        for (host in candidates) {
+        // 1. Primary: Cloud or LAN HTTP base URL
+        urlList.add("${SyncPreferences.httpBaseUrl}/api/devices/$deviceId/connection-status")
+        // 2. Fallback: Localhost reverse tunnel (USB ADB)
+        urlList.add("http://127.0.0.1:3000/api/devices/$deviceId/connection-status")
+
+        for (url in urlList.distinct()) {
             try {
-                val url = "http://$host:$port/api/devices/$deviceId/connection-status"
                 val request = Request.Builder().url(url).get().build()
                 val response = pollClient.newCall(request).execute()
                 if (response.isSuccessful) {
                     val body = response.body?.string() ?: ""
+                    response.close()
                     if (body.contains("\"shouldConnect\":true")) {
-                        Log.i(TAG, "Server connection-status requested connect. Connecting to $host...")
+                        Log.i(TAG, "Server connection-status confirmed shouldConnect=true via $url. Connecting...")
                         if (wsClient == null) {
                             wsClient = EdrWebSocketClient(this)
                         }
-                        wsClient?.resetDisconnectAndConnect(host)
+                        wsClient?.resetDisconnectAndConnect()
                         break
                     }
+                } else {
+                    response.close()
                 }
             } catch (ignored: Exception) {
                 // Host not reachable right now, try next candidate

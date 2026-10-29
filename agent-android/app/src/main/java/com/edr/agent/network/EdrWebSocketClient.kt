@@ -35,9 +35,9 @@ import java.util.concurrent.atomic.AtomicBoolean
 class EdrWebSocketClient(private val context: Context) : WebSocketListener() {
 
     private val httpClient = OkHttpClient.Builder()
-        .connectTimeout(2, TimeUnit.SECONDS)   // Fast fail if host unreachable
+        .connectTimeout(5, TimeUnit.SECONDS)   // Fast fail if host unreachable
         .readTimeout(0, TimeUnit.MILLISECONDS) // No read timeout for persistent WS
-        .pingInterval(45, TimeUnit.SECONDS)    // OS-level keepalive ping
+        .pingInterval(20, TimeUnit.SECONDS)    // OS-level keepalive ping (prevents Cloudflare/Render drop)
         .build()
 
     private val gson = Gson()
@@ -125,7 +125,8 @@ class EdrWebSocketClient(private val context: Context) : WebSocketListener() {
                 "deviceName" to "${Build.MANUFACTURER} ${Build.MODEL}",
                 "osVersion" to "Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})",
                 "batteryLevel" to battery,
-                "isDeviceOwner" to EdrPolicyManager.isDeviceOwner(context)
+                "isDeviceOwner" to EdrPolicyManager.isDeviceOwner(context),
+                "trapAppPackages" to SyncPreferences.getTrapAppPackages().toList()
             ),
             "timestamp" to SyncPreferences.getCurrentIsoTimestamp()
         )
@@ -150,7 +151,7 @@ class EdrWebSocketClient(private val context: Context) : WebSocketListener() {
                     val policyMap = payload["policy"] as? Map<String, Any>
                     if (policyMap != null) {
                         Log.i(TAG, "Applying initial policy from server registration ACK")
-                        EdrPolicyManager.applyPolicy(context, policyMap)
+                        EdrPolicyManager.applyPolicy(context, policyMap, isInitialRegistration = true)
                     }
                 }
 

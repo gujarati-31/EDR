@@ -7,7 +7,9 @@ export function createPolicyRouter(gateway: EDRWebSocketGateway) {
 
   // Get device policy
   router.get('/:deviceId', (req, res) => {
-    const policy = db.getPolicy(req.params.deviceId);
+    const device = db.getDeviceById(req.params.deviceId);
+    const targetId = device ? device.deviceId : req.params.deviceId;
+    const policy = db.getPolicy(targetId);
     res.json({ success: true, data: policy });
   });
 
@@ -42,4 +44,3 @@ export function createPolicyRouter(gateway: EDRWebSocketGateway) {
 
   return router;
 }
-

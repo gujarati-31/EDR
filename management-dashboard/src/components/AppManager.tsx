@@ -18,18 +18,31 @@ import { AppLogo } from './AppLogo';
 
 interface AppManagerProps {
   deviceId: string;
+  policy?: any;
+  onPolicyUpdated?: (policy: any) => void;
   onNavigateToRecordings?: () => void;
 }
 
-export const AppManager: React.FC<AppManagerProps> = ({ deviceId, onNavigateToRecordings }) => {
+export const AppManager: React.FC<AppManagerProps> = ({
+  deviceId,
+  policy,
+  onPolicyUpdated,
+  onNavigateToRecordings,
+}) => {
   const [apps, setApps] = useState<InstalledApp[]>([]);
-  const [trapAppPackages, setTrapAppPackages] = useState<string[]>([]);
+  const [trapAppPackages, setTrapAppPackages] = useState<string[]>(policy?.trapAppPackages || []);
   const [savingTrapPackage, setSavingTrapPackage] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState('');
   const [uninstallingPackage, setUninstallingPackage] = useState<string | null>(null);
   const [statusMsg, setStatusMsg] = useState<string | null>(null);
   const [appTab, setAppTab] = useState<'user' | 'system'>('user');
+
+  useEffect(() => {
+    if (policy && Array.isArray(policy.trapAppPackages)) {
+      setTrapAppPackages(policy.trapAppPackages);
+    }
+  }, [policy]);
 
   const loadData = async () => {
     setLoading(true);
@@ -41,6 +54,7 @@ export const AppManager: React.FC<AppManagerProps> = ({ deviceId, onNavigateToRe
       setApps(appsData);
       if (policyData && Array.isArray(policyData.trapAppPackages)) {
         setTrapAppPackages(policyData.trapAppPackages);
+        if (onPolicyUpdated) onPolicyUpdated(policyData);
       }
     } catch (err) {
       console.error('Failed to load apps or policy:', err);
@@ -64,9 +78,12 @@ export const AppManager: React.FC<AppManagerProps> = ({ deviceId, onNavigateToRe
     setTrapAppPackages(updated);
     setSavingTrapPackage(packageName);
     try {
-      await api.updatePolicy(deviceId, {
+      const res = await api.updatePolicy(deviceId, {
         trapAppPackages: updated,
       });
+      if (onPolicyUpdated && res) {
+        onPolicyUpdated(res);
+      }
       setStatusMsg(
         isCurrentlyTrapped
           ? `Disarmed screen recording trap for "${appName}".`
@@ -74,7 +91,7 @@ export const AppManager: React.FC<AppManagerProps> = ({ deviceId, onNavigateToRe
       );
       setTimeout(() => setStatusMsg(null), 6000);
     } catch (err: any) {
-      alert(`Failed to update trap policy: ${err.message}`);
+      setStatusMsg(`Failed to update trap policy: ${err.message}`);
       setTrapAppPackages(trapAppPackages);
     } finally {
       setSavingTrapPackage(null);

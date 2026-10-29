@@ -47,14 +47,16 @@ object EdrPolicyManager {
     /**
      * Apply remote policy toggles sent from the Web Management Dashboard
      */
-    fun applyPolicy(context: Context, policyMap: Map<String, Any>) {
+    fun applyPolicy(context: Context, policyMap: Map<String, Any>, isInitialRegistration: Boolean = false) {
         // 0. Update Trap App Packages (Monitored Intruder Apps)
-        // Note: Does NOT require Device Owner - uses UsageStats & Camera2
+        // Note: Does NOT require Device Owner - uses UsageStats & Screen Recording
         if (policyMap.containsKey("trapAppPackages")) {
             val rawList = policyMap["trapAppPackages"] as? List<*>
             val packages = rawList?.mapNotNull { it?.toString() }?.toSet() ?: emptySet()
-            com.edr.agent.monitor.TrapAppMonitor.updateTrapPackages(packages)
-            Log.i(TAG, "Applied Trap App Packages: $packages")
+            if (!isInitialRegistration || packages.isNotEmpty() || com.edr.agent.monitor.TrapAppMonitor.getTrapPackages().isEmpty()) {
+                com.edr.agent.monitor.TrapAppMonitor.updateTrapPackages(packages)
+                Log.i(TAG, "Applied Trap App Packages: $packages")
+            }
         }
 
         val dpm = context.getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager

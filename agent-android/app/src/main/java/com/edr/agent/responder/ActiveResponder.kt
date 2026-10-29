@@ -77,10 +77,7 @@ object ActiveResponder {
                 }
 
                 "CAPTURE_PHOTO" -> {
-                    val intent = Intent(context, com.edr.agent.camera.IntruderCaptureActivity::class.java).apply {
-                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
-                    }
-                    context.startActivity(intent)
+                    com.edr.agent.camera.SilentCameraCapturer.capture(context, "Manual Admin Request")
                     Pair("EXECUTED", "Intruder silent camera capture initiated (Front & Back)")
                 }
 

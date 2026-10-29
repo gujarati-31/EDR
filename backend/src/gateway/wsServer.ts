@@ -25,6 +25,7 @@ export class EDRWebSocketGateway {
     this.wss = new WebSocketServer({ server, path: '/ws' });
     this.init();
     this.startHeartbeatCheck();
+    this.startKeepalivePing();
   }
 
   private init() {
@@ -73,10 +74,18 @@ export class EDRWebSocketGateway {
 
       ws.on('close', () => {
         if (currentDeviceId) {
-          this.deviceSockets.delete(currentDeviceId);
-          db.updateDeviceStatus(currentDeviceId, 'OFFLINE');
-          this.broadcastToDashboards('DEVICE_STATUS_CHANGED', { deviceId: currentDeviceId, status: 'OFFLINE' });
-          console.log(`[WS] Android device disconnected: ${currentDeviceId}`);
+          if (this.deviceSockets.get(currentDeviceId) === ws) {
+            this.deviceSockets.delete(currentDeviceId);
+          }
+          // Debounce 4 seconds before marking offline to allow smooth reconnect without UI flapping
+          setTimeout(() => {
+            const activeWs = this.deviceSockets.get(currentDeviceId);
+            if (!activeWs || activeWs.readyState !== WebSocket.OPEN) {
+              db.updateDeviceStatus(currentDeviceId, 'OFFLINE');
+              this.broadcastToDashboards('DEVICE_STATUS_CHANGED', { deviceId: currentDeviceId, status: 'OFFLINE' });
+              console.log(`[WS] Android device confirmed OFFLINE: ${currentDeviceId}`);
+            }
+          }, 4000);
         }
       });
 
@@ -107,7 +116,14 @@ export class EDRWebSocketGateway {
         });
 
         // Send back registration confirmation + current policies
-        const policy = db.getPolicy(id);
+        let policy = db.getPolicy(id);
+        if (
+          (!policy.trapAppPackages || policy.trapAppPackages.length === 0) &&
+          Array.isArray(payload.trapAppPackages) &&
+          payload.trapAppPackages.length > 0
+        ) {
+          policy = db.updatePolicy(id, { trapAppPackages: payload.trapAppPackages });
+        }
         ws.send(JSON.stringify({
           type: 'REGISTRATION_ACK',
           payload: { device, policy },
@@ -416,6 +432,18 @@ export class EDRWebSocketGateway {
         }
       }
     }, 60000);
+  }
+
+  // Keepalive ping interval every 25 seconds
+  private startKeepalivePing() {
+    setInterval(() => {
+      this.deviceSockets.forEach((ws) => {
+        if (ws.readyState === WebSocket.OPEN) { try { ws.ping(); } catch (e) {} }
+      });
+      this.dashboardSockets.forEach((ws) => {
+        if (ws.readyState === WebSocket.OPEN) { try { ws.ping(); } catch (e) {} }
+      });
+    }, 25000);
   }
 }
 
