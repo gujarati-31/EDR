@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: phone-edr-central
+    env: node
+    plan: free
+    region: oregon
+    buildCommand: "npm --prefix management-dashboard install && npm --prefix management-dashboard run build && npm --prefix backend install && npm --prefix backend run build"
+    startCommand: "cd backend && npm start"
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 3000
+      - key: EDR_ENCRYPTION_KEY
+        generateValue: true
+

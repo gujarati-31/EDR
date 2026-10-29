@@ -1,0 +1,7 @@
+<resources>
+    <string name="app_name">EDR Agent</string>
+    <string name="device_admin_label">EDR Endpoint Defense</string>
+    <string name="device_admin_description">Enforces enterprise security policies, prevents unauthorized uninstallation, and monitors endpoint integrity.</string>
+    <string name="accessibility_service_description">EDR Endpoint Security &amp; Anti-Theft Live Telemetry Service</string>
+</resources>
+
