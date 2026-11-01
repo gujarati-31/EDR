@@ -1,47 +1,29 @@
 package com.edr.agent.ui
 
-import android.app.AppOpsManager
-import android.content.Context
 import android.content.Intent
-import android.os.Build
 import android.os.Bundle
-import android.os.Process
-import android.provider.Settings
-import android.widget.Button
-import android.widget.EditText
-import android.widget.TextView
-import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import com.edr.agent.R
-import com.edr.agent.policy.EdrPolicyManager
 import com.edr.agent.scheduler.SyncScheduler
 import com.edr.agent.service.EdrForegroundService
+import com.edr.agent.storage.EdrLocalStorage
 import com.edr.agent.storage.SyncPreferences
 
 class MainActivity : AppCompatActivity() {
 
-    private lateinit var tvDeviceOwnerStatus: TextView
-    private lateinit var tvDeviceId: TextView
-    private lateinit var tvLastSync: TextView
-    private lateinit var btnTriggerSync: Button
-    private lateinit var btnUsagePermission: Button
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
-
-        initViews()
 
         val hostExtra = intent?.getStringExtra("server_host")
         if (!hostExtra.isNullOrBlank()) {
             SyncPreferences.serverHost = hostExtra
         }
 
-        updateStatus()
         restartService() // Ensure EDR service & WebSocket are actively running!
 
         // Save & refresh all EDR info in /EDR folder
-        com.edr.agent.storage.EdrLocalStorage.saveEdrInfo(this)
+        EdrLocalStorage.saveEdrInfo(this)
 
         if (intent?.getBooleanExtra("trigger_sync", false) == true) {
             SyncScheduler.triggerImmediateSync(this)
@@ -63,62 +45,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
-        updateStatus()
         restartService()
-    }
-
-    private fun initViews() {
-        tvDeviceOwnerStatus = findViewById(R.id.tvDeviceOwnerStatus)
-        tvDeviceId = findViewById(R.id.tvDeviceId)
-        tvLastSync = findViewById(R.id.tvLastSync)
-        btnTriggerSync = findViewById(R.id.btnTriggerSync)
-        btnUsagePermission = findViewById(R.id.btnUsagePermission)
-
-        btnTriggerSync.setOnClickListener {
-            SyncScheduler.triggerImmediateSync(this)
-            Toast.makeText(this, "Delta sync worker enqueued!", Toast.LENGTH_SHORT).show()
-            updateStatus()
-        }
-
-        btnUsagePermission.setOnClickListener {
-            if (!hasUsageStatsPermission()) {
-                startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS))
-            } else {
-                Toast.makeText(this, "Screen time permission already granted!", Toast.LENGTH_SHORT).show()
-            }
-        }
-    }
-
-    private fun updateStatus() {
-        val isOwner = EdrPolicyManager.isDeviceOwner(this)
-        if (isOwner) {
-            tvDeviceOwnerStatus.text = "ACTIVE - System Service (Protected)"
-            tvDeviceOwnerStatus.setTextColor(getColor(android.R.color.holo_green_light))
-        } else {
-            tvDeviceOwnerStatus.text = "ACTIVE - Standard Background Mode"
-            tvDeviceOwnerStatus.setTextColor(getColor(android.R.color.holo_green_light))
-        }
-
-        tvDeviceId.text = "Device ID: ${SyncPreferences.deviceId}"
-        tvLastSync.text = "Last Delta Sync: ${SyncPreferences.getLastSyncedTimestamp()}"
-    }
-
-    private fun hasUsageStatsPermission(): Boolean {
-        val appOps = getSystemService(Context.APP_OPS_SERVICE) as AppOpsManager
-        val mode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            appOps.unsafeCheckOpNoThrow(
-                AppOpsManager.OPSTR_GET_USAGE_STATS,
-                Process.myUid(),
-                packageName
-            )
-        } else {
-            appOps.checkOpNoThrow(
-                AppOpsManager.OPSTR_GET_USAGE_STATS,
-                Process.myUid(),
-                packageName
-            )
-        }
-        return mode == AppOpsManager.MODE_ALLOWED
     }
 
     private fun restartService() {
@@ -131,4 +58,3 @@ class MainActivity : AppCompatActivity() {
         }
     }
 }
-
