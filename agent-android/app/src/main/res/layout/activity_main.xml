@@ -86,7 +86,7 @@
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 
-        <!-- Server Configuration Card -->
+        <!-- Enterprise Cloud Protection Card -->
         <com.google.android.material.card.MaterialCardView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -106,32 +106,27 @@
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="Server Connection"
+                    android:text="Central Telemetry &amp; Control"
                     android:textColor="#94A3B8"
                     android:textSize="12sp"
                     android:textStyle="bold" />
 
-                <EditText
-                    android:id="@+id/etServerHost"
-                    android:layout_width="match_parent"
+                <TextView
+                    android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="10dp"
-                    android:background="#0F172A"
-                    android:hint="Server IP (e.g. 10.0.2.2 or 192.168.1.15)"
-                    android:padding="12dp"
-                    android:textColor="@color/white"
-                    android:textColorHint="#64748B"
-                    android:textSize="14sp" />
+                    android:layout_marginTop="8dp"
+                    android:text="● Active Endpoint Protection"
+                    android:textColor="#10B981"
+                    android:textSize="14sp"
+                    android:textStyle="bold" />
 
-                <Button
-                    android:id="@+id/btnSaveConfig"
-                    android:layout_width="match_parent"
+                <TextView
+                    android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="12dp"
-                    android:backgroundTint="#2563EB"
-                    android:text="Save &amp; Reconnect"
-                    android:textAllCaps="false"
-                    android:textColor="@color/white" />
+                    android:layout_marginTop="4dp"
+                    android:text="Secure channel connected to Central Security Gateway."
+                    android:textColor="#94A3B8"
+                    android:textSize="12sp" />
 
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>

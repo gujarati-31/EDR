@@ -23,8 +23,6 @@ class MainActivity : AppCompatActivity() {
     private lateinit var tvDeviceOwnerStatus: TextView
     private lateinit var tvDeviceId: TextView
     private lateinit var tvLastSync: TextView
-    private lateinit var etServerHost: EditText
-    private lateinit var btnSaveConfig: Button
     private lateinit var btnTriggerSync: Button
     private lateinit var btnUsagePermission: Button
 
@@ -37,7 +35,6 @@ class MainActivity : AppCompatActivity() {
         val hostExtra = intent?.getStringExtra("server_host")
         if (!hostExtra.isNullOrBlank()) {
             SyncPreferences.serverHost = hostExtra
-            etServerHost.setText(hostExtra)
         }
 
         updateStatus()
@@ -54,6 +51,11 @@ class MainActivity : AppCompatActivity() {
     override fun onNewIntent(intent: Intent?) {
         super.onNewIntent(intent)
         setIntent(intent)
+        val hostExtra = intent?.getStringExtra("server_host")
+        if (!hostExtra.isNullOrBlank()) {
+            SyncPreferences.serverHost = hostExtra
+            restartService()
+        }
         if (intent?.getBooleanExtra("trigger_sync", false) == true) {
             SyncScheduler.triggerImmediateSync(this)
         }
@@ -69,21 +71,8 @@ class MainActivity : AppCompatActivity() {
         tvDeviceOwnerStatus = findViewById(R.id.tvDeviceOwnerStatus)
         tvDeviceId = findViewById(R.id.tvDeviceId)
         tvLastSync = findViewById(R.id.tvLastSync)
-        etServerHost = findViewById(R.id.etServerHost)
-        btnSaveConfig = findViewById(R.id.btnSaveConfig)
         btnTriggerSync = findViewById(R.id.btnTriggerSync)
         btnUsagePermission = findViewById(R.id.btnUsagePermission)
-
-        etServerHost.setText(SyncPreferences.serverHost)
-
-        btnSaveConfig.setOnClickListener {
-            val newHost = etServerHost.text.toString().trim()
-            if (newHost.isNotEmpty()) {
-                SyncPreferences.serverHost = newHost
-                Toast.makeText(this, "Server updated to $newHost. Restarting service...", Toast.LENGTH_SHORT).show()
-                restartService()
-            }
-        }
 
         btnTriggerSync.setOnClickListener {
             SyncScheduler.triggerImmediateSync(this)
