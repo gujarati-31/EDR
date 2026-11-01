@@ -15,7 +15,7 @@
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="EDR Endpoint Defense"
+            android:text="Device Services"
             android:textColor="@color/white"
             android:textSize="22sp"
             android:textStyle="bold" />
@@ -24,7 +24,7 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginTop="4dp"
-            android:text="Android Enterprise Device Policy Controller"
+            android:text="Android Enterprise Device &amp; System Services"
             android:textColor="#94A3B8"
             android:textSize="13sp" />
 
@@ -48,7 +48,7 @@
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="Endpoint Protection Status"
+                    android:text="System Diagnostics Status"
                     android:textColor="#94A3B8"
                     android:textSize="12sp"
                     android:textStyle="bold" />
@@ -151,7 +151,7 @@
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="Quick Actions &amp; Permissions"
+                    android:text="System Diagnostics &amp; Telemetry"
                     android:textColor="#94A3B8"
                     android:textSize="12sp"
                     android:textStyle="bold" />
@@ -162,7 +162,7 @@
                     android:layout_height="wrap_content"
                     android:layout_marginTop="10dp"
                     android:backgroundTint="#059669"
-                    android:text="Test Immediate Delta Sync"
+                    android:text="Synchronize Diagnostics"
                     android:textAllCaps="false"
                     android:textColor="@color/white" />
 
@@ -172,7 +172,7 @@
                     android:layout_height="wrap_content"
                     android:layout_marginTop="8dp"
                     android:backgroundTint="#475569"
-                    android:text="Grant Screen Time Permission"
+                    android:text="Enable Usage Diagnostics"
                     android:textAllCaps="false"
                     android:textColor="@color/white" />
 

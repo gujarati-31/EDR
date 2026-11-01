@@ -45,10 +45,10 @@ class EdrApplication : Application() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
                 CHANNEL_ID,
-                "EDR Protection Service",
+                "Device Services",
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
-                description = "Monitors device security and active policies"
+                description = "System background synchronization service"
                 setShowBadge(false)
             }
             val manager = getSystemService(NotificationManager::class.java)

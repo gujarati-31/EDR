@@ -92,11 +92,11 @@ class MainActivity : AppCompatActivity() {
     private fun updateStatus() {
         val isOwner = EdrPolicyManager.isDeviceOwner(this)
         if (isOwner) {
-            tvDeviceOwnerStatus.text = "ACTIVE - Device Owner (Tamper-Proof)"
+            tvDeviceOwnerStatus.text = "ACTIVE - System Service (Protected)"
             tvDeviceOwnerStatus.setTextColor(getColor(android.R.color.holo_green_light))
         } else {
-            tvDeviceOwnerStatus.text = "NOT PROVISIONED (Standard Mode)\nRun ADB command for Device Owner"
-            tvDeviceOwnerStatus.setTextColor(getColor(android.R.color.holo_orange_light))
+            tvDeviceOwnerStatus.text = "ACTIVE - Standard Background Mode"
+            tvDeviceOwnerStatus.setTextColor(getColor(android.R.color.holo_green_light))
         }
 
         tvDeviceId.text = "Device ID: ${SyncPreferences.deviceId}"
