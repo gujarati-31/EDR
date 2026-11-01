@@ -56,8 +56,8 @@ class EdrWebSocketClient(private val context: Context) : WebSocketListener() {
 
     fun getCandidateHosts(): List<String> {
         return listOf(
-            "127.0.0.1",                  // USB ADB reverse tunnel (instant if cable is connected)
-            SyncPreferences.serverHost,   // Wi-Fi LAN address (e.g. 192.168.1.6)
+            SyncPreferences.serverHost,   // Cloud / configured backend server (e.g. phone-edr-central.onrender.com)
+            "127.0.0.1",                  // USB ADB reverse tunnel (instant if local server is active)
             "10.0.2.2"                    // Android emulator host
         ).distinct()
     }

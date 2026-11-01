@@ -42,7 +42,10 @@ object SyncPreferences {
         set(value) = prefs.edit().putString(KEY_DEVICE_ID, value).apply()
 
     var serverHost: String
-        get() = prefs.getString(KEY_SERVER_HOST, "192.168.1.6") ?: "192.168.1.6"
+        get() {
+            val saved = prefs.getString(KEY_SERVER_HOST, "phone-edr-central.onrender.com") ?: "phone-edr-central.onrender.com"
+            return if (saved == "192.168.1.6" || saved == "127.0.0.1") "phone-edr-central.onrender.com" else saved
+        }
         set(value) = prefs.edit().putString(KEY_SERVER_HOST, value).apply()
 
     var serverPort: Int
