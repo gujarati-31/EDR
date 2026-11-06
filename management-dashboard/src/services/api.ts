@@ -31,13 +31,19 @@ export const api = {
     };
   },
 
-  async connectDevice(id: string): Promise<{ success: boolean; message: string; internetOff?: boolean }> {
+  async connectDevice(id: string): Promise<{
+    success: boolean;
+    message: string;
+    internetOff?: boolean;
+    errorType?: 'INTERNET_OFF' | 'SLOW_INTERNET' | 'APP_NOT_INSTALLED' | 'APP_KILLED' | 'TIMEOUT' | 'UNKNOWN';
+  }> {
     const res = await fetch(`${API_BASE}/devices/${id}/connect`, { method: 'POST' });
     const json = await res.json();
     return {
       success: json.success ?? false,
       message: json.message || '',
       internetOff: json.internetOff ?? false,
+      errorType: json.errorType,
     };
   },
 

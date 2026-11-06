@@ -122,13 +122,25 @@ class Database {
     return device;
   }
 
-  updateDeviceStatus(deviceId: string, status: 'ONLINE' | 'OFFLINE', batteryLevel?: number) {
+  updateDeviceStatus(
+    deviceId: string,
+    status: 'ONLINE' | 'OFFLINE',
+    batteryLevel?: number,
+    networkQuality?: 'FAST' | 'MODERATE' | 'SLOW',
+    downstreamKbps?: number
+  ) {
     const device = this.data.devices.find((d) => d.deviceId === deviceId || d.id === deviceId);
     if (device) {
       device.status = status;
       device.lastHeartbeat = new Date().toISOString();
       if (batteryLevel !== undefined) {
         device.batteryLevel = batteryLevel;
+      }
+      if (networkQuality !== undefined) {
+        device.networkQuality = networkQuality;
+      }
+      if (downstreamKbps !== undefined) {
+        device.downstreamKbps = downstreamKbps;
       }
       this.save();
     }

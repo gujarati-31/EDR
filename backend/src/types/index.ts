@@ -12,6 +12,8 @@ export interface Device {
   enrolledAt: string; // ISO timestamp
   lastHeartbeat: string; // ISO timestamp
   lastSyncedTimestamp: string; // ISO timestamp (anchor for delta logs)
+  networkQuality?: 'FAST' | 'MODERATE' | 'SLOW';
+  downstreamKbps?: number;
 }
 
 export interface DevicePolicy {

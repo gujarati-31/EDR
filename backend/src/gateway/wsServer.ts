@@ -114,6 +114,8 @@ export class EDRWebSocketGateway {
           batteryLevel: payload.batteryLevel,
           isDeviceOwner: payload.isDeviceOwner ?? true,
           status: 'ONLINE',
+          networkQuality: payload.networkQuality || 'FAST',
+          downstreamKbps: payload.downstreamKbps,
         });
 
         // Send back registration confirmation + current policies
@@ -138,10 +140,12 @@ export class EDRWebSocketGateway {
       case 'HEARTBEAT': {
         const id = deviceId || payload.deviceId;
         if (id) {
-          db.updateDeviceStatus(id, 'ONLINE', payload.batteryLevel);
+          db.updateDeviceStatus(id, 'ONLINE', payload.batteryLevel, payload.networkQuality, payload.downstreamKbps);
           this.broadcastToDashboards('DEVICE_HEARTBEAT', {
             deviceId: id,
             batteryLevel: payload.batteryLevel,
+            networkQuality: payload.networkQuality,
+            downstreamKbps: payload.downstreamKbps,
             timestamp: new Date().toISOString(),
           });
         }

@@ -96,6 +96,11 @@ export const DeviceList: React.FC<DeviceListProps> = ({
                   </div>
 
                   {/* Status Indicator */}
+                  {device.networkQuality === 'SLOW' && isOnline && (
+                    <span className="px-1.5 py-0.5 rounded text-[9px] font-mono font-bold bg-amber-950/80 text-amber-300 border border-amber-500/40" title="Low bandwidth (< 1.5 Mbps)">
+                      SLOW NET
+                    </span>
+                  )}
                   <span
                     className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold tracking-wider ${
                       isOnline

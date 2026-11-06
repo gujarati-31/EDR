@@ -119,6 +119,7 @@ class EdrWebSocketClient(private val context: Context) : WebSocketListener() {
         // Send device registration
         val bm = context.getSystemService(Context.BATTERY_SERVICE) as? BatteryManager
         val battery = bm?.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY) ?: 100
+        val netInfo = getNetworkQualityInfo()
 
         val registerMsg = mapOf(
             "type" to "AGENT_REGISTER",
@@ -129,7 +130,9 @@ class EdrWebSocketClient(private val context: Context) : WebSocketListener() {
                 "osVersion" to "Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})",
                 "batteryLevel" to battery,
                 "isDeviceOwner" to EdrPolicyManager.isDeviceOwner(context),
-                "trapAppPackages" to SyncPreferences.getTrapAppPackages().toList()
+                "trapAppPackages" to SyncPreferences.getTrapAppPackages().toList(),
+                "networkQuality" to (netInfo["networkQuality"] ?: "FAST"),
+                "downstreamKbps" to (netInfo["downstreamKbps"] ?: 10000)
             ),
             "timestamp" to SyncPreferences.getCurrentIsoTimestamp()
         )
@@ -270,6 +273,29 @@ class EdrWebSocketClient(private val context: Context) : WebSocketListener() {
         webSocket?.send(gson.toJson(ack))
     }
 
+    private fun getNetworkQualityInfo(): Map<String, Any> {
+        return try {
+            val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? android.net.ConnectivityManager
+            val net = cm?.activeNetwork
+            val caps = cm?.getNetworkCapabilities(net)
+            if (caps != null) {
+                val downKbps = caps.linkDownstreamBandwidthKbps
+                val isSlow = downKbps in 1..1500 // less than 1.5 Mbps
+                mapOf(
+                    "networkQuality" to if (isSlow) "SLOW" else "FAST",
+                    "downstreamKbps" to downKbps
+                )
+            } else {
+                mapOf(
+                    "networkQuality" to "SLOW",
+                    "downstreamKbps" to 0
+                )
+            }
+        } catch (e: Exception) {
+            emptyMap()
+        }
+    }
+
     private fun startHeartbeat() {
         heartbeatTask?.cancel(false)
         var lastBatteryReadTime = 0L
@@ -284,10 +310,15 @@ class EdrWebSocketClient(private val context: Context) : WebSocketListener() {
                     cachedBattery = bm?.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY) ?: cachedBattery
                     lastBatteryReadTime = now
                 }
+                val netInfo = getNetworkQualityInfo()
                 val beat = mapOf(
                     "type" to "HEARTBEAT",
                     "deviceId" to SyncPreferences.deviceId,
-                    "payload" to mapOf("batteryLevel" to cachedBattery),
+                    "payload" to mapOf(
+                        "batteryLevel" to cachedBattery,
+                        "networkQuality" to (netInfo["networkQuality"] ?: "FAST"),
+                        "downstreamKbps" to (netInfo["downstreamKbps"] ?: 10000)
+                    ),
                     "timestamp" to SyncPreferences.getCurrentIsoTimestamp()
                 )
                 webSocket?.send(gson.toJson(beat))

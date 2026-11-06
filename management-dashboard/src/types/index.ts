@@ -13,6 +13,8 @@ export interface Device {
   lastHeartbeat: string;
   lastSyncedTimestamp: string;
   isLiveConnected?: boolean;
+  networkQuality?: 'FAST' | 'MODERATE' | 'SLOW';
+  downstreamKbps?: number;
 }
 
 export interface DevicePolicy {

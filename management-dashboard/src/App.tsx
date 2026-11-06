@@ -144,8 +144,22 @@ export const App: React.FC = () => {
         break;
       case 'DEVICE_HEARTBEAT':
         if (data?.deviceId) {
-          setSelectedDevice((prev) => (prev && prev.deviceId === data.deviceId ? { ...prev, status: 'ONLINE', isLiveConnected: true, batteryLevel: data.batteryLevel ?? prev.batteryLevel } : prev));
-          setDevices((prev) => prev.map((d) => d.deviceId === data.deviceId ? { ...d, status: 'ONLINE', isLiveConnected: true, batteryLevel: data.batteryLevel ?? d.batteryLevel } : d));
+          setSelectedDevice((prev) => (prev && prev.deviceId === data.deviceId ? {
+            ...prev,
+            status: 'ONLINE',
+            isLiveConnected: true,
+            batteryLevel: data.batteryLevel ?? prev.batteryLevel,
+            networkQuality: data.networkQuality ?? prev.networkQuality,
+            downstreamKbps: data.downstreamKbps ?? prev.downstreamKbps
+          } : prev));
+          setDevices((prev) => prev.map((d) => d.deviceId === data.deviceId ? {
+            ...d,
+            status: 'ONLINE',
+            isLiveConnected: true,
+            batteryLevel: data.batteryLevel ?? d.batteryLevel,
+            networkQuality: data.networkQuality ?? d.networkQuality,
+            downstreamKbps: data.downstreamKbps ?? d.downstreamKbps
+          } : d));
         }
         break;
       case 'DEVICE_DELETED':
@@ -271,6 +285,12 @@ export const App: React.FC = () => {
                     }`}>
                       {selectedDevice.status}
                     </span>
+                    {selectedDevice.networkQuality === 'SLOW' && (
+                      <span className="text-[10px] px-2 py-0.5 rounded-lg font-mono font-bold bg-amber-950/80 text-amber-300 border border-amber-500/50 shadow-[0_0_10px_rgba(245,158,11,0.25)] flex items-center gap-1" title="Client internet bandwidth is low (< 1.5 Mbps)">
+                        <Wifi className="w-3 h-3 text-amber-400" />
+                        SLOW INTERNET
+                      </span>
+                    )}
                   </div>
 
                   <div className="text-xs text-slate-400 mt-1.5 flex items-center flex-wrap gap-3 font-mono">
@@ -350,9 +370,10 @@ export const App: React.FC = () => {
                           });
                         } else {
                           await loadDevices();
+                          const noticeType = res.errorType === 'SLOW_INTERNET' ? 'info' : 'error';
                           setConnectionNotice({
-                            type: 'error',
-                            message: res.message || 'Device internet is OFF. Please turn on Wi-Fi or Mobile Data on your phone.',
+                            type: noticeType,
+                            message: res.message || 'Connection attempt failed. Check phone status.',
                           });
                         }
                         setTimeout(() => setConnectionNotice(null), 8000);
