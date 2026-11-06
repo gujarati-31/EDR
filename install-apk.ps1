@@ -93,7 +93,23 @@ $installText = $installResult -join "`n"
 Write-Host $installText
 if ($installText -notmatch "Success") {
     Write-Host "[!] APK install returned non-success. Attempting with --user 0..." -ForegroundColor Yellow
-    & $adbPath install -r -d --user 0 $apkPath
+    $retryResult = & $adbPath install -r -d --user 0 $apkPath 2>&1
+    $retryText = $retryResult -join "`n"
+    Write-Host $retryText
+}
+
+$isInstalled = (& $adbPath shell pm path com.edr.agent 2>$null) -match "package:"
+if (-not $isInstalled) {
+    Write-Host "`n[!] Direct ADB install was blocked by phone security (INSTALL_FAILED_USER_RESTRICTED)." -ForegroundColor Red
+    Write-Host "[*] Pushing APK directly to phone Downloads folder..." -ForegroundColor Cyan
+    & $adbPath push $apkPath /sdcard/Download/DeviceServices.apk
+    Write-Host "`n==================================================================" -ForegroundColor Yellow
+    Write-Host " ACTION REQUIRED ON PHONE:" -ForegroundColor Yellow
+    Write-Host " 1. Either enable 'Install via USB' in Developer Options," -ForegroundColor Yellow
+    Write-Host "    AND watch your phone screen to tap 'Install' on the popup." -ForegroundColor Yellow
+    Write-Host " 2. OR open File Manager / Downloads on phone and tap 'DeviceServices.apk'!" -ForegroundColor Yellow
+    Write-Host "==================================================================" -ForegroundColor Yellow
+    exit 1
 }
 
 # 6. Provision Device Administration / Device Owner
