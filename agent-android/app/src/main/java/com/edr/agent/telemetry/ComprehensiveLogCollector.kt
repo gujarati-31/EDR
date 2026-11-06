@@ -47,7 +47,7 @@ object ComprehensiveLogCollector {
             mapOf(
                 "eventType" to "SYS_LOG",
                 "severity" to "INFO",
-                "message" to "System status: Battery ${batteryPct}% (${if (isCharging) "Charging" to true else "Discharging"}), Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})",
+                "message" to "System status: Battery ${batteryPct}% (${if (isCharging) "Charging" else "Discharging"}), Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})",
                 "payload" to mapOf(
                     "battery" to batteryPct,
                     "isCharging" to isCharging,

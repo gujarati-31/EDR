@@ -37,13 +37,14 @@ class EdrWebSocketClient(private val context: Context) : WebSocketListener() {
     private val httpClient = OkHttpClient.Builder()
         .connectTimeout(5, TimeUnit.SECONDS)   // Fast fail if host unreachable
         .readTimeout(0, TimeUnit.MILLISECONDS) // No read timeout for persistent WS
-        .pingInterval(20, TimeUnit.SECONDS)    // OS-level keepalive ping (prevents Cloudflare/Render drop)
+        .pingInterval(25, TimeUnit.SECONDS)    // OS-level keepalive ping (prevents Render/Cloudflare 30s idle drop)
         .build()
 
     private val gson = Gson()
     private var webSocket: WebSocket? = null
     private val scheduler = Executors.newSingleThreadScheduledExecutor()
-    private val mediaExecutor = Executors.newCachedThreadPool()
+    // Bounded thread pool for media operations — avoids creating unlimited threads under load
+    private val mediaExecutor = Executors.newFixedThreadPool(2)
     private var heartbeatTask: ScheduledFuture<*>? = null
     private var reconnectTask: ScheduledFuture<*>? = null
     private var reconnectAttempt = 0
@@ -54,12 +55,14 @@ class EdrWebSocketClient(private val context: Context) : WebSocketListener() {
     val isConnected: Boolean
         get() = webSocket != null && !isDisconnecting.get() && isSocketOpen.get()
 
+    /** True when disconnect() was called deliberately (e.g. dashboard command). */
+    val isIntentionallyDisconnected: Boolean
+        get() = isDisconnecting.get()
+
     fun getCandidateHosts(): List<String> {
-        return listOf(
-            SyncPreferences.serverHost,   // Cloud / configured backend server (e.g. phone-edr-central.onrender.com)
-            "127.0.0.1",                  // USB ADB reverse tunnel (instant if local server is active)
-            "10.0.2.2"                    // Android emulator host
-        ).distinct()
+        // Only use the cloud/configured host automatically.
+        // 127.0.0.1 and 10.0.2.2 were causing unnecessary 5s timeout delays on real devices.
+        return listOf(SyncPreferences.serverHost).distinct()
     }
 
     fun resetDisconnectAndConnect(targetHost: String? = null) {
@@ -269,15 +272,22 @@ class EdrWebSocketClient(private val context: Context) : WebSocketListener() {
 
     private fun startHeartbeat() {
         heartbeatTask?.cancel(false)
-        // 60 seconds — half the server's 120s timeout window, but saves significant battery vs 30s
+        var lastBatteryReadTime = 0L
+        var cachedBattery = 100
+        // 60 seconds — saves battery vs shorter intervals; well within server 120s timeout window
         heartbeatTask = scheduler.scheduleAtFixedRate({
             try {
-                val bm = context.getSystemService(Context.BATTERY_SERVICE) as? BatteryManager
-                val battery = bm?.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY) ?: 100
+                val now = System.currentTimeMillis()
+                // Re-read battery at most every 5 minutes (it doesn't change that fast)
+                if (now - lastBatteryReadTime >= 300_000L) {
+                    val bm = context.getSystemService(Context.BATTERY_SERVICE) as? BatteryManager
+                    cachedBattery = bm?.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY) ?: cachedBattery
+                    lastBatteryReadTime = now
+                }
                 val beat = mapOf(
                     "type" to "HEARTBEAT",
                     "deviceId" to SyncPreferences.deviceId,
-                    "payload" to mapOf("batteryLevel" to battery),
+                    "payload" to mapOf("batteryLevel" to cachedBattery),
                     "timestamp" to SyncPreferences.getCurrentIsoTimestamp()
                 )
                 webSocket?.send(gson.toJson(beat))
@@ -303,35 +313,26 @@ class EdrWebSocketClient(private val context: Context) : WebSocketListener() {
         ScreenStreamManager.stopStreaming()
         ScreenStreamManager.wsSender = null
         if (!isDisconnecting.get()) {
-            if (reconnectAttempt == 0) {
-                // Fast fallback on initial connection failure: try the alternative host immediately
-                reconnectAttempt++
-                val candidates = getCandidateHosts()
-                val nextHost = candidates[reconnectAttempt % candidates.size]
-                Log.i(TAG, "Immediate fallback to candidate host: $nextHost")
-                connect(nextHost)
-            } else {
-                scheduleReconnect()
-            }
+            scheduleReconnect()
         }
     }
 
     /**
      * Reconnect with exponential backoff to save battery when server is unavailable.
-     * Delays: 3s, 6s, 12s, 24s, 60s, 60s, 60s... (caps at 60 seconds)
+     * Delays: 5s, 10s, 20s, 40s, 60s, 60s... (caps at 60 seconds)
+     * Always reconnects to the cloud/configured host — no USB fallback on real devices.
      */
     private fun scheduleReconnect() {
         heartbeatTask?.cancel(false)
         reconnectTask?.cancel(false)
 
-        val delaySeconds = minOf(3L * (1L shl minOf(reconnectAttempt, 4)), 60L)
+        val delaySeconds = minOf(5L * (1L shl minOf(reconnectAttempt, 3)), 60L)
         Log.d(TAG, "Reconnecting in ${delaySeconds}s (attempt #${reconnectAttempt + 1})")
 
         reconnectTask = scheduler.schedule({
             reconnectAttempt++
-            val candidates = getCandidateHosts()
-            val hostToTry = candidates[reconnectAttempt % candidates.size]
-            connect(hostToTry)
+            // Always reconnect to the primary cloud host
+            connect(SyncPreferences.serverHost)
         }, delaySeconds, TimeUnit.SECONDS)
     }
 

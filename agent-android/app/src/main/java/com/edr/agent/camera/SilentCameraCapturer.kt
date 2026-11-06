@@ -110,7 +110,7 @@ object SilentCameraCapturer {
         }
 
         // Brief cooldown between hardware camera switches
-        try { Thread.sleep(350) } catch (ignored: Exception) {}
+        try { Thread.sleep(150) } catch (ignored: Exception) {}
 
         // 2. Capture Back Camera (Environment / Room)
         if (backCameraId != null) {
