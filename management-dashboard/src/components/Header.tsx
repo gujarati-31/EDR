@@ -32,7 +32,7 @@ export const Header: React.FC<HeaderProps> = ({
                 CYBER-EDR <span className="text-cyan-400 font-normal">CONSOLE</span>
               </h1>
               <span className="text-[10px] font-mono tracking-widest px-2 py-0.5 bg-cyan-950/80 text-cyan-300 rounded border border-cyan-500/30">
-                MDM v2.4
+                EDR v3.0
               </span>
             </div>
             <p className="text-[11px] text-slate-400 flex items-center gap-1.5 mt-0.5">

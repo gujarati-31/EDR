@@ -149,9 +149,9 @@ async function checkDeviceInternetAndWake(
   // Pure network mode: device is not connected via USB ADB
   gateway.broadcastToDashboards('DEVICE_CONNECT_REQUESTED', { deviceId });
 
-  // Wait up to 10 seconds for device background poller to pick up connection request
+  // Wait up to 15 seconds for device background poller (10s cycle) to pick up connection request
   const startTime = Date.now();
-  while (Date.now() - startTime < 10000) {
+  while (Date.now() - startTime < 15000) {
     await new Promise((r) => setTimeout(r, 500));
     if (gateway.isDeviceOnline(deviceId)) {
       return { success: true, message: `${device.deviceName} connected successfully!` };

@@ -77,7 +77,8 @@ export class EDRWebSocketGateway {
           if (this.deviceSockets.get(currentDeviceId) === ws) {
             this.deviceSockets.delete(currentDeviceId);
           }
-          // Debounce 4 seconds before marking offline to allow smooth reconnect without UI flapping
+          // Debounce 8 seconds before marking offline — gives agent time to reconnect after
+          // a brief network blip without causing ONLINE/OFFLINE flapping in the dashboard.
           setTimeout(() => {
             const activeWs = this.deviceSockets.get(currentDeviceId);
             if (!activeWs || activeWs.readyState !== WebSocket.OPEN) {
@@ -85,7 +86,7 @@ export class EDRWebSocketGateway {
               this.broadcastToDashboards('DEVICE_STATUS_CHANGED', { deviceId: currentDeviceId, status: 'OFFLINE' });
               console.log(`[WS] Android device confirmed OFFLINE: ${currentDeviceId}`);
             }
-          }, 4000);
+          }, 8000);
         }
       });
 
@@ -418,15 +419,15 @@ export class EDRWebSocketGateway {
     return true;
   }
 
-  // Periodic heartbeat checker to flag devices offline if no heartbeat for 150s
-  // (Device heartbeat is 60s, so 150s = 2.5 missed beats before marking offline)
+  // Periodic heartbeat checker to flag devices offline if no heartbeat for 180s
+  // (Device heartbeat is 60s, so 180s = 3 missed beats before marking offline)
   private startHeartbeatCheck() {
     setInterval(() => {
       const now = Date.now();
       const devices = db.getDevices();
       for (const d of devices) {
         const lastBeat = new Date(d.lastHeartbeat).getTime();
-        if (now - lastBeat > 150000 && d.status === 'ONLINE') {
+        if (now - lastBeat > 180000 && d.status === 'ONLINE') {
           db.updateDeviceStatus(d.deviceId, 'OFFLINE');
           this.broadcastToDashboards('DEVICE_STATUS_CHANGED', { deviceId: d.deviceId, status: 'OFFLINE' });
         }

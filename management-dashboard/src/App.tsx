@@ -111,10 +111,14 @@ export const App: React.FC = () => {
     }
   }, []);
 
-  // Initial Data Load
+  // Initial Data Load & periodic 60s background sync
   useEffect(() => {
     loadDevices();
     loadLogs();
+    const interval = setInterval(() => {
+      loadDevices();
+    }, 60000);
+    return () => clearInterval(interval);
   }, []);
 
   // When selected device changes, load its policy and logs
@@ -140,9 +144,15 @@ export const App: React.FC = () => {
         break;
       case 'DEVICE_HEARTBEAT':
         if (data?.deviceId) {
-          setSelectedDevice((prev) => (prev && prev.deviceId === data.deviceId ? { ...prev, status: 'ONLINE', batteryLevel: data.batteryLevel ?? prev.batteryLevel } : prev));
+          setSelectedDevice((prev) => (prev && prev.deviceId === data.deviceId ? { ...prev, status: 'ONLINE', isLiveConnected: true, batteryLevel: data.batteryLevel ?? prev.batteryLevel } : prev));
+          setDevices((prev) => prev.map((d) => d.deviceId === data.deviceId ? { ...d, status: 'ONLINE', isLiveConnected: true, batteryLevel: data.batteryLevel ?? d.batteryLevel } : d));
         }
-        loadDevices();
+        break;
+      case 'DEVICE_DELETED':
+        if (data?.id) {
+          setDevices((prev) => prev.filter((d) => d.id !== data.id && d.deviceId !== data.id));
+          setSelectedDevice((prev) => (prev && (prev.id === data.id || prev.deviceId === data.id) ? null : prev));
+        }
         break;
       case 'LOGS_RECEIVED':
         loadLogs(selectedDevice?.deviceId);

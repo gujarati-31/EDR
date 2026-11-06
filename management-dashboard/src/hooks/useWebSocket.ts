@@ -10,11 +10,23 @@ export function useWebSocket(onEvent?: (event: string, data: any) => void) {
   const [isConnected, setIsConnected] = useState(false);
   const socketRef = useRef<WebSocket | null>(null);
   const reconnectTimeoutRef = useRef<any>(null);
+  const reconnectAttemptRef = useRef<number>(0);
   const onEventRef = useRef(onEvent);
 
   useEffect(() => {
     onEventRef.current = onEvent;
   }, [onEvent]);
+
+  const scheduleReconnect = useCallback(() => {
+    if (reconnectTimeoutRef.current) return;
+    const delay = Math.min(2000 * Math.pow(1.8, Math.min(reconnectAttemptRef.current, 5)), 15000);
+    console.log(`[WS] Disconnected. Reconnecting in ${Math.round(delay / 1000)}s (attempt ${reconnectAttemptRef.current + 1})...`);
+    reconnectAttemptRef.current++;
+    reconnectTimeoutRef.current = setTimeout(() => {
+      reconnectTimeoutRef.current = null;
+      connect();
+    }, delay);
+  }, []);
 
   const connect = useCallback(() => {
     try {
@@ -33,6 +45,7 @@ export function useWebSocket(onEvent?: (event: string, data: any) => void) {
 
       ws.onopen = () => {
         setIsConnected(true);
+        reconnectAttemptRef.current = 0;
         console.log('[WS] Connected to EDR Command Bus');
       };
 
@@ -49,13 +62,7 @@ export function useWebSocket(onEvent?: (event: string, data: any) => void) {
 
       ws.onclose = () => {
         setIsConnected(false);
-        console.log('[WS] Disconnected. Reconnecting in 3 seconds...');
-        if (!reconnectTimeoutRef.current) {
-          reconnectTimeoutRef.current = setTimeout(() => {
-            reconnectTimeoutRef.current = null;
-            connect();
-          }, 3000);
-        }
+        scheduleReconnect();
       };
 
       ws.onerror = (err) => {
@@ -64,14 +71,9 @@ export function useWebSocket(onEvent?: (event: string, data: any) => void) {
       };
     } catch (err) {
       console.error('[WS] Connection init error:', err);
-      if (!reconnectTimeoutRef.current) {
-        reconnectTimeoutRef.current = setTimeout(() => {
-          reconnectTimeoutRef.current = null;
-          connect();
-        }, 3000);
-      }
+      scheduleReconnect();
     }
-  }, []);
+  }, [scheduleReconnect]);
 
   useEffect(() => {
     connect();

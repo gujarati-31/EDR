@@ -35,6 +35,7 @@ export const DeviceList: React.FC<DeviceListProps> = ({
           {devices.map((device) => {
             const isSelected = selectedDeviceId === device.deviceId || selectedDeviceId === device.id;
             const isOnline = device.status === 'ONLINE';
+            const isDirectLive = isOnline && (device.isLiveConnected ?? true);
 
             return (
               <div
@@ -49,13 +50,19 @@ export const DeviceList: React.FC<DeviceListProps> = ({
                 <div className="flex items-center space-x-3 min-w-0">
                   <div className={`relative p-2.5 rounded-xl border flex-shrink-0 ${
                     isOnline
-                      ? 'bg-emerald-950/50 border-emerald-500/40 text-emerald-400 shadow-[0_0_10px_rgba(16,185,129,0.2)]'
+                      ? isDirectLive
+                        ? 'bg-emerald-950/50 border-emerald-500/40 text-emerald-400 shadow-[0_0_10px_rgba(16,185,129,0.2)]'
+                        : 'bg-amber-950/50 border-amber-500/40 text-amber-400 shadow-[0_0_10px_rgba(245,158,11,0.2)]'
                       : 'bg-slate-900 border-slate-800 text-slate-600'
                   }`}>
                     <Smartphone className="w-5 h-5" />
                     <span
                       className={`absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full border-2 border-slate-950 ${
-                        isOnline ? 'bg-emerald-400 animate-pulse' : 'bg-slate-600'
+                        isOnline
+                          ? isDirectLive
+                            ? 'bg-emerald-400 animate-pulse'
+                            : 'bg-amber-400 animate-pulse'
+                          : 'bg-slate-600'
                       }`}
                     />
                   </div>
@@ -92,11 +99,13 @@ export const DeviceList: React.FC<DeviceListProps> = ({
                   <span
                     className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold tracking-wider ${
                       isOnline
-                        ? 'bg-emerald-950/80 text-emerald-300 border border-emerald-500/40 shadow-[0_0_8px_rgba(16,185,129,0.2)]'
+                        ? isDirectLive
+                          ? 'bg-emerald-950/80 text-emerald-300 border border-emerald-500/40 shadow-[0_0_8px_rgba(16,185,129,0.2)]'
+                          : 'bg-amber-950/80 text-amber-300 border border-amber-500/40 shadow-[0_0_8px_rgba(245,158,11,0.2)]'
                         : 'bg-slate-900 text-slate-500 border border-slate-800'
                     }`}
                   >
-                    {isOnline ? 'ONLINE' : 'OFFLINE'}
+                    {isOnline ? (isDirectLive ? 'ONLINE' : 'SYNCING') : 'OFFLINE'}
                   </span>
 
                   <ChevronRight className={`w-4 h-4 transition-transform ${
