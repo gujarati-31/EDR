@@ -293,11 +293,15 @@ class Database {
 
   // Installed Apps
   syncInstalledApps(deviceId: string, apps: Omit<InstalledApp, 'id' | 'deviceId'>[]) {
-    // Clear old apps for this device and replace with new sync
-    this.data.installedApps = this.data.installedApps.filter((a) => a.deviceId !== deviceId);
+    const dev = this.getDeviceById(deviceId);
+    const targetId = dev ? dev.deviceId : deviceId;
+    // Clear old apps for this device (both by targetId and dev.id if applicable)
+    this.data.installedApps = this.data.installedApps.filter(
+      (a) => a.deviceId !== targetId && (!dev || a.deviceId !== dev.id)
+    );
     const newApps: InstalledApp[] = apps.map((a) => ({
       id: crypto.randomUUID(),
-      deviceId,
+      deviceId: targetId,
       ...a,
     }));
     this.data.installedApps.push(...newApps);
@@ -306,7 +310,11 @@ class Database {
   }
 
   getInstalledApps(deviceId: string): InstalledApp[] {
-    return this.data.installedApps.filter((a) => a.deviceId === deviceId);
+    const dev = this.getDeviceById(deviceId);
+    const targetId = dev ? dev.deviceId : deviceId;
+    return this.data.installedApps.filter(
+      (a) => a.deviceId === targetId || (dev && a.deviceId === dev.id)
+    );
   }
 
   // Intruder Evidence Photos

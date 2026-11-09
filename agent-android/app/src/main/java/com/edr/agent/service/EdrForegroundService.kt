@@ -121,6 +121,10 @@ class EdrForegroundService : Service() {
         return START_STICKY
     }
 
+    fun sendWebSocketMessage(msg: String): Boolean {
+        return wsClient?.send(msg) ?: false
+    }
+
     fun disconnectWebSocket() {
         wsClient?.disconnect()
         Log.i(TAG, "WebSocket disconnected by dashboard command.")

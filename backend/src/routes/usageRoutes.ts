@@ -73,12 +73,10 @@ export function createUsageRouter(gateway: EDRWebSocketGateway) {
     }
 
     const device = db.getDeviceById(deviceId);
-    if (!device) {
-      return res.status(404).json({ success: false, message: 'Device not found' });
-    }
+    const targetId = device ? device.deviceId : deviceId;
 
-    const synced = db.syncInstalledApps(device.deviceId, apps);
-    gateway.broadcastToDashboards('APPS_SYNCED', { deviceId: device.deviceId, count: synced.length });
+    const synced = db.syncInstalledApps(targetId, apps);
+    gateway.broadcastToDashboards('APPS_SYNCED', { deviceId: targetId, count: synced.length, apps: synced });
 
     res.json({ success: true, count: synced.length, message: 'Installed apps synchronized' });
   });

@@ -60,6 +60,7 @@ export const App: React.FC = () => {
   const [isConnectingDevice, setIsConnectingDevice] = useState(false);
   const [isDisconnectingDevice, setIsDisconnectingDevice] = useState(false);
   const [isFetchingData, setIsFetchingData] = useState(false);
+  const [appsLastUpdated, setAppsLastUpdated] = useState<number>(0);
 
   // Live Screen Streaming State
   const [screenFrame, setScreenFrame] = useState<{
@@ -199,6 +200,9 @@ export const App: React.FC = () => {
         break;
       case 'RECORDING_SAVED':
         loadLogs(selectedDevice?.deviceId);
+        break;
+      case 'APPS_SYNCED':
+        setAppsLastUpdated(Date.now());
         break;
       default:
         break;
@@ -676,6 +680,7 @@ export const App: React.FC = () => {
                     deviceId={selectedDevice.deviceId}
                     policy={currentPolicy}
                     onPolicyUpdated={(pol) => setCurrentPolicy(pol)}
+                    appsLastUpdated={appsLastUpdated}
                     onNavigateToRecordings={() => {
                       setActiveTab('evidence');
                       setEvidenceSubTab('trap_recordings');

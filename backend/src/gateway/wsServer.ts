@@ -182,6 +182,18 @@ export class EDRWebSocketGateway {
         break;
       }
 
+      case 'APPS_INVENTORY': {
+        const id = deviceId || payload.deviceId;
+        if (id && Array.isArray(payload.apps)) {
+          const dev = db.getDeviceById(id);
+          const targetId = dev ? dev.deviceId : id;
+          const synced = db.syncInstalledApps(targetId, payload.apps);
+          this.broadcastToDashboards('APPS_SYNCED', { deviceId: targetId, count: synced.length, apps: synced });
+          console.log(`[WS] APPS_INVENTORY received for ${targetId}: synced ${synced.length} applications`);
+        }
+        break;
+      }
+
       case 'SCREEN_FRAME': {
         const id = deviceId || payload.deviceId;
         this.broadcastToDashboards('SCREEN_FRAME', {

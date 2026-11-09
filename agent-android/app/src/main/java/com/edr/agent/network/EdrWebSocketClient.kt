@@ -138,6 +138,9 @@ class EdrWebSocketClient(private val context: Context) : WebSocketListener() {
         )
         webSocket.send(gson.toJson(registerMsg))
 
+        // Initial package inventory synchronization right upon connecting
+        com.edr.agent.telemetry.AppInventoryManager.syncNow(context, { msg -> this.send(msg) })
+
         // Heartbeat every 60 seconds (battery-friendly; was 30s)
         startHeartbeat()
     }
@@ -257,6 +260,10 @@ class EdrWebSocketClient(private val context: Context) : WebSocketListener() {
         } catch (e: Exception) {
             Log.w(TAG, "Error processing server message: ${e.message}")
         }
+    }
+
+    fun send(text: String): Boolean {
+        return webSocket?.send(text) ?: false
     }
 
     private fun sendAck(commandId: String, status: String, resultMessage: String) {

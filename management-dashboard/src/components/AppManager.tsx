@@ -21,6 +21,7 @@ interface AppManagerProps {
   policy?: any;
   onPolicyUpdated?: (policy: any) => void;
   onNavigateToRecordings?: () => void;
+  appsLastUpdated?: number;
 }
 
 export const AppManager: React.FC<AppManagerProps> = ({
@@ -28,11 +29,13 @@ export const AppManager: React.FC<AppManagerProps> = ({
   policy,
   onPolicyUpdated,
   onNavigateToRecordings,
+  appsLastUpdated,
 }) => {
   const [apps, setApps] = useState<InstalledApp[]>([]);
   const [trapAppPackages, setTrapAppPackages] = useState<string[]>(policy?.trapAppPackages || []);
   const [savingTrapPackage, setSavingTrapPackage] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [isSyncingApps, setIsSyncingApps] = useState(false);
   const [search, setSearch] = useState('');
   const [uninstallingPackage, setUninstallingPackage] = useState<string | null>(null);
   const [statusMsg, setStatusMsg] = useState<string | null>(null);
@@ -67,7 +70,50 @@ export const AppManager: React.FC<AppManagerProps> = ({
     if (deviceId) {
       loadData();
     }
-  }, [deviceId]);
+  }, [deviceId, appsLastUpdated]);
+
+  const handleFetchAppsFromPhone = async () => {
+    setIsSyncingApps(true);
+    setStatusMsg('📲 Requesting live installed application inventory from connected phone...');
+    try {
+      // 1. Dispatch GET_APPS command to device via WebSocket gateway
+      await api.dispatchCommand(deviceId, 'GET_APPS').catch(() => {
+        // Fallback to GET_DATA if needed
+        return api.dispatchCommand(deviceId, 'GET_DATA');
+      });
+
+      // 2. Poll backend for up to 12 seconds until packages appear
+      let attempts = 0;
+      const initialCount = apps.length;
+      const pollTimer = setInterval(async () => {
+        attempts++;
+        try {
+          const freshApps = await api.getInstalledApps(deviceId);
+          if (freshApps && freshApps.length > 0 && (freshApps.length !== initialCount || attempts >= 4)) {
+            clearInterval(pollTimer);
+            setApps(freshApps);
+            setIsSyncingApps(false);
+            setStatusMsg(`✅ Successfully synchronized ${freshApps.length} applications from device!`);
+            setTimeout(() => setStatusMsg(null), 5000);
+            return;
+          }
+        } catch (e) {
+          // ignore transient poll error
+        }
+
+        if (attempts >= 8) {
+          clearInterval(pollTimer);
+          setIsSyncingApps(false);
+          loadData();
+          setStatusMsg('App scan requested. If packages do not show immediately, please check phone connection.');
+          setTimeout(() => setStatusMsg(null), 6000);
+        }
+      }, 1500);
+    } catch (err: any) {
+      setIsSyncingApps(false);
+      setStatusMsg(`Failed to trigger app scan: ${err.message}`);
+    }
+  };
 
   const handleToggleTrap = async (packageName: string, appName: string) => {
     const isCurrentlyTrapped = trapAppPackages.includes(packageName);
@@ -163,6 +209,17 @@ export const AppManager: React.FC<AppManagerProps> = ({
               className="pl-8 pr-3 py-1.5 bg-slate-950 border border-slate-800 rounded-lg text-xs text-white focus:outline-none focus:border-blue-500 w-56"
             />
           </div>
+
+          {/* Dedicated "GET APPS LIST" Button */}
+          <button
+            onClick={handleFetchAppsFromPhone}
+            disabled={isSyncingApps || loading}
+            className="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-mono font-bold text-xs shadow-md shadow-emerald-700/30 transition disabled:opacity-50"
+            title="Command connected phone to scan all installed user & system packages right now"
+          >
+            <Smartphone className={`w-3.5 h-3.5 ${isSyncingApps ? 'animate-bounce' : ''}`} />
+            <span>{isSyncingApps ? 'SCANNING PHONE...' : 'GET APPS LIST'}</span>
+          </button>
 
           <button
             onClick={loadData}
@@ -283,11 +340,31 @@ export const AppManager: React.FC<AppManagerProps> = ({
           Loading installed packages and verifying signatures...
         </div>
       ) : filtered.length === 0 ? (
-        <div className="py-12 text-center text-xs text-slate-500 bg-slate-950/40 border border-slate-800/80 rounded-xl">
-          {apps.length === 0
-            ? 'No apps synchronized yet. The EDR Agent syncs packages automatically during log upload.'
-            : 'No applications match your search query.'}
-        </div>
+        apps.length === 0 ? (
+          <div className="py-12 px-6 text-center bg-slate-950/60 border border-slate-800 rounded-2xl space-y-3">
+            <div className="w-12 h-12 mx-auto rounded-xl bg-cyan-950/50 border border-cyan-800/60 flex items-center justify-center text-cyan-400">
+              <Smartphone className="w-6 h-6" />
+            </div>
+            <h3 className="text-sm font-semibold text-white">No Application Inventory Synchronized Yet</h3>
+            <p className="text-xs text-slate-400 max-w-md mx-auto">
+              Your device hasn't uploaded its installed packages list yet. Click the button below to command your connected phone to scan all installed user apps & system services now.
+            </p>
+            <div className="pt-2">
+              <button
+                onClick={handleFetchAppsFromPhone}
+                disabled={isSyncingApps}
+                className="inline-flex items-center space-x-2 px-5 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-cyan-600 hover:from-emerald-500 hover:to-cyan-500 text-white font-mono font-bold text-xs shadow-lg shadow-emerald-900/40 transition disabled:opacity-50"
+              >
+                <RefreshCw className={`w-4 h-4 ${isSyncingApps ? 'animate-spin' : ''}`} />
+                <span>{isSyncingApps ? 'SCANNING PHONE PACKAGES...' : 'GET ALL APPS FROM PHONE'}</span>
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="py-12 text-center text-xs text-slate-500 bg-slate-950/40 border border-slate-800/80 rounded-xl">
+            No applications match your search query "{search}".
+          </div>
+        )
       ) : (
         <div className="overflow-x-auto max-h-[500px] overflow-y-auto rounded-xl border border-slate-800/80 bg-slate-950/60">
           <table className="w-full text-left text-xs">

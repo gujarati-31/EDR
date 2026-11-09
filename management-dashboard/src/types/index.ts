@@ -38,6 +38,7 @@ export type CommandType =
   | 'WIPE_DEVICE'
   | 'GET_LOGS'
   | 'GET_DATA'
+  | 'GET_APPS'
   | 'CAPTURE_PHOTO'
   | 'START_SCREEN_STREAM'
   | 'STOP_SCREEN_STREAM'
