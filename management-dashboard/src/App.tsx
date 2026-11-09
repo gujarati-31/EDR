@@ -29,6 +29,7 @@ import {
   Clock,
   Cpu,
   FolderOpen,
+  Download,
 } from 'lucide-react';
 import { Device, DevicePolicy, LogEntry } from './types';
 import { api } from './services/api';
@@ -58,6 +59,7 @@ export const App: React.FC = () => {
   } | null>(null);
   const [isConnectingDevice, setIsConnectingDevice] = useState(false);
   const [isDisconnectingDevice, setIsDisconnectingDevice] = useState(false);
+  const [isFetchingData, setIsFetchingData] = useState(false);
 
   // Live Screen Streaming State
   const [screenFrame, setScreenFrame] = useState<{
@@ -312,8 +314,48 @@ export const App: React.FC = () => {
                 </div>
               </div>
 
-              {/* Big High-Visibility Connect / Disconnect Cyber Action Button */}
+              {/* Big High-Visibility Command Action Buttons */}
               <div className="flex items-center gap-3">
+                {/* Immediate GET DATA Button */}
+                <button
+                  onClick={async () => {
+                    setIsFetchingData(true);
+                    setConnectionNotice({
+                      type: 'info',
+                      message: `Requesting real-time device data from ${selectedDevice.deviceName}...`,
+                    });
+                    try {
+                      await api.dispatchCommand(selectedDevice.deviceId, 'GET_DATA');
+                      setTimeout(() => {
+                        loadDevices();
+                        loadLogs(selectedDevice.deviceId);
+                      }, 2000);
+                      setTimeout(() => {
+                        loadDevices();
+                        loadLogs(selectedDevice.deviceId);
+                        setIsFetchingData(false);
+                        setConnectionNotice({
+                          type: 'success',
+                          message: `Live data received from ${selectedDevice.deviceName}!`,
+                        });
+                        setTimeout(() => setConnectionNotice(null), 5000);
+                      }, 5000);
+                    } catch (err: any) {
+                      setIsFetchingData(false);
+                      setConnectionNotice({
+                        type: 'error',
+                        message: `Failed to fetch data: ${err.message}`,
+                      });
+                    }
+                  }}
+                  disabled={isFetchingData || selectedDevice.status !== 'ONLINE'}
+                  className="inline-flex items-center space-x-2 px-4 py-2.5 rounded-xl text-xs font-mono font-bold tracking-wider bg-gradient-to-r from-cyan-950 via-teal-950 to-slate-900 hover:from-cyan-900 hover:to-teal-900 text-cyan-200 border border-cyan-400/50 shadow-[0_0_15px_rgba(6,182,212,0.2)] transition-all active:scale-95 disabled:opacity-50"
+                  title="Pull real-time device telemetry, screen time, app inventory, and threat logs now"
+                >
+                  <Download className={`w-4 h-4 text-cyan-400 ${isFetchingData ? 'animate-bounce' : ''}`} />
+                  <span>{isFetchingData ? 'FETCHING...' : 'GET DATA'}</span>
+                </button>
+
                 {selectedDevice.status === 'ONLINE' ? (
                   <button
                     onClick={async () => {

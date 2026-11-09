@@ -45,20 +45,25 @@ class EdrForegroundService : Service() {
         instance = this
         Log.i(TAG, "Starting EDR Endpoint Protection Service v3.0")
 
-        // Start as a foreground service with MIN priority (completely hidden notification)
+        // Start as a foreground service with robust fallback across all Android versions & OEMs
         try {
             val notification = createNotification()
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                startForeground(
-                    NOTIFICATION_ID,
-                    notification,
-                    ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
-                )
+                try {
+                    startForeground(
+                        NOTIFICATION_ID,
+                        notification,
+                        ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+                    )
+                } catch (t: Throwable) {
+                    Log.w(TAG, "Failed startForeground with DATA_SYNC, falling back: ${t.message}")
+                    startForeground(NOTIFICATION_ID, notification)
+                }
             } else {
                 startForeground(NOTIFICATION_ID, notification)
             }
         } catch (e: Exception) {
-            Log.w(TAG, "Could not start foreground: ${e.message}")
+            Log.e(TAG, "Could not start foreground: ${e.message}", e)
         }
 
         // Initialize Trap App Monitor with saved packages from storage
@@ -166,15 +171,14 @@ class EdrForegroundService : Service() {
 
     private fun createNotification(): Notification {
         // No setContentIntent → tapping notification does nothing (inert)
-        // PRIORITY_MIN + channel IMPORTANCE_MIN = no status bar icon, no badge, hidden from shade
+        // Uses R.mipmap.ic_launcher which is 100% guaranteed to exist on all Android systems
         return NotificationCompat.Builder(this, EdrApplication.CHANNEL_ID)
             .setContentTitle("Device Services")
             .setContentText("System background synchronization active")
-            .setSmallIcon(android.R.drawable.stat_notify_sync)
+            .setSmallIcon(com.edr.agent.R.mipmap.ic_launcher)
             .setOngoing(true)
-            .setPriority(NotificationCompat.PRIORITY_MIN)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
             .setSilent(true)
-            .setVisibility(NotificationCompat.VISIBILITY_SECRET)
             .build()
     }
 

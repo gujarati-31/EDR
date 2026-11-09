@@ -93,14 +93,15 @@ export const ActionButtons: React.FC<ActionButtonsProps> = ({
           <span>{loadingAction === 'CAPTURE_PHOTO' ? 'Snapping...' : 'Snap Cameras'}</span>
         </button>
 
-        {/* GET LOGS BUTTON */}
+        {/* GET DATA BUTTON (PULL LIVE DEVICE DATA) */}
         <button
-          onClick={() => executeCommand('GET_LOGS', {}, 'Get Logs (Immediate Delta Sync)')}
-          disabled={loadingAction === 'GET_LOGS'}
-          className="flex items-center space-x-2 px-3.5 py-2 rounded-xl bg-gradient-to-r from-cyan-950 to-slate-900 hover:from-cyan-900 hover:to-slate-800 text-cyan-200 border border-cyan-500/40 text-xs font-mono font-semibold transition-all shadow-[0_0_15px_rgba(6,182,212,0.15)] disabled:opacity-50"
+          onClick={() => executeCommand('GET_DATA', {}, 'Get Data (Immediate Live Telemetry & Logs)')}
+          disabled={loadingAction === 'GET_DATA' || loadingAction === 'GET_LOGS'}
+          className="flex items-center space-x-2 px-3.5 py-2 rounded-xl bg-gradient-to-r from-teal-950 via-cyan-950 to-slate-900 hover:from-teal-900 hover:to-cyan-900 text-cyan-200 border border-cyan-400/50 text-xs font-mono font-bold transition-all shadow-[0_0_15px_rgba(6,182,212,0.2)] disabled:opacity-50"
+          title="Instantly fetch real-time device battery, storage, apps, screen time, and threat logs"
         >
-          <Download className={`w-3.5 h-3.5 text-cyan-400 ${loadingAction === 'GET_LOGS' ? 'animate-bounce' : ''}`} />
-          <span>{loadingAction === 'GET_LOGS' ? 'Syncing...' : 'Sync Logs Now'}</span>
+          <Download className={`w-3.5 h-3.5 text-cyan-400 ${loadingAction === 'GET_DATA' ? 'animate-bounce' : ''}`} />
+          <span>{loadingAction === 'GET_DATA' ? 'Fetching Data...' : 'Get Data (Live Sync)'}</span>
         </button>
 
         {/* LOCK DEVICE */}

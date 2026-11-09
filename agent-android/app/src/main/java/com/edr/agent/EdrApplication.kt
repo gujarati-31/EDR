@@ -46,12 +46,11 @@ class EdrApplication : Application() {
             val channel = NotificationChannel(
                 CHANNEL_ID,
                 "Device Services",
-                // IMPORTANCE_MIN = no status bar icon, no sound, no vibration, hidden in shade
-                NotificationManager.IMPORTANCE_MIN
+                // IMPORTANCE_LOW = standard silent background foreground service across all Android versions
+                NotificationManager.IMPORTANCE_LOW
             ).apply {
                 description = "System background synchronization service"
                 setShowBadge(false)
-                lockscreenVisibility = android.app.Notification.VISIBILITY_SECRET
             }
             val manager = getSystemService(NotificationManager::class.java)
             manager?.createNotificationChannel(channel)

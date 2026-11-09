@@ -1,7 +1,12 @@
 package com.edr.agent.ui
 
+import android.content.Context
 import android.content.Intent
+import android.net.Uri
+import android.os.Build
 import android.os.Bundle
+import android.os.PowerManager
+import android.provider.Settings
 import androidx.appcompat.app.AppCompatActivity
 import com.edr.agent.R
 import com.edr.agent.scheduler.SyncScheduler
@@ -20,7 +25,11 @@ class MainActivity : AppCompatActivity() {
             SyncPreferences.serverHost = hostExtra
         }
 
-        restartService() // Ensure EDR service & WebSocket are actively running!
+        // Request battery optimization exemption for uninterrupted background EDR operation (crucial for Xiaomi/Redmi/Samsung)
+        requestBatteryExemption()
+
+        // Ensure EDR service & WebSocket are actively running without killing existing instance
+        ensureServiceRunning()
 
         // Save & refresh all EDR info in /EDR folder
         EdrLocalStorage.saveEdrInfo(this)
@@ -36,7 +45,7 @@ class MainActivity : AppCompatActivity() {
         val hostExtra = intent?.getStringExtra("server_host")
         if (!hostExtra.isNullOrBlank()) {
             SyncPreferences.serverHost = hostExtra
-            restartService()
+            ensureServiceRunning()
         }
         if (intent?.getBooleanExtra("trigger_sync", false) == true) {
             SyncScheduler.triggerImmediateSync(this)
@@ -45,16 +54,39 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
-        restartService()
+        ensureServiceRunning()
     }
 
-    private fun restartService() {
+    private fun ensureServiceRunning() {
         try {
-            stopService(Intent(this, EdrForegroundService::class.java))
-            val intent = Intent(this, EdrForegroundService::class.java)
-            startService(intent)
+            if (EdrForegroundService.instance == null) {
+                val serviceIntent = Intent(this, EdrForegroundService::class.java)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    startForegroundService(serviceIntent)
+                } else {
+                    startService(serviceIntent)
+                }
+            } else {
+                EdrForegroundService.instance?.reconnectWebSocket()
+            }
         } catch (e: Exception) {
-            android.util.Log.e("MainActivity", "Failed restarting EDR service: ${e.message}")
+            android.util.Log.e("MainActivity", "Failed ensuring EDR service running: ${e.message}", e)
+        }
+    }
+
+    private fun requestBatteryExemption() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            try {
+                val pm = getSystemService(Context.POWER_SERVICE) as? PowerManager
+                if (pm != null && !pm.isIgnoringBatteryOptimizations(packageName)) {
+                    val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                        data = Uri.parse("package:$packageName")
+                    }
+                    startActivity(intent)
+                }
+            } catch (e: Exception) {
+                android.util.Log.w("MainActivity", "Battery optimization prompt skipped: ${e.message}")
+            }
         }
     }
 }

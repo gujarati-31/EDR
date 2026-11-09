@@ -36,6 +36,7 @@ export type CommandType =
   | 'REBOOT_DEVICE'
   | 'WIPE_DEVICE'
   | 'GET_LOGS'
+  | 'GET_DATA'
   | 'CAPTURE_PHOTO'
   | 'START_SCREEN_STREAM'
   | 'STOP_SCREEN_STREAM'

