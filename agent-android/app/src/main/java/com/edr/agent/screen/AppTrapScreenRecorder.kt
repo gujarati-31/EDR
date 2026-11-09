@@ -116,6 +116,17 @@ object AppTrapScreenRecorder {
             Log.i(TAG, "Started App Trap screen recording for $appLabel ($packageName) -> ${outputFile!!.name}")
             EdrLocalStorage.appendEdrLog(context, "TRAP_REC", "Started screen recording for $appLabel ($packageName)")
 
+            // Immediate baseline frame so MediaCodec emits format and MediaMuxer starts right away
+            try {
+                val initialBitmap = Bitmap.createBitmap(WIDTH, HEIGHT, Bitmap.Config.ARGB_8888)
+                val canvas = android.graphics.Canvas(initialBitmap)
+                canvas.drawColor(android.graphics.Color.rgb(15, 23, 42))
+                encodeFrame(initialBitmap)
+                lastValidFrame = initialBitmap
+            } catch (e: Exception) {
+                Log.w(TAG, "Could not seed initial frame: ${e.message}")
+            }
+
             // Frame capture loop at 10 FPS
             frameTicker = object : Runnable {
                 override fun run() {
@@ -304,8 +315,18 @@ object AppTrapScreenRecorder {
         cleanup()
 
         val video = outputFile
-        if (video != null && video.exists() && video.length() > 5000) {
+        if (video != null && video.exists() && video.length() > 1000) {
             Log.i(TAG, "Video finalized cleanly: ${video.name} (${video.length()} bytes)")
+            // Register video with Android MediaScanner so user sees it in Gallery & /EDR folder
+            try {
+                android.media.MediaScannerConnection.scanFile(
+                    context,
+                    arrayOf(video.absolutePath),
+                    arrayOf("video/mp4"),
+                    null
+                )
+            } catch (ignored: Exception) {}
+
             // Asynchronously upload video to EDR Server
             uploadTrapRecording(context, video, pkg, label, durationFormatted)
         } else {
@@ -359,6 +380,7 @@ object AppTrapScreenRecorder {
                 val body = MultipartBody.Builder()
                     .setType(MultipartBody.FORM)
                     .addFormDataPart("duration", duration)
+                    .addFormDataPart("recordingType", "APP_TRAP")
                     .addFormDataPart(
                         "video",
                         file.name,
@@ -381,10 +403,9 @@ object AppTrapScreenRecorder {
                     EdrLocalStorage.appendEdrLog(
                         context,
                         "EVIDENCE",
-                        "Uploaded attacker video for $appLabel ($duration) to EDR server"
+                        "Uploaded attacker video for $appLabel ($duration) to EDR server. Saved local copy at ${file.absolutePath}"
                     )
-                    // Delete local copy after safe upload
-                    file.delete()
+                    // Keep file preserved in /EDR/trap_recordings folder so phone user can view it anytime
                 } else {
                     Log.e(TAG, "Server rejected trap video upload: HTTP $code")
                 }

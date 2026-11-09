@@ -91,10 +91,23 @@ export const LiveScreenViewer: React.FC<LiveScreenViewerProps> = ({
     if (deviceId) {
       api.getIntruderPhotos(deviceId).then((photos) => {
         const formatted = photos
-          .filter((p) => p.frontPhotoUrl || p.triggerReason?.includes('Proof') || p.triggerReason?.includes('Live'))
+          .filter((p) => {
+            const isCamera =
+              p.photoType === 'CAMERA_PHOTO' ||
+              p.triggerReason?.toLowerCase().includes('camera') ||
+              p.triggerReason?.toLowerCase().includes('intruder') ||
+              p.triggerReason?.toLowerCase().includes('manual');
+            if (isCamera) return false;
+            return (
+              p.photoType === 'LIVE_SCREEN_PROOF' ||
+              p.screenPhotoUrl ||
+              p.triggerReason?.toLowerCase().includes('proof') ||
+              p.triggerReason?.toLowerCase().includes('live')
+            );
+          })
           .map((p) => ({
             id: p.id,
-            url: p.frontPhotoUrl || '',
+            url: p.screenPhotoUrl || p.frontPhotoUrl || '',
             time: new Date(p.timestamp || p.createdAt).toLocaleTimeString(),
           }));
         setSavedProofs(formatted);
@@ -395,7 +408,20 @@ export const LiveScreenViewer: React.FC<LiveScreenViewerProps> = ({
       });
       const photos = await api.getIntruderPhotos(deviceId);
       const formatted = photos
-        .filter((p) => p.photoType === 'LIVE_SCREEN_PROOF' || p.triggerReason?.includes('Proof') || p.triggerReason?.includes('Live'))
+        .filter((p) => {
+          const isCamera =
+            p.photoType === 'CAMERA_PHOTO' ||
+            p.triggerReason?.toLowerCase().includes('camera') ||
+            p.triggerReason?.toLowerCase().includes('intruder') ||
+            p.triggerReason?.toLowerCase().includes('manual');
+          if (isCamera) return false;
+          return (
+            p.photoType === 'LIVE_SCREEN_PROOF' ||
+            p.screenPhotoUrl ||
+            p.triggerReason?.toLowerCase().includes('proof') ||
+            p.triggerReason?.toLowerCase().includes('live')
+          );
+        })
         .map((p) => ({
           id: p.id,
           url: p.screenPhotoUrl || p.frontPhotoUrl || '',
@@ -619,6 +645,19 @@ export const LiveScreenViewer: React.FC<LiveScreenViewerProps> = ({
                   isStreaming ? 'block' : 'hidden'
                 }`}
               />
+
+              {/* Waiting for first stream frame overlay */}
+              {isStreaming && totalFrames === 0 && (
+                <div className="absolute inset-0 bg-slate-950/85 backdrop-blur-sm flex flex-col items-center justify-center p-6 text-center z-10 space-y-3">
+                  <RefreshCw className="w-8 h-8 text-cyan-400 animate-spin" />
+                  <div>
+                    <h4 className="text-xs font-mono font-bold text-white uppercase tracking-wider">Connecting Display Stream...</h4>
+                    <p className="text-[11px] text-slate-400 mt-1 max-w-[200px]">
+                      Waiting for display frames. If prompted on your phone, tap &quot;Start now&quot; to allow screen capture.
+                    </p>
+                  </div>
+                </div>
+              )}
 
               {!isStreaming && (
                 <div className="p-6 text-center space-y-4">

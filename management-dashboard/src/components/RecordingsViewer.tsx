@@ -13,9 +13,10 @@ import { api } from '../services/api';
 
 interface RecordingsViewerProps {
   deviceId: string;
+  recordingsLastUpdated?: number;
 }
 
-export const RecordingsViewer: React.FC<RecordingsViewerProps> = ({ deviceId }) => {
+export const RecordingsViewer: React.FC<RecordingsViewerProps> = ({ deviceId, recordingsLastUpdated }) => {
   const [recordings, setRecordings] = useState<RecordedVideo[]>([]);
   const [loading, setLoading] = useState(false);
   const [activeVideo, setActiveVideo] = useState<RecordedVideo | null>(null);
@@ -40,7 +41,7 @@ export const RecordingsViewer: React.FC<RecordingsViewerProps> = ({ deviceId }) 
     if (deviceId) {
       loadRecordings();
     }
-  }, [deviceId]);
+  }, [deviceId, recordingsLastUpdated]);
 
   const handleDelete = async (e: React.MouseEvent, id: string) => {
     e.stopPropagation();

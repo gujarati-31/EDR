@@ -128,6 +128,8 @@ object ScreenStreamManager {
             return Pair("EXECUTED", "Live screen stream is active.")
         }
         isStreaming.set(true)
+        nextAllowedScreenshotTime = 0L
+        com.edr.agent.service.EdrForegroundService.instance?.promoteToMediaProjection()
 
         Log.i(TAG, "Starting ultra-smooth live screen stream over WebSocket...")
 

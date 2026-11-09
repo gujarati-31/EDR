@@ -348,9 +348,11 @@ class Database {
 
   // Recorded Live Video Sessions
   addRecording(rec: Omit<RecordedVideo, 'id' | 'createdAt'>): RecordedVideo {
+    const id = crypto.randomUUID();
     const newRec: RecordedVideo = {
-      id: crypto.randomUUID(),
+      id,
       ...rec,
+      url: `/api/devices/${rec.deviceId}/recordings/${id}/stream`,
       createdAt: new Date().toISOString(),
     };
     if (!this.data.recordings) this.data.recordings = [];

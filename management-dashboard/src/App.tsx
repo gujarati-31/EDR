@@ -61,6 +61,7 @@ export const App: React.FC = () => {
   const [isDisconnectingDevice, setIsDisconnectingDevice] = useState(false);
   const [isFetchingData, setIsFetchingData] = useState(false);
   const [appsLastUpdated, setAppsLastUpdated] = useState<number>(0);
+  const [recordingsLastUpdated, setRecordingsLastUpdated] = useState<number>(0);
 
   // Live Screen Streaming State
   const [screenFrame, setScreenFrame] = useState<{
@@ -189,17 +190,18 @@ export const App: React.FC = () => {
         }
         break;
       case 'SCREEN_FRAME':
-        if (selectedDevice && data.deviceId === selectedDevice.deviceId) {
+        if (selectedDevice && (data.deviceId === selectedDevice.deviceId || data.deviceId === selectedDevice.id)) {
           setScreenFrame(data);
         }
         break;
       case 'SCREEN_STREAM_STATUS':
-        if (selectedDevice && data.deviceId === selectedDevice.deviceId) {
+        if (selectedDevice && (data.deviceId === selectedDevice.deviceId || data.deviceId === selectedDevice.id)) {
           setStreamStatus(data);
         }
         break;
       case 'RECORDING_SAVED':
         loadLogs(selectedDevice?.deviceId);
+        setRecordingsLastUpdated(Date.now());
         break;
       case 'APPS_SYNCED':
         setAppsLastUpdated(Date.now());
@@ -608,7 +610,10 @@ export const App: React.FC = () => {
                 )}
 
                 {evidenceSubTab === 'trap_recordings' && (
-                  <RecordingsViewer deviceId={selectedDevice.deviceId} />
+                  <RecordingsViewer
+                    deviceId={selectedDevice.deviceId}
+                    recordingsLastUpdated={recordingsLastUpdated}
+                  />
                 )}
 
                 {evidenceSubTab === 'camera_photos' && (
