@@ -137,13 +137,14 @@
             android:layout_height="wrap_content"
             android:orientation="vertical" />
 
-        <!-- Completed / Granted Permissions Section (Collapsible) -->
+        <!-- Completed / Granted Permissions Section (Hidden as per requirement) -->
         <LinearLayout
             android:id="@+id/sectionGranted"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="18dp"
-            android:orientation="vertical">
+            android:orientation="vertical"
+            android:visibility="gone">
 
             <TextView
                 android:id="@+id/tvGrantedHeader"

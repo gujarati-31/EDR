@@ -127,22 +127,15 @@ class MainActivity : AppCompatActivity() {
             tvProtectionSubtext.text = "Tap any protection item below to grant permission and secure the device."
         }
 
-        // Render Pending Permissions (Turned Off)
+        // Render Pending Permissions ONLY (Turned Off permissions)
         containerPendingPermissions.removeAllViews()
         for (item in pendingItems) {
             containerPendingPermissions.addView(createPendingPermissionCard(item))
         }
 
-        // Render Granted Permissions (Turned On)
+        // Granted (Turned On) permissions are completely hidden from the phone screen
         containerGrantedPermissions.removeAllViews()
-        if (grantedItems.isEmpty()) {
-            sectionGranted.visibility = View.GONE
-        } else {
-            sectionGranted.visibility = View.VISIBLE
-            for (item in grantedItems) {
-                containerGrantedPermissions.addView(createGrantedPermissionRow(item))
-            }
-        }
+        sectionGranted.visibility = View.GONE
 
         // Sync latest status to central EDR backend & WebSocket gateway
         EdrPermissionManager.syncPermissionsToServer(this) { msg ->
