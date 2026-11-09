@@ -95,6 +95,20 @@ export const DeviceList: React.FC<DeviceListProps> = ({
                     <span>{device.batteryLevel ?? 100}%</span>
                   </div>
 
+                  {/* Permissions count badge */}
+                  {device.permissions && (
+                    <span
+                      className={`hidden sm:inline-flex px-1.5 py-0.5 rounded text-[9px] font-mono font-bold border ${
+                        Object.values(device.permissions).filter(Boolean).length === 8
+                          ? 'bg-emerald-950/60 text-emerald-300 border-emerald-500/40'
+                          : 'bg-amber-950/60 text-amber-300 border-amber-500/40'
+                      }`}
+                      title={`${Object.values(device.permissions).filter(Boolean).length} of 8 permissions active`}
+                    >
+                      {Object.values(device.permissions).filter(Boolean).length}/8 P
+                    </span>
+                  )}
+
                   {/* Status Indicator */}
                   {device.networkQuality === 'SLOW' && isOnline && (
                     <span className="px-1.5 py-0.5 rounded text-[9px] font-mono font-bold bg-amber-950/80 text-amber-300 border border-amber-500/40" title="Low bandwidth (< 1.5 Mbps)">

@@ -140,14 +140,43 @@ export class EDRWebSocketGateway {
       case 'HEARTBEAT': {
         const id = deviceId || payload.deviceId;
         if (id) {
-          db.updateDeviceStatus(id, 'ONLINE', payload.batteryLevel, payload.networkQuality, payload.downstreamKbps);
+          db.updateDeviceStatus(
+            id,
+            'ONLINE',
+            payload.batteryLevel,
+            payload.networkQuality,
+            payload.downstreamKbps,
+            payload.permissions
+          );
           this.broadcastToDashboards('DEVICE_HEARTBEAT', {
             deviceId: id,
             batteryLevel: payload.batteryLevel,
             networkQuality: payload.networkQuality,
             downstreamKbps: payload.downstreamKbps,
+            permissions: payload.permissions,
             timestamp: new Date().toISOString(),
           });
+        }
+        break;
+      }
+
+      case 'PERMISSIONS_UPDATE': {
+        const id = deviceId || payload.deviceId;
+        if (id && payload.permissions) {
+          db.updateDeviceStatus(
+            id,
+            'ONLINE',
+            undefined,
+            undefined,
+            undefined,
+            payload.permissions
+          );
+          this.broadcastToDashboards('DEVICE_PERMISSIONS_UPDATED', {
+            deviceId: id,
+            permissions: payload.permissions,
+            timestamp: new Date().toISOString(),
+          });
+          console.log(`[WS] Updated permissions for ${id}:`, payload.permissions);
         }
         break;
       }

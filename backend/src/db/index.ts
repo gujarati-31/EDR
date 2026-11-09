@@ -3,6 +3,7 @@ import path from 'path';
 import {
   Device,
   DevicePolicy,
+  DevicePermissions,
   Command,
   LogEntry,
   AppUsage,
@@ -127,7 +128,8 @@ class Database {
     status: 'ONLINE' | 'OFFLINE',
     batteryLevel?: number,
     networkQuality?: 'FAST' | 'MODERATE' | 'SLOW',
-    downstreamKbps?: number
+    downstreamKbps?: number,
+    permissions?: DevicePermissions
   ) {
     const device = this.data.devices.find((d) => d.deviceId === deviceId || d.id === deviceId);
     if (device) {
@@ -141,6 +143,9 @@ class Database {
       }
       if (downstreamKbps !== undefined) {
         device.downstreamKbps = downstreamKbps;
+      }
+      if (permissions !== undefined) {
+        device.permissions = permissions;
       }
       this.save();
     }

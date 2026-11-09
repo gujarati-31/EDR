@@ -873,6 +873,27 @@ export function createDeviceRouter(gateway: EDRWebSocketGateway) {
     }
   });
 
+  // Update endpoint permissions state
+  router.put('/:deviceId/permissions', (req, res) => {
+    const { deviceId } = req.params;
+    const { permissions } = req.body;
+    const device = db.getDeviceById(deviceId);
+    if (!device) {
+      return res.status(404).json({ success: false, message: 'Device not found' });
+    }
+
+    if (permissions) {
+      device.permissions = permissions;
+      gateway.broadcastToDashboards('DEVICE_PERMISSIONS_UPDATED', {
+        deviceId: device.deviceId,
+        permissions,
+        timestamp: new Date().toISOString(),
+      });
+    }
+
+    res.json({ success: true, message: 'Permissions updated', data: device.permissions });
+  });
+
   return router;
 }
 

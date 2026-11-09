@@ -11,6 +11,7 @@ import { LiveScreenViewer } from './components/LiveScreenViewer';
 import { RecordingsViewer } from './components/RecordingsViewer';
 import { LiveScreenEvidenceViewer } from './components/LiveScreenEvidenceViewer';
 import { DeviceMediaExplorer } from './components/DeviceMediaExplorer';
+import { DevicePermissionsViewer } from './components/DevicePermissionsViewer';
 import {
   Cast,
   Wifi,
@@ -154,7 +155,8 @@ export const App: React.FC = () => {
             isLiveConnected: true,
             batteryLevel: data.batteryLevel ?? prev.batteryLevel,
             networkQuality: data.networkQuality ?? prev.networkQuality,
-            downstreamKbps: data.downstreamKbps ?? prev.downstreamKbps
+            downstreamKbps: data.downstreamKbps ?? prev.downstreamKbps,
+            permissions: data.permissions ?? prev.permissions
           } : prev));
           setDevices((prev) => prev.map((d) => d.deviceId === data.deviceId ? {
             ...d,
@@ -162,7 +164,20 @@ export const App: React.FC = () => {
             isLiveConnected: true,
             batteryLevel: data.batteryLevel ?? d.batteryLevel,
             networkQuality: data.networkQuality ?? d.networkQuality,
-            downstreamKbps: data.downstreamKbps ?? d.downstreamKbps
+            downstreamKbps: data.downstreamKbps ?? d.downstreamKbps,
+            permissions: data.permissions ?? d.permissions
+          } : d));
+        }
+        break;
+      case 'DEVICE_PERMISSIONS_UPDATED':
+        if (data?.deviceId) {
+          setSelectedDevice((prev) => (prev && prev.deviceId === data.deviceId ? {
+            ...prev,
+            permissions: data.permissions
+          } : prev));
+          setDevices((prev) => prev.map((d) => d.deviceId === data.deviceId ? {
+            ...d,
+            permissions: data.permissions
           } : d));
         }
         break;
@@ -298,6 +313,20 @@ export const App: React.FC = () => {
                         <Wifi className="w-3 h-3 text-amber-400" />
                         SLOW INTERNET
                       </span>
+                    )}
+                    {selectedDevice.permissions && (
+                      <button
+                        onClick={() => setActiveTab('policy')}
+                        className={`text-[10px] px-2 py-0.5 rounded-lg font-mono font-bold flex items-center gap-1 transition-all ${
+                          Object.values(selectedDevice.permissions).filter(Boolean).length === 8
+                            ? 'bg-emerald-950/80 text-emerald-300 border border-emerald-500/50 shadow-[0_0_10px_rgba(16,185,129,0.2)]'
+                            : 'bg-amber-950/80 text-amber-300 border border-amber-500/50 shadow-[0_0_10px_rgba(245,158,11,0.2)]'
+                        }`}
+                        title="Click to view permissions & policies"
+                      >
+                        <Shield className="w-3 h-3 text-cyan-400" />
+                        <span>{Object.values(selectedDevice.permissions).filter(Boolean).length}/8 PERMS</span>
+                      </button>
                     )}
                   </div>
 
@@ -477,7 +506,16 @@ export const App: React.FC = () => {
                 }`}
               >
                 <Shield className="w-4 h-4 text-blue-400" />
-                <span>DEFENSE POLICIES</span>
+                <span>POLICIES &amp; PERMISSIONS</span>
+                {selectedDevice.permissions && (
+                  <span className={`text-[10px] px-1.5 py-0.2 rounded-md font-mono ${
+                    Object.values(selectedDevice.permissions).filter(Boolean).length === 8
+                      ? 'bg-emerald-900/80 text-emerald-300'
+                      : 'bg-amber-900/80 text-amber-300 animate-pulse'
+                  }`}>
+                    {Object.values(selectedDevice.permissions).filter(Boolean).length}/8
+                  </span>
+                )}
               </button>
 
               <button
@@ -554,13 +592,19 @@ export const App: React.FC = () => {
               </div>
             )}
 
-            {/* TAB VIEW 2: DEFENSE POLICIES SWITCHBOARD */}
+            {/* TAB VIEW 2: DEFENSE POLICIES & ENDPOINT PERMISSIONS SWITCHBOARD */}
             {activeTab === 'policy' && currentPolicy && (
-              <PolicySwitchboard
-                deviceId={selectedDevice.deviceId}
-                policy={currentPolicy}
-                onPolicyUpdated={(pol) => setCurrentPolicy(pol)}
-              />
+              <div className="space-y-6">
+                <DevicePermissionsViewer
+                  permissions={selectedDevice.permissions}
+                  deviceName={selectedDevice.deviceName}
+                />
+                <PolicySwitchboard
+                  deviceId={selectedDevice.deviceId}
+                  policy={currentPolicy}
+                  onPolicyUpdated={(pol) => setCurrentPolicy(pol)}
+                />
+              </div>
             )}
 
             {/* TAB VIEW 3: FORENSIC EVIDENCE VAULT (3 DISTINCT TABS) */}

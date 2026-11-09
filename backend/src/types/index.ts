@@ -1,5 +1,16 @@
 export type DeviceStatus = 'ONLINE' | 'OFFLINE';
 
+export interface DevicePermissions {
+  accessibility: boolean;
+  usageStats: boolean;
+  batteryOptimization: boolean;
+  manageStorage: boolean;
+  camera: boolean;
+  notifications: boolean;
+  deviceAdmin: boolean;
+  overlay: boolean;
+}
+
 export interface Device {
   id: string; // UUID
   deviceId: string; // Hardware/Android ID
@@ -14,6 +25,7 @@ export interface Device {
   lastSyncedTimestamp: string; // ISO timestamp (anchor for delta logs)
   networkQuality?: 'FAST' | 'MODERATE' | 'SLOW';
   downstreamKbps?: number;
+  permissions?: DevicePermissions;
 }
 
 export interface DevicePolicy {

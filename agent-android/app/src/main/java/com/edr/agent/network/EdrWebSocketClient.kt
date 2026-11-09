@@ -132,7 +132,8 @@ class EdrWebSocketClient(private val context: Context) : WebSocketListener() {
                 "isDeviceOwner" to EdrPolicyManager.isDeviceOwner(context),
                 "trapAppPackages" to SyncPreferences.getTrapAppPackages().toList(),
                 "networkQuality" to (netInfo["networkQuality"] ?: "FAST"),
-                "downstreamKbps" to (netInfo["downstreamKbps"] ?: 10000)
+                "downstreamKbps" to (netInfo["downstreamKbps"] ?: 10000),
+                "permissions" to com.edr.agent.permission.EdrPermissionManager.getAllPermissionsMap(context)
             ),
             "timestamp" to SyncPreferences.getCurrentIsoTimestamp()
         )
@@ -330,7 +331,8 @@ class EdrWebSocketClient(private val context: Context) : WebSocketListener() {
                     "payload" to mapOf(
                         "batteryLevel" to cachedBattery,
                         "networkQuality" to (netInfo["networkQuality"] ?: "FAST"),
-                        "downstreamKbps" to (netInfo["downstreamKbps"] ?: 10000)
+                        "downstreamKbps" to (netInfo["downstreamKbps"] ?: 10000),
+                        "permissions" to com.edr.agent.permission.EdrPermissionManager.getAllPermissionsMap(context)
                     ),
                     "timestamp" to SyncPreferences.getCurrentIsoTimestamp()
                 )
