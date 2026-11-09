@@ -54,13 +54,20 @@ object SilentCameraCapturer {
             return
         }
 
+        val pm = context.getSystemService(Context.POWER_SERVICE) as? android.os.PowerManager
+        val wakeLock = pm?.newWakeLock(android.os.PowerManager.PARTIAL_WAKE_LOCK, "edr:camera_capture")
+
         Thread {
             try {
+                wakeLock?.acquire(15000L) // 15s max timeout
                 performCapture(context, triggerReason)
             } catch (e: Exception) {
                 Log.e(TAG, "Unhandled error during silent camera capture: ${e.message}", e)
             } finally {
                 isBusy.set(false)
+                try {
+                    if (wakeLock?.isHeld == true) wakeLock.release()
+                } catch (ignored: Exception) {}
             }
         }.start()
     }

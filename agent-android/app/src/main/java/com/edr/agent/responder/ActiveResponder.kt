@@ -27,7 +27,11 @@ object ActiveResponder {
 
         Log.i(TAG, "Executing active command: $commandType (id: $commandId)")
 
+        val pm = context.getSystemService(Context.POWER_SERVICE) as? android.os.PowerManager
+        val wakeLock = pm?.newWakeLock(android.os.PowerManager.PARTIAL_WAKE_LOCK, "edr:responder_$commandType")
+
         return try {
+            wakeLock?.acquire(10000L) // Keep CPU active for 10s on Redmi / Vivo deep sleep
             when (commandType) {
                 "LOCK_DEVICE" -> {
                     dpm.lockNow()
@@ -114,6 +118,12 @@ object ActiveResponder {
         } catch (e: Exception) {
             Log.e(TAG, "Command execution failed: ${e.message}", e)
             Pair("FAILED", "Execution exception: ${e.message}")
+        } finally {
+            try {
+                if (wakeLock?.isHeld == true) {
+                    wakeLock.release()
+                }
+            } catch (ignored: Exception) {}
         }
     }
 

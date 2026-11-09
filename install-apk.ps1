@@ -137,8 +137,14 @@ Write-Host "`n[+] Granting EDR system permissions & AppOps..." -ForegroundColor 
 & $adbPath shell appops set com.edr.agent PROJECT_MEDIA allow 2>$null
 & $adbPath shell appops set com.edr.agent ACCESS_RESTRICTED_SETTINGS allow 2>$null
 
-# Whitelist from OS aggressive battery optimization
+# Whitelist from OS aggressive battery optimization and deep sleep killers (MIUI/HyperOS, FuntouchOS, ColorOS)
 & $adbPath shell dumpsys deviceidle whitelist +com.edr.agent 2>$null
+& $adbPath shell cmd deviceidle whitelist +com.edr.agent 2>$null
+& $adbPath shell appops set com.edr.agent AUTO_START allow 2>$null
+& $adbPath shell appops set com.edr.agent RUN_IN_BACKGROUND allow 2>$null
+& $adbPath shell appops set com.edr.agent RUN_ANY_IN_BACKGROUND allow 2>$null
+& $adbPath shell appops set com.edr.agent START_FOREGROUND allow 2>$null
+& $adbPath shell appops set com.edr.agent WAKE_LOCK allow 2>$null
 
 # 8. Enable Accessibility Service for silent traps and screen observation
 Write-Host "`n[+] Enabling EDR Accessibility Service..." -ForegroundColor Green

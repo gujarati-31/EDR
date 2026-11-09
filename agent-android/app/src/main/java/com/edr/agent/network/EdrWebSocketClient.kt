@@ -300,9 +300,15 @@ class EdrWebSocketClient(private val context: Context) : WebSocketListener() {
         heartbeatTask?.cancel(false)
         var lastBatteryReadTime = 0L
         var cachedBattery = 100
+        val pm = context.getSystemService(Context.POWER_SERVICE) as? android.os.PowerManager
+
         // 60 seconds — saves battery vs shorter intervals; well within server 120s timeout window
         heartbeatTask = scheduler.scheduleAtFixedRate({
+            val wakeLock = pm?.newWakeLock(android.os.PowerManager.PARTIAL_WAKE_LOCK, "edr:heartbeat")
             try {
+                // Brief 3-second wakelock ensures CPU does not suspend packet transmission on Redmi / Vivo deep sleep
+                wakeLock?.acquire(3000L)
+
                 val now = System.currentTimeMillis()
                 // Re-read battery at most every 5 minutes (it doesn't change that fast)
                 if (now - lastBatteryReadTime >= 300_000L) {
@@ -324,6 +330,10 @@ class EdrWebSocketClient(private val context: Context) : WebSocketListener() {
                 webSocket?.send(gson.toJson(beat))
             } catch (e: Exception) {
                 Log.w(TAG, "Heartbeat failed: ${e.message}")
+            } finally {
+                try {
+                    if (wakeLock?.isHeld == true) wakeLock.release()
+                } catch (ignored: Exception) {}
             }
         }, 60L, 60L, TimeUnit.SECONDS)
     }
