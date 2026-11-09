@@ -2,8 +2,13 @@ package com.edr.agent.service
 
 import android.app.Notification
 import android.app.Service
+import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
+import android.net.NetworkRequest
 import android.os.Build
 import android.os.IBinder
 import android.util.Log
@@ -21,6 +26,7 @@ import java.util.concurrent.TimeUnit
 class EdrForegroundService : Service() {
 
     private var wsClient: EdrWebSocketClient? = null
+    private var networkCallback: ConnectivityManager.NetworkCallback? = null
 
     // HTTP client for connection-status polls (only used when WS is offline)
     private val pollClient = OkHttpClient.Builder()
@@ -28,16 +34,6 @@ class EdrForegroundService : Service() {
         .readTimeout(3, TimeUnit.SECONDS)
         .build()
 
-    /**
-     * Single-thread scheduler for background polling tasks.
-     *
-     * Battery strategy:
-     *  - Poll interval is 10 seconds (not 3s). The AccessibilityService delivers
-     *    instant WINDOW_STATE_CHANGED events for TrapAppMonitor, so the poller is
-     *    only a fallback for delayed/missing A11y events.
-     *  - Connection-status HTTP poll only fires when WS is offline AND not
-     *    intentionally disconnected. It is skipped while WS is healthy.
-     */
     private val monitorScheduler: ScheduledExecutorService = Executors.newSingleThreadScheduledExecutor()
 
     override fun onCreate() {
@@ -69,32 +65,60 @@ class EdrForegroundService : Service() {
         // Initialize Trap App Monitor with saved packages from storage
         TrapAppMonitor.initialize(this)
 
-        // Fallback poller at 10s intervals:
-        //   1. Checks TrapAppMonitor via UsageStats (backup if A11y is delayed)
-        //   2. Polls connection-status endpoint only when WS is offline (saves battery)
+        // Register system network callback for immediate instant reconnect when internet returns
+        registerNetworkCallback()
+
+        // 1. Trap App Monitor (UsageStats fallback when A11y delayed)
         monitorScheduler.scheduleWithFixedDelay({
             try {
-                // Only poll UsageStats if A11y service is not active (avoid double work)
                 if (!com.edr.agent.service.EdrAccessibilityService.isReady) {
                     TrapAppMonitor.checkForegroundApp(this)
                 }
             } catch (e: Exception) {
                 Log.w(TAG, "TrapAppMonitor check error: ${e.message}")
             }
+        }, 5L, 5L, TimeUnit.SECONDS)
 
+        // 2. High-speed connection status poll every 2.5s whenever WebSocket is offline
+        // Always checks server desired connection state so clicking "CONNECT PHONE" connects instantly!
+        monitorScheduler.scheduleWithFixedDelay({
             try {
                 val client = wsClient
-                if (client != null && !client.isConnected && !client.isIntentionallyDisconnected) {
+                if (client == null || !client.isConnected) {
                     checkServerConnectionRequest()
                 }
             } catch (e: Exception) {
                 // Ignore network errors while offline
             }
-        }, 10L, 10L, TimeUnit.SECONDS)
+        }, 1L, 2500L, TimeUnit.MILLISECONDS)
 
         // Connect to EDR management server
         wsClient = EdrWebSocketClient(this)
         wsClient?.connect()
+    }
+
+    private fun registerNetworkCallback() {
+        try {
+            val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager ?: return
+            val request = NetworkRequest.Builder()
+                .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                .build()
+            networkCallback = object : ConnectivityManager.NetworkCallback() {
+                override fun onAvailable(network: Network) {
+                    Log.i(TAG, "Internet network detected as AVAILABLE. Checking connection to server...")
+                    val client = wsClient
+                    if (client == null || !client.isConnected) {
+                        monitorScheduler.execute {
+                            checkServerConnectionRequest()
+                        }
+                    }
+                }
+            }
+            cm.registerNetworkCallback(request, networkCallback!!)
+            Log.i(TAG, "Registered network callback for live connectivity detection.")
+        } catch (e: Exception) {
+            Log.w(TAG, "Could not register network callback: ${e.message}")
+        }
     }
 
     /**
@@ -118,6 +142,9 @@ class EdrForegroundService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (intent?.action == "com.edr.agent.ACTION_RECONNECT") {
+            reconnectWebSocket()
+        }
         return START_STICKY
     }
 
@@ -166,6 +193,10 @@ class EdrForegroundService : Service() {
     override fun onDestroy() {
         super.onDestroy()
         instance = null
+        try {
+            val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+            networkCallback?.let { cm?.unregisterNetworkCallback(it) }
+        } catch (ignored: Exception) {}
         monitorScheduler.shutdownNow()
         wsClient?.disconnect()
         Log.w(TAG, "EDR Service destroyed — will be restarted by OS (START_STICKY)")

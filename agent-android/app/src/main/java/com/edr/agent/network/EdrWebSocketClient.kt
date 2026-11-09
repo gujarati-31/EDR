@@ -68,6 +68,7 @@ class EdrWebSocketClient(private val context: Context) : WebSocketListener() {
     fun resetDisconnectAndConnect(targetHost: String? = null) {
         isDisconnecting.set(false)
         reconnectAttempt = 0
+        reconnectTask?.cancel(false)
         val hostToTry = targetHost ?: getCandidateHosts().first()
         connect(hostToTry)
     }
@@ -75,6 +76,7 @@ class EdrWebSocketClient(private val context: Context) : WebSocketListener() {
     fun connect(targetHost: String = getCandidateHosts().first()) {
         if (isDisconnecting.get()) return
         try {
+            try { webSocket?.cancel() } catch (ignored: Exception) {}
             currentHostInUse = targetHost
             val port = SyncPreferences.serverPort
             val deviceId = SyncPreferences.deviceId
@@ -376,7 +378,7 @@ class EdrWebSocketClient(private val context: Context) : WebSocketListener() {
         heartbeatTask?.cancel(false)
         reconnectTask?.cancel(false)
 
-        val delaySeconds = minOf(5L * (1L shl minOf(reconnectAttempt, 3)), 60L)
+        val delaySeconds = minOf(3L * (reconnectAttempt + 1), 10L)
         Log.d(TAG, "Reconnecting in ${delaySeconds}s (attempt #${reconnectAttempt + 1})")
 
         reconnectTask = scheduler.schedule({

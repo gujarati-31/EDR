@@ -83,107 +83,56 @@ async function checkDeviceInternetAndWake(
       }
     } catch (err) {}
 
-    // Check B: Are Wi-Fi and Mobile Data both toggled OFF?
-    let mobileData = false;
-    let wifiOn = false;
-    try {
-      const { stdout: netSettings } = await execAsync(
-        `"${adb}" -s ${adbSerial} shell "settings get global mobile_data; settings get global wifi_on"`,
-        { timeout: 3000 }
-      );
-      const parts = netSettings.trim().split(/\s+/);
-      mobileData = parts[0] === '1';
-      wifiOn = parts[1] === '1';
-    } catch (err) {}
-
-    if (!mobileData && !wifiOn) {
-      return {
-        success: false,
-        internetOff: true,
-        errorType: 'INTERNET_OFF',
-        message: 'Phone Internet is completely OFF (Both Wi-Fi and Mobile Data are disabled).',
-      };
-    }
-
-    // Check C: Test real internet reachability and latency via ICMP ping from the phone
-    let isPingSuccessful = false;
-    let avgPingMs = 0;
-    try {
-      const { stdout: pingRes } = await execAsync(
-        `"${adb}" -s ${adbSerial} shell "ping -c 2 -W 2 8.8.8.8"`,
-        { timeout: 5000 }
-      );
-      if (pingRes.includes('bytes from')) {
-        isPingSuccessful = true;
-        const rttMatch = pingRes.match(/min\/avg\/max\/(?:mdev|stddev)\s*=\s*[\d.]+\/([\d.]+)/);
-        if (rttMatch) {
-          avgPingMs = parseFloat(rttMatch[1]);
-        }
-      }
-    } catch (e) {}
-
-    if (!isPingSuccessful) {
-      return {
-        success: false,
-        internetOff: true,
-        errorType: 'INTERNET_OFF',
-        message: 'No Internet Access: Wi-Fi/Data toggle is ON, but phone cannot reach internet servers (no network signal or captive portal).',
-      };
-    }
-
-    // Check D: Is the EDR process running?
+    // Check if the EDR process is running
     let isAppRunning = false;
     try {
       const { stdout: pidOut } = await execAsync(`"${adb}" -s ${adbSerial} shell pidof com.edr.agent`);
       isAppRunning = pidOut.trim().length > 0;
     } catch (e) {}
 
-    // Wake up agent and establish connection
+    // Wake up agent and establish connection immediately (never abort beforehand)
     try {
-      // 1. Ensure USB reverse tunnel is forwarding port 3000
-      await execAsync(`"${adb}" -s ${adbSerial} reverse tcp:3000 tcp:3000`);
+      // 1. Ensure USB reverse tunnel is forwarding port 3000 (best-effort)
+      try { await execAsync(`"${adb}" -s ${adbSerial} reverse tcp:3000 tcp:3000`); } catch (e) {}
       // 2. Broadcast wake-up to EDR Connect Receiver
-      await execAsync(
-        `"${adb}" -s ${adbSerial} shell am broadcast -a com.edr.agent.ACTION_RECONNECT -n com.edr.agent/.receiver.EdrConnectReceiver`
-      );
-      // 3. Ensure foreground service is running
       try {
         await execAsync(
-          `"${adb}" -s ${adbSerial} shell am startforegroundservice -n com.edr.agent/.service.EdrForegroundService`
+          `"${adb}" -s ${adbSerial} shell am broadcast -a com.edr.agent.ACTION_RECONNECT -n com.edr.agent/.receiver.EdrConnectReceiver`
+        );
+      } catch (e) {}
+      // 3. Ensure foreground service is running with ACTION_RECONNECT
+      try {
+        await execAsync(
+          `"${adb}" -s ${adbSerial} shell am startforegroundservice -a com.edr.agent.ACTION_RECONNECT -n com.edr.agent/.service.EdrForegroundService`
         );
       } catch (e1) {
         try {
           await execAsync(
-            `"${adb}" -s ${adbSerial} shell am startservice -n com.edr.agent/.service.EdrForegroundService`
+            `"${adb}" -s ${adbSerial} shell am startservice -a com.edr.agent.ACTION_RECONNECT -n com.edr.agent/.service.EdrForegroundService`
           );
         } catch (e2) {}
       }
       // 4. If app wasn't running, start it
       if (!isAppRunning) {
-        await execAsync(
-          `"${adb}" -s ${adbSerial} shell am start -n com.edr.agent/.ui.MainActivity -f 0x10000000`
-        );
+        try {
+          await execAsync(
+            `"${adb}" -s ${adbSerial} shell am start -n com.edr.agent/.ui.MainActivity -f 0x10000000`
+          );
+        } catch (e) {}
       }
     } catch (e) {}
 
     // Wait up to 8 seconds for WebSocket connection
     const startTime = Date.now();
     while (Date.now() - startTime < 8000) {
-      await new Promise((r) => setTimeout(r, 500));
+      await new Promise((r) => setTimeout(r, 400));
       if (gateway.isDeviceOnline(deviceId)) {
-        if (avgPingMs > 500) {
-          return {
-            success: true,
-            errorType: 'SLOW_INTERNET',
-            message: `${device.deviceName} connected! (Note: Phone internet latency is high: ${Math.round(avgPingMs)}ms)`,
-          };
-        }
         return { success: true, message: `${device.deviceName} connected successfully!` };
       }
     }
 
     // Handshake timed out: inspect logcat for exact diagnostic reason
-    let diagnostic = 'WebSocket handshake timed out.';
+    let diagnostic = 'Device did not complete connection within 8 seconds.';
     let detectedErrorType: 'INTERNET_OFF' | 'SLOW_INTERNET' | 'APP_STOPPED' | 'TIMEOUT' = 'TIMEOUT';
 
     try {
@@ -191,10 +140,10 @@ async function checkDeviceInternetAndWake(
         `"${adb}" -s ${adbSerial} logcat -d -t 30 -s EdrWebSocketClient:V EdrForegroundService:V`
       );
       if (logcat.includes('SocketTimeoutException') || logcat.includes('timeout')) {
-        diagnostic = 'Client internet is too slow: connection attempt timed out during handshake.';
+        diagnostic = 'Connection timed out during handshake (phone internet may be slow).';
         detectedErrorType = 'SLOW_INTERNET';
-      } else if (logcat.includes('UnknownHostException')) {
-        diagnostic = 'DNS resolution failed: phone network cannot resolve central server address.';
+      } else if (logcat.includes('UnknownHostException') || logcat.includes('No address associated')) {
+        diagnostic = 'Phone cannot reach central server. Check phone Wi-Fi or Mobile Data.';
         detectedErrorType = 'INTERNET_OFF';
       } else if (logcat.includes('Connection refused')) {
         diagnostic = 'Connection refused by target server.';
@@ -204,28 +153,25 @@ async function checkDeviceInternetAndWake(
       }
     } catch (e) {}
 
-    if (avgPingMs > 500) {
-      detectedErrorType = 'SLOW_INTERNET';
-      diagnostic = `Client Internet is SLOW (Ping: ${Math.round(avgPingMs)}ms). Handshake could not complete in time.`;
-    } else if (!isAppRunning) {
+    if (!isAppRunning && detectedErrorType === 'TIMEOUT') {
       detectedErrorType = 'APP_STOPPED';
-      diagnostic = 'EDR background service was stopped by OS battery saver. Please open the Device Services app on phone.';
+      diagnostic = 'EDR background service was stopped by OS. Please open Device Services on the phone once.';
     }
 
     return {
       success: false,
       errorType: detectedErrorType,
-      message: `${device.deviceName} failed to connect. ${diagnostic}`,
+      message: `${device.deviceName} failed to connect: ${diagnostic}`,
     };
   }
 
   // Pure network mode: device is not connected via USB ADB (remote cellular / Wi-Fi)
   gateway.broadcastToDashboards('DEVICE_CONNECT_REQUESTED', { deviceId });
 
-  // Wait up to 15 seconds for device background poller (10s cycle) to pick up connection request
+  // Wait up to 10 seconds for device background poller (2.5s cycle) to pick up connection request
   const startTime = Date.now();
-  while (Date.now() - startTime < 15000) {
-    await new Promise((r) => setTimeout(r, 500));
+  while (Date.now() - startTime < 10000) {
+    await new Promise((r) => setTimeout(r, 400));
     if (gateway.isDeviceOnline(deviceId)) {
       return { success: true, message: `${device.deviceName} connected successfully!` };
     }
@@ -236,23 +182,23 @@ async function checkDeviceInternetAndWake(
   const lastBeatTime = new Date(device.lastHeartbeat || 0).getTime();
   const minutesAgo = Math.round((now - lastBeatTime) / 60000);
 
-  let diagMsg = `Connection request dispatched, but ${device.deviceName} did not respond within 15 seconds.`;
+  let diagMsg = `Connect signal dispatched to ${device.deviceName}, waiting for device to respond.`;
   let errorType: 'INTERNET_OFF' | 'SLOW_INTERNET' | 'APP_STOPPED' | 'TIMEOUT' = 'TIMEOUT';
 
   if (device.networkQuality === 'SLOW') {
-    diagMsg = `Client Internet is SLOW: Phone was operating on low bandwidth. Ensure phone has strong Wi-Fi or 4G/5G signal.`;
-    errorType = 'SLOW_INTERNET';
-  } else if (minutesAgo < 5) {
-    diagMsg = `Phone was online recently (${minutesAgo} min ago) but missed the wake-up signal. Internet connection on the phone is likely slow or disconnected.`;
+    diagMsg = `Phone internet connection appears slow. Reconnection signal is active and will auto-connect shortly.`;
     errorType = 'SLOW_INTERNET';
   } else if (minutesAgo > 120) {
     const timeText = minutesAgo > 1440 ? `${Math.round(minutesAgo / 1440)} day(s)` : `${Math.round(minutesAgo / 60)} hour(s)`;
-    diagMsg = `Phone has been offline for ${timeText}. The device is powered off, out of battery, or EDR Agent was stopped.`;
-    errorType = 'INTERNET_OFF';
+    diagMsg = `Phone has been offline for ${timeText}. Open the Device Services app on the phone once or ensure battery optimization is turned OFF.`;
+    errorType = 'APP_STOPPED';
+  } else {
+    diagMsg = `Connect request sent to ${device.deviceName}. Ensure Device Services app is running on the phone (check battery optimization).`;
+    errorType = 'TIMEOUT';
   }
 
   if (device.batteryLevel !== undefined && device.batteryLevel < 10) {
-    diagMsg += ` (Note: Battery was critical at ${device.batteryLevel}%, Android Doze may have killed background sync).`;
+    diagMsg += ` (Note: Battery is low at ${device.batteryLevel}%).`;
   }
 
   return {
