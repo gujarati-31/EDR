@@ -1,5 +1,5 @@
 import React from 'react';
-import { Smartphone, Battery, ShieldCheck, ChevronRight, Cpu } from 'lucide-react';
+import { Smartphone, Battery, ShieldCheck, ChevronRight, Cpu, Activity, Loader2 } from 'lucide-react';
 import { Device } from '../types';
 
 interface DeviceListProps {
@@ -7,12 +7,16 @@ interface DeviceListProps {
   selectedDeviceId: string | null;
   onSelectDevice: (device: Device) => void;
   onRefresh: () => void;
+  onCheckOnline?: (device: Device) => void;
+  checkingDeviceId?: string | null;
 }
 
 export const DeviceList: React.FC<DeviceListProps> = ({
   devices,
   selectedDeviceId,
   onSelectDevice,
+  onCheckOnline,
+  checkingDeviceId,
 }) => {
   return (
     <div className="cyber-card rounded-2xl p-4 transition-all">
@@ -126,6 +130,26 @@ export const DeviceList: React.FC<DeviceListProps> = ({
                   >
                     {isOnline ? (isDirectLive ? 'ONLINE' : 'SYNCING') : 'OFFLINE'}
                   </span>
+
+                  {onCheckOnline && (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onCheckOnline(device);
+                      }}
+                      disabled={checkingDeviceId === device.deviceId}
+                      className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-mono font-bold bg-slate-900 hover:bg-cyan-950/80 text-cyan-300 border border-cyan-500/40 transition-all active:scale-95 disabled:opacity-50"
+                      title="Ping phone live right now to verify whether it is actually online"
+                    >
+                      {checkingDeviceId === device.deviceId ? (
+                        <Loader2 className="w-3 h-3 animate-spin text-cyan-400" />
+                      ) : (
+                        <Activity className="w-3 h-3 text-cyan-400" />
+                      )}
+                      <span>{checkingDeviceId === device.deviceId ? 'PING...' : 'CHECK'}</span>
+                    </button>
+                  )}
 
                   <ChevronRight className={`w-4 h-4 transition-transform ${
                     isSelected ? 'translate-x-0.5 text-cyan-400' : 'text-slate-600'

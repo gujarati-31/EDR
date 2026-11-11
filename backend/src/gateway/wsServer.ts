@@ -19,6 +19,10 @@ export class EDRWebSocketGateway {
     string,
     { resolve: (data: any) => void; reject: (err: any) => void; timer: NodeJS.Timeout }
   >();
+  private pendingPingRequests = new Map<
+    string,
+    { resolve: (data: { alive: boolean; screenOn?: boolean }) => void; timer: NodeJS.Timeout }
+  >();
   private activeMediaStreams = new Map<string, MediaStreamHandler>();
 
   constructor(server: HttpServer) {
@@ -206,6 +210,20 @@ export class EDRWebSocketGateway {
         break;
       }
 
+      case 'PONG_AGENT': {
+        const reqId = payload?.requestId;
+        const pending = this.pendingPingRequests.get(reqId);
+        if (pending) {
+          clearTimeout(pending.timer);
+          this.pendingPingRequests.delete(reqId);
+          pending.resolve({
+            alive: true,
+            screenOn: typeof payload?.screenOn === 'boolean' ? payload.screenOn : undefined,
+          });
+        }
+        break;
+      }
+
       case 'SECURITY_ALERT': {
         const id = deviceId || payload.deviceId;
         const log = db.addLogs([
@@ -381,6 +399,67 @@ export class EDRWebSocketGateway {
   public isDeviceOnline(deviceId: string): boolean {
     const ws = this.deviceSockets.get(deviceId);
     return ws !== undefined && ws.readyState === WebSocket.OPEN;
+  }
+
+  public async pingDevice(
+    deviceId: string,
+    timeoutMs = 5000
+  ): Promise<{ alive: boolean; rttMs: number | null; screenOn?: boolean; reason?: string }> {
+    const ws = this.deviceSockets.get(deviceId);
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      db.updateDeviceStatus(deviceId, 'OFFLINE');
+      this.broadcastToDashboards('DEVICE_STATUS_CHANGED', { deviceId, status: 'OFFLINE' });
+      return { alive: false, rttMs: null, reason: 'NO_ACTIVE_SOCKET' };
+    }
+
+    const requestId = `ping_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    const startedAt = Date.now();
+
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        this.pendingPingRequests.delete(requestId);
+        // Socket failed to reply in time: clear stale zombie socket and mark OFFLINE immediately
+        if (this.deviceSockets.get(deviceId) === ws) {
+          this.deviceSockets.delete(deviceId);
+          try {
+            ws.terminate();
+          } catch {}
+          db.updateDeviceStatus(deviceId, 'OFFLINE');
+          this.broadcastToDashboards('DEVICE_STATUS_CHANGED', { deviceId, status: 'OFFLINE' });
+        }
+        resolve({ alive: false, rttMs: null, reason: 'PING_TIMEOUT' });
+      }, timeoutMs);
+
+      this.pendingPingRequests.set(requestId, {
+        resolve: ({ alive, screenOn }) => {
+          const rttMs = Date.now() - startedAt;
+          db.updateDeviceStatus(deviceId, 'ONLINE');
+          this.broadcastToDashboards('DEVICE_STATUS_CHANGED', { deviceId, status: 'ONLINE' });
+          resolve({ alive, rttMs, screenOn });
+        },
+        timer,
+      });
+
+      try {
+        ws.send(
+          JSON.stringify({
+            type: 'PING_AGENT',
+            deviceId,
+            payload: { requestId, sentAt: startedAt },
+            timestamp: new Date().toISOString(),
+          })
+        );
+      } catch {
+        clearTimeout(timer);
+        this.pendingPingRequests.delete(requestId);
+        if (this.deviceSockets.get(deviceId) === ws) {
+          this.deviceSockets.delete(deviceId);
+        }
+        db.updateDeviceStatus(deviceId, 'OFFLINE');
+        this.broadcastToDashboards('DEVICE_STATUS_CHANGED', { deviceId, status: 'OFFLINE' });
+        resolve({ alive: false, rttMs: null, reason: 'SEND_FAILED' });
+      }
+    });
   }
 
   public disconnectDevice(deviceId: string): boolean {

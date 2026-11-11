@@ -31,6 +31,7 @@ import {
   Cpu,
   FolderOpen,
   Download,
+  Activity,
 } from 'lucide-react';
 import { Device, DevicePolicy, LogEntry } from './types';
 import { api } from './services/api';
@@ -60,6 +61,14 @@ export const App: React.FC = () => {
   } | null>(null);
   const [isConnectingDevice, setIsConnectingDevice] = useState(false);
   const [isDisconnectingDevice, setIsDisconnectingDevice] = useState(false);
+  const [checkingDeviceId, setCheckingDeviceId] = useState<string | null>(null);
+  const [liveCheckResult, setLiveCheckResult] = useState<{
+    deviceId: string;
+    online: boolean;
+    rttMs: number | null;
+    screenOn?: boolean;
+    checkedAt: string;
+  } | null>(null);
   const [isFetchingData, setIsFetchingData] = useState(false);
   const [appsLastUpdated, setAppsLastUpdated] = useState<number>(0);
   const [recordingsLastUpdated, setRecordingsLastUpdated] = useState<number>(0);
@@ -230,6 +239,43 @@ export const App: React.FC = () => {
 
   const onlineCount = devices.filter((d) => d.status === 'ONLINE').length;
 
+  const handleCheckDeviceOnline = useCallback(async (device: Device) => {
+    setCheckingDeviceId(device.deviceId);
+    setConnectionNotice({
+      type: 'info',
+      message: `Pinging ${device.deviceName} live to verify real connection...`,
+    });
+    try {
+      const res = await api.checkDeviceOnline(device.deviceId);
+      setLiveCheckResult({
+        deviceId: device.deviceId,
+        online: res.online,
+        rttMs: res.rttMs,
+        screenOn: res.screenOn,
+        checkedAt: new Date().toLocaleTimeString(),
+      });
+      setSelectedDevice((prev) =>
+        prev && prev.deviceId === device.deviceId
+          ? { ...prev, status: res.status, isLiveConnected: res.online }
+          : prev
+      );
+      await loadDevices();
+      setConnectionNotice({
+        type: res.online ? 'success' : 'error',
+        message: res.message,
+      });
+      setTimeout(() => setConnectionNotice(null), 8000);
+    } catch (err: any) {
+      setConnectionNotice({
+        type: 'error',
+        message: `Live online check failed: ${err.message || 'Server error'}`,
+      });
+      setTimeout(() => setConnectionNotice(null), 8000);
+    } finally {
+      setCheckingDeviceId(null);
+    }
+  }, [loadDevices]);
+
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans">
       <Header
@@ -277,6 +323,8 @@ export const App: React.FC = () => {
           selectedDeviceId={selectedDevice?.deviceId || null}
           onSelectDevice={(d) => setSelectedDevice(d)}
           onRefresh={loadDevices}
+          onCheckOnline={handleCheckDeviceOnline}
+          checkingDeviceId={checkingDeviceId}
         />
 
         {selectedDevice ? (
@@ -308,6 +356,20 @@ export const App: React.FC = () => {
                     }`}>
                       {selectedDevice.status}
                     </span>
+                    {liveCheckResult && liveCheckResult.deviceId === selectedDevice.deviceId && (
+                      <span
+                        className={`text-[10px] px-2.5 py-0.5 rounded-lg font-mono font-bold tracking-wider border ${
+                          liveCheckResult.online
+                            ? 'bg-cyan-950/80 text-cyan-200 border-cyan-500/50'
+                            : 'bg-rose-950/80 text-rose-200 border-rose-500/50'
+                        }`}
+                        title={`Last live ping verified at ${liveCheckResult.checkedAt}`}
+                      >
+                        {liveCheckResult.online
+                          ? `VERIFIED LIVE • ${liveCheckResult.rttMs}ms${liveCheckResult.screenOn === false ? ' • SCREEN OFF' : ''}`
+                          : `UNREACHABLE @ ${liveCheckResult.checkedAt}`}
+                      </span>
+                    )}
                     {selectedDevice.networkQuality === 'SLOW' && (
                       <span className="text-[10px] px-2 py-0.5 rounded-lg font-mono font-bold bg-amber-950/80 text-amber-300 border border-amber-500/50 shadow-[0_0_10px_rgba(245,158,11,0.25)] flex items-center gap-1" title="Client internet bandwidth is low (< 1.5 Mbps)">
                         <Wifi className="w-3 h-3 text-amber-400" />
@@ -350,7 +412,22 @@ export const App: React.FC = () => {
               </div>
 
               {/* Big High-Visibility Command Action Buttons */}
-              <div className="flex items-center gap-3">
+              <div className="flex items-center flex-wrap gap-3">
+                {/* Real Live Reachability Check Button */}
+                <button
+                  onClick={() => handleCheckDeviceOnline(selectedDevice)}
+                  disabled={checkingDeviceId === selectedDevice.deviceId}
+                  className="inline-flex items-center space-x-2 px-4 py-2.5 rounded-xl text-xs font-mono font-bold tracking-wider bg-slate-900 hover:bg-cyan-950 text-cyan-200 border border-cyan-500/50 shadow-[0_0_12px_rgba(6,182,212,0.18)] transition-all active:scale-95 disabled:opacity-50"
+                  title="Send a real live ping to verify if phone is genuinely online before opening Live Screen or Gallery"
+                >
+                  {checkingDeviceId === selectedDevice.deviceId ? (
+                    <Loader2 className="w-4 h-4 text-cyan-400 animate-spin" />
+                  ) : (
+                    <Activity className="w-4 h-4 text-cyan-400" />
+                  )}
+                  <span>{checkingDeviceId === selectedDevice.deviceId ? 'CHECKING...' : 'CHECK ONLINE'}</span>
+                </button>
+
                 {/* Immediate GET DATA Button */}
                 <button
                   onClick={async () => {

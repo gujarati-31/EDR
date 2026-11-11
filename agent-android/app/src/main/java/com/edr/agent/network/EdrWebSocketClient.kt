@@ -208,6 +208,23 @@ class EdrWebSocketClient(private val context: Context) : WebSocketListener() {
                     webSocket.send(gson.toJson(ack))
                 }
 
+                "PING_AGENT" -> {
+                    val reqId = payload["requestId"] as? String ?: ""
+                    val pm = context.getSystemService(Context.POWER_SERVICE) as? android.os.PowerManager
+                    val screenOn = pm?.isInteractive ?: true
+                    val pong = mapOf(
+                        "type" to "PONG_AGENT",
+                        "deviceId" to SyncPreferences.deviceId,
+                        "payload" to mapOf(
+                            "requestId" to reqId,
+                            "screenOn" to screenOn,
+                            "clientTimestamp" to System.currentTimeMillis()
+                        ),
+                        "timestamp" to SyncPreferences.getCurrentIsoTimestamp()
+                    )
+                    webSocket.send(gson.toJson(pong))
+                }
+
                 "FETCH_DEVICE_MEDIA_LIST" -> {
                     val reqId = payload["requestId"] as? String ?: ""
                     val typeFilter = payload["typeFilter"] as? String ?: "ALL"

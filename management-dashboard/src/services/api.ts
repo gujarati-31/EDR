@@ -47,6 +47,26 @@ export const api = {
     };
   },
 
+  async checkDeviceOnline(id: string): Promise<{
+    success: boolean;
+    online: boolean;
+    status: 'ONLINE' | 'OFFLINE';
+    rttMs: number | null;
+    screenOn?: boolean;
+    message: string;
+  }> {
+    const res = await fetch(`${API_BASE}/devices/${id}/ping`, { method: 'POST' });
+    const json = await res.json();
+    return {
+      success: json.success ?? false,
+      online: json.online ?? false,
+      status: json.status || (json.online ? 'ONLINE' : 'OFFLINE'),
+      rttMs: json.rttMs ?? null,
+      screenOn: json.screenOn,
+      message: json.message || '',
+    };
+  },
+
   // Policies
   async getPolicy(deviceId: string): Promise<DevicePolicy> {
     const res = await fetch(`${API_BASE}/policies/${deviceId}`);

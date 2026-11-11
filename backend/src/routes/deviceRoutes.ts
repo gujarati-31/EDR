@@ -840,6 +840,42 @@ export function createDeviceRouter(gateway: EDRWebSocketGateway) {
     res.json({ success: true, message: 'Permissions updated', data: device.permissions });
   });
 
+  // Live reachability verification: actually pings the device over WebSocket and confirms RTT
+  router.post('/:deviceId/ping', async (req, res) => {
+    const { deviceId } = req.params;
+    const device = db.getDeviceById(deviceId);
+    if (!device) {
+      return res.status(404).json({ success: false, message: 'Device not found' });
+    }
+
+    const result = await gateway.pingDevice(device.deviceId, 5000);
+    const updatedDevice = db.getDeviceById(device.deviceId);
+
+    if (result.alive) {
+      const screenLabel =
+        result.screenOn === undefined ? '' : result.screenOn ? ' • Screen ON' : ' • Screen OFF';
+      return res.json({
+        success: true,
+        online: true,
+        status: 'ONLINE',
+        rttMs: result.rttMs,
+        screenOn: result.screenOn,
+        device: updatedDevice,
+        message: `${device.deviceName} is ACTUALLY ONLINE (${result.rttMs} ms${screenLabel})`,
+      });
+    }
+
+    return res.json({
+      success: true,
+      online: false,
+      status: 'OFFLINE',
+      rttMs: null,
+      reason: result.reason,
+      device: updatedDevice,
+      message: `${device.deviceName} is OFFLINE / UNREACHABLE (${result.reason === 'PING_TIMEOUT' ? 'did not answer live ping within 5s' : 'no active phone connection'})`,
+    });
+  });
+
   return router;
 }
 
