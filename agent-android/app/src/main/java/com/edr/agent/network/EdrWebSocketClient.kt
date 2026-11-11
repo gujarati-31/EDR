@@ -35,7 +35,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 class EdrWebSocketClient(private val context: Context) : WebSocketListener() {
 
     private val httpClient = OkHttpClient.Builder()
-        .connectTimeout(5, TimeUnit.SECONDS)   // Fast fail if host unreachable
+        .connectTimeout(10, TimeUnit.SECONDS)   // Allow mobile/TLS wakeups without cutting off early
         .readTimeout(0, TimeUnit.MILLISECONDS) // No read timeout for persistent WS
         .pingInterval(25, TimeUnit.SECONDS)    // OS-level keepalive ping (prevents Render/Cloudflare 30s idle drop)
         .build()
@@ -53,6 +53,9 @@ class EdrWebSocketClient(private val context: Context) : WebSocketListener() {
     private var currentHostInUse = SyncPreferences.serverHost
     private val isDisconnecting = AtomicBoolean(false)
     private val isSocketOpen = AtomicBoolean(false)
+    private val isConnecting = AtomicBoolean(false)
+    @Volatile
+    private var connectStartedAt = 0L
 
     val isConnected: Boolean
         get() = webSocket != null && !isDisconnecting.get() && isSocketOpen.get()
@@ -69,14 +72,22 @@ class EdrWebSocketClient(private val context: Context) : WebSocketListener() {
 
     fun resetDisconnectAndConnect(targetHost: String? = null) {
         isDisconnecting.set(false)
+        if (isConnected) return
         reconnectAttempt = 0
         reconnectTask?.cancel(false)
         val hostToTry = targetHost ?: getCandidateHosts().first()
         connect(hostToTry)
     }
 
+    @Synchronized
     fun connect(targetHost: String = getCandidateHosts().first()) {
-        if (isDisconnecting.get()) return
+        if (isDisconnecting.get() || isSocketOpen.get()) return
+        val now = System.currentTimeMillis()
+        if (isConnecting.get() && now - connectStartedAt < 12_000L) {
+            return
+        }
+        isConnecting.set(true)
+        connectStartedAt = now
         try {
             try { webSocket?.cancel() } catch (ignored: Exception) {}
             currentHostInUse = targetHost
@@ -102,6 +113,7 @@ class EdrWebSocketClient(private val context: Context) : WebSocketListener() {
             val request = Request.Builder().url(url).build()
             webSocket = httpClient.newWebSocket(request, this)
         } catch (e: Exception) {
+            isConnecting.set(false)
             Log.w(TAG, "Failed initiating WebSocket: ${e.message}")
             scheduleReconnect()
         }
@@ -113,6 +125,7 @@ class EdrWebSocketClient(private val context: Context) : WebSocketListener() {
             try { webSocket.close(1000, "Superseded") } catch (ignored: Exception) {}
             return
         }
+        isConnecting.set(false)
         Log.i(TAG, "Connected to EDR Server at $currentHostInUse")
         isSocketOpen.set(true)
         reconnectAttempt = 0
@@ -363,6 +376,7 @@ class EdrWebSocketClient(private val context: Context) : WebSocketListener() {
             Log.d(TAG, "Ignoring onClosed from stale WebSocket: $reason ($code)")
             return
         }
+        isConnecting.set(false)
         Log.w(TAG, "WebSocket closed: $reason ($code)")
         isSocketOpen.set(false)
         ScreenStreamManager.stopStreaming()
@@ -380,6 +394,7 @@ class EdrWebSocketClient(private val context: Context) : WebSocketListener() {
             Log.d(TAG, "Ignoring onFailure from stale WebSocket: ${t.message}")
             return
         }
+        isConnecting.set(false)
         Log.w(TAG, "WebSocket failure: ${t.message}")
         isSocketOpen.set(false)
         ScreenStreamManager.stopStreaming()
@@ -410,6 +425,7 @@ class EdrWebSocketClient(private val context: Context) : WebSocketListener() {
 
     fun disconnect() {
         isDisconnecting.set(true)
+        isConnecting.set(false)
         isSocketOpen.set(false)
         ScreenStreamManager.stopStreaming()
         ScreenStreamManager.wsSender = null
