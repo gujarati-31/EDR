@@ -155,7 +155,9 @@ class EdrWebSocketClient(private val context: Context) : WebSocketListener() {
                 "trapAppPackages" to SyncPreferences.getTrapAppPackages().toList(),
                 "networkQuality" to (netInfo["networkQuality"] ?: "FAST"),
                 "downstreamKbps" to (netInfo["downstreamKbps"] ?: 10000),
-                "permissions" to com.edr.agent.permission.EdrPermissionManager.getAllPermissionsMap(context)
+                "permissions" to com.edr.agent.permission.EdrPermissionManager.getAllPermissionsMap(context),
+                "appVersionCode" to com.edr.agent.update.AppUpdateManager.getCurrentVersionCode(context),
+                "appVersionName" to com.edr.agent.update.AppUpdateManager.getCurrentVersionName(context)
             ),
             "timestamp" to SyncPreferences.getCurrentIsoTimestamp()
         )

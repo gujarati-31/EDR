@@ -1,11 +1,12 @@
 import React from 'react';
-import { Shield, ShieldAlert, WifiOff } from 'lucide-react';
+import { Shield, ShieldAlert, WifiOff, UploadCloud } from 'lucide-react';
 
 interface HeaderProps {
   wsConnected: boolean;
   onlineCount: number;
   totalCount: number;
   criticalCount: number;
+  onOpenOtaModal?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -13,6 +14,7 @@ export const Header: React.FC<HeaderProps> = ({
   onlineCount,
   totalCount,
   criticalCount,
+  onOpenOtaModal,
 }) => {
   return (
     <header className="bg-slate-950/90 backdrop-blur-md border-b border-cyan-900/30 px-6 py-3.5 sticky top-0 z-50 shadow-[0_4px_30px_rgba(0,0,0,0.5)]">
@@ -80,6 +82,17 @@ export const Header: React.FC<HeaderProps> = ({
             <ShieldAlert className={`w-3.5 h-3.5 ${criticalCount > 0 ? 'text-rose-400' : 'text-slate-500'}`} />
             <span>{criticalCount} ALERTS</span>
           </div>
+
+          {onOpenOtaModal && (
+            <button
+              onClick={onOpenOtaModal}
+              className="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg bg-cyan-950/70 hover:bg-cyan-900 border border-cyan-500/40 text-cyan-200 text-xs font-mono font-bold transition-all active:scale-95"
+              title="Upload new EDR APK release and push OTA updates to phones"
+            >
+              <UploadCloud className="w-3.5 h-3.5 text-cyan-400" />
+              <span>OTA APK</span>
+            </button>
+          )}
         </div>
       </div>
     </header>

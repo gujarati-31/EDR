@@ -13,6 +13,7 @@ import {
   Bell,
   Lock,
   Layers,
+  PackagePlus,
 } from 'lucide-react';
 import { DevicePermissions } from '../types';
 
@@ -90,6 +91,18 @@ export const DevicePermissionsViewer: React.FC<DevicePermissionsViewerProps> = (
       isGranted: permissions?.overlay ?? false,
       isCritical: false,
     },
+    ...(permissions?.installPackages !== undefined
+      ? [
+          {
+            key: 'installPackages',
+            name: 'Install Unknown Apps (OTA Updates)',
+            description: 'Enables remote APK self-updates pushed from the admin dashboard',
+            icon: PackagePlus,
+            isGranted: permissions.installPackages,
+            isCritical: false,
+          },
+        ]
+      : []),
   ];
 
   const grantedCount = permList.filter((p) => p.isGranted).length;

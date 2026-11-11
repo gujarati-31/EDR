@@ -10,6 +10,7 @@ import {
   InstalledApp,
   IntruderPhoto,
   RecordedVideo,
+  AppRelease,
 } from '../types/index.js';
 
 interface DatabaseSchema {
@@ -21,6 +22,8 @@ interface DatabaseSchema {
   installedApps: InstalledApp[];
   photos: IntruderPhoto[];
   recordings: RecordedVideo[];
+  latestRelease?: AppRelease;
+  releases?: AppRelease[];
 }
 
 const DATA_DIR = path.resolve(process.cwd(), 'data');
@@ -36,6 +39,7 @@ class Database {
     installedApps: [],
     photos: [],
     recordings: [],
+    releases: [],
   };
 
   constructor() {
@@ -380,6 +384,29 @@ class Database {
       return true;
     }
     return false;
+  }
+
+  // OTA Agent Releases
+  saveRelease(release: Omit<AppRelease, 'id' | 'uploadedAt'>): AppRelease {
+    const record: AppRelease = {
+      id: crypto.randomUUID(),
+      ...release,
+      uploadedAt: new Date().toISOString(),
+    };
+    if (!this.data.releases) this.data.releases = [];
+    this.data.releases.unshift(record);
+    this.data.releases = this.data.releases.slice(0, 15);
+    this.data.latestRelease = record;
+    this.save();
+    return record;
+  }
+
+  getLatestRelease(): AppRelease | null {
+    return this.data.latestRelease || null;
+  }
+
+  getReleases(): AppRelease[] {
+    return this.data.releases || [];
   }
 }
 

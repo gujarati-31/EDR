@@ -9,6 +9,7 @@ export interface DevicePermissions {
   notifications: boolean;
   deviceAdmin: boolean;
   overlay: boolean;
+  installPackages?: boolean;
 }
 
 export interface Device {
@@ -26,6 +27,8 @@ export interface Device {
   networkQuality?: 'FAST' | 'MODERATE' | 'SLOW';
   downstreamKbps?: number;
   permissions?: DevicePermissions;
+  appVersionCode?: number;
+  appVersionName?: string;
 }
 
 export interface DevicePolicy {
@@ -59,7 +62,20 @@ export type CommandType =
   | 'ISOLATE_NETWORK'
   | 'RECONNECT_NETWORK'
   | 'DISCONNECT_DEVICE'
-  | 'CONNECT_DEVICE';
+  | 'CONNECT_DEVICE'
+  | 'UPDATE_AGENT';
+
+export interface AppRelease {
+  id: string;
+  versionCode: number;
+  versionName: string;
+  filename: string;
+  fileSize: number;
+  sha256: string;
+  releaseNotes: string;
+  downloadUrl: string;
+  uploadedAt: string;
+}
 
 export interface IntruderPhoto {
   id: string;

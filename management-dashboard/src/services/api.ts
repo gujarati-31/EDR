@@ -1,4 +1,4 @@
-import { Device, DevicePolicy, Command, LogEntry, AppUsage, InstalledApp, CommandType, IntruderPhoto, RecordedVideo } from '../types';
+import { Device, DevicePolicy, Command, LogEntry, AppUsage, InstalledApp, CommandType, IntruderPhoto, RecordedVideo, AppRelease } from '../types';
 
 const API_BASE = '/api';
 
@@ -65,6 +65,46 @@ export const api = {
       screenOn: json.screenOn,
       message: json.message || '',
     };
+  },
+
+  // OTA Agent Updates
+  async getLatestRelease(): Promise<AppRelease | null> {
+    const res = await fetch(`${API_BASE}/updates/latest`);
+    const json = await res.json();
+    return json.data || null;
+  },
+
+  async uploadAgentRelease(
+    file: File,
+    versionCode: number,
+    versionName: string,
+    releaseNotes: string,
+    pushToAll: boolean
+  ): Promise<{ success: boolean; message: string; data?: AppRelease; pushedCount?: number }> {
+    const form = new FormData();
+    form.append('apk', file);
+    form.append('versionCode', String(versionCode));
+    form.append('versionName', versionName);
+    form.append('releaseNotes', releaseNotes);
+    form.append('pushToAll', String(pushToAll));
+
+    const res = await fetch(`${API_BASE}/updates`, {
+      method: 'POST',
+      body: form,
+    });
+    return await res.json();
+  },
+
+  async pushAgentUpdate(
+    deviceId: string,
+    force = false
+  ): Promise<{ success: boolean; message: string; dispatched?: boolean; sentCount?: number }> {
+    const res = await fetch(`${API_BASE}/updates/push/${deviceId}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ force }),
+    });
+    return await res.json();
   },
 
   // Policies

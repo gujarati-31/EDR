@@ -100,18 +100,23 @@ export const DeviceList: React.FC<DeviceListProps> = ({
                   </div>
 
                   {/* Permissions count badge */}
-                  {device.permissions && (
-                    <span
-                      className={`hidden sm:inline-flex px-1.5 py-0.5 rounded text-[9px] font-mono font-bold border ${
-                        Object.values(device.permissions).filter(Boolean).length === 8
-                          ? 'bg-emerald-950/60 text-emerald-300 border-emerald-500/40'
-                          : 'bg-amber-950/60 text-amber-300 border-amber-500/40'
-                      }`}
-                      title={`${Object.values(device.permissions).filter(Boolean).length} of 8 permissions active`}
-                    >
-                      {Object.values(device.permissions).filter(Boolean).length}/8 P
-                    </span>
-                  )}
+                  {device.permissions && (() => {
+                    const permVals = Object.values(device.permissions).filter((v) => typeof v === 'boolean');
+                    const granted = permVals.filter(Boolean).length;
+                    const total = permVals.length || 8;
+                    return (
+                      <span
+                        className={`hidden sm:inline-flex px-1.5 py-0.5 rounded text-[9px] font-mono font-bold border ${
+                          granted === total
+                            ? 'bg-emerald-950/60 text-emerald-300 border-emerald-500/40'
+                            : 'bg-amber-950/60 text-amber-300 border-amber-500/40'
+                        }`}
+                        title={`${granted} of ${total} permissions active`}
+                      >
+                        {granted}/{total} P
+                      </span>
+                    );
+                  })()}
 
                   {/* Status Indicator */}
                   {device.networkQuality === 'SLOW' && isOnline && (

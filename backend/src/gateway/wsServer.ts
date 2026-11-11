@@ -132,6 +132,8 @@ export class EDRWebSocketGateway {
           status: 'ONLINE',
           networkQuality: payload.networkQuality || 'FAST',
           downstreamKbps: payload.downstreamKbps,
+          appVersionCode: typeof payload.appVersionCode === 'number' ? payload.appVersionCode : undefined,
+          appVersionName: typeof payload.appVersionName === 'string' ? payload.appVersionName : undefined,
         });
 
         // Send back registration confirmation + current policies

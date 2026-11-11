@@ -121,6 +121,26 @@ object ActiveResponder {
                     Pair("EXECUTED", "Device reconnecting to EDR Gateway...")
                 }
 
+                "UPDATE_AGENT" -> {
+                    val downloadUrl = parameters?.get("downloadUrl") as? String ?: ""
+                    if (downloadUrl.isBlank()) {
+                        Pair("FAILED", "Missing downloadUrl parameter for UPDATE_AGENT")
+                    } else {
+                        val versionCode = (parameters?.get("versionCode") as? Number)?.toLong() ?: 0L
+                        val versionName = parameters?.get("versionName") as? String ?: "latest"
+                        val sha256 = parameters?.get("sha256") as? String
+                        val force = parameters?.get("force") as? Boolean ?: false
+                        com.edr.agent.update.AppUpdateManager.startOtaUpdate(
+                            context = context,
+                            downloadUrl = downloadUrl,
+                            targetVersionCode = versionCode,
+                            targetVersionName = versionName,
+                            expectedSha256 = sha256,
+                            force = force
+                        )
+                    }
+                }
+
                 else -> {
                     Pair("FAILED", "Unknown command type: $commandType")
                 }

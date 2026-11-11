@@ -132,8 +132,20 @@ object EdrPermissionManager {
         }
     }
 
+    fun isInstallPackagesGranted(context: Context): Boolean {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            try {
+                context.packageManager.canRequestPackageInstalls()
+            } catch (_: Exception) {
+                false
+            }
+        } else {
+            true
+        }
+    }
+
     /**
-     * Returns full status map of all 8 system permissions (true = turned on, false = turned off).
+     * Returns full status map of system permissions (true = turned on, false = turned off).
      */
     fun getAllPermissionsMap(context: Context): Map<String, Boolean> {
         return mapOf(
@@ -144,7 +156,8 @@ object EdrPermissionManager {
             "camera" to isCameraGranted(context),
             "notifications" to isNotificationsGranted(context),
             "deviceAdmin" to isDeviceAdminGranted(context),
-            "overlay" to isOverlayGranted(context)
+            "overlay" to isOverlayGranted(context),
+            "installPackages" to isInstallPackagesGranted(context)
         )
     }
 
@@ -207,6 +220,13 @@ object EdrPermissionManager {
                 title = "Display Over Other Apps",
                 description = "Allows live screen mirror projection and transparent protection dialogs.",
                 isGranted = isOverlayGranted(context),
+                isCritical = false
+            ),
+            PermissionItem(
+                key = "installPackages",
+                title = "Install Unknown Apps (OTA Updates)",
+                description = "Allows remote EDR agent updates pushed from the management dashboard.",
+                isGranted = isInstallPackagesGranted(context),
                 isCritical = false
             )
         )
@@ -285,6 +305,15 @@ object EdrPermissionManager {
             "overlay" -> {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                     Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION).apply {
+                        data = Uri.parse("package:$pkg")
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    }
+                } else null
+            }
+
+            "installPackages" -> {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES).apply {
                         data = Uri.parse("package:$pkg")
                         addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                     }

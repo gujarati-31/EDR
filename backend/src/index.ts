@@ -12,6 +12,7 @@ import { createCommandRouter } from './routes/commandRoutes.js';
 import { createLogRouter } from './routes/logRoutes.js';
 import { createUsageRouter } from './routes/usageRoutes.js';
 import { createLogoRouter } from './routes/logoRoutes.js';
+import { createUpdateRouter } from './routes/updateRoutes.js';
 
 dotenv.config();
 
@@ -67,6 +68,7 @@ app.use('/api/commands', createCommandRouter(wsGateway));
 app.use('/api/logs', createLogRouter(wsGateway));
 app.use('/api/usage', createUsageRouter(wsGateway));
 app.use('/api/logos', createLogoRouter());
+app.use('/api/updates', createUpdateRouter(wsGateway));
 
 // Health Check
 app.get('/api/health', (req, res) => {
