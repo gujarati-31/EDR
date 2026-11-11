@@ -39,10 +39,50 @@ export function createUpdateRouter(gateway: EDRWebSocketGateway) {
     },
   });
 
+  const DEFAULT_RELEASE_CHECKSUM = 'ax7KU6-Ih_42hDN-pREz3SazcvRF5qQmOR2Dxug-41E';
+
   // Get latest uploaded agent release metadata
   router.get('/latest', (_req, res) => {
     const latest = db.getLatestRelease();
     res.json({ success: true, data: latest });
+  });
+
+  // Generate Android Enterprise Device Owner QR JSON payload for zero-tap phone provisioning
+  router.get('/provisioning-qr', (req, res) => {
+    const latest = db.getLatestRelease();
+    const proto = (req.headers['x-forwarded-proto'] as string)?.split(',')[0]?.trim() || req.protocol || 'https';
+    const host = (req.headers['x-forwarded-host'] as string) || req.get('host') || 'phone-edr-central.onrender.com';
+    const baseOverride = typeof req.query.serverUrl === 'string' && req.query.serverUrl.trim()
+      ? req.query.serverUrl.trim().replace(/\/+$/, '')
+      : `${proto}://${host}`;
+
+    const checksumOverride = typeof req.query.checksum === 'string' && req.query.checksum.trim()
+      ? req.query.checksum.trim()
+      : undefined;
+
+    const downloadLocation = latest
+      ? (latest.downloadUrl.startsWith('http') ? latest.downloadUrl : `${baseOverride}${latest.downloadUrl}`)
+      : `${baseOverride}/api/updates/download/app-release.apk`;
+
+    const signatureChecksum = checksumOverride || latest?.signatureChecksum || DEFAULT_RELEASE_CHECKSUM;
+
+    const qrPayload = {
+      'android.app.extra.PROVISIONING_DEVICE_ADMIN_COMPONENT_NAME':
+        'com.edr.agent/.admin.EdrDeviceAdminReceiver',
+      'android.app.extra.PROVISIONING_DEVICE_ADMIN_SIGNATURE_CHECKSUM': signatureChecksum,
+      'android.app.extra.PROVISIONING_DEVICE_ADMIN_PACKAGE_DOWNLOAD_LOCATION': downloadLocation,
+      'android.app.extra.PROVISIONING_SKIP_ENCRYPTION': false,
+      'android.app.extra.PROVISIONING_LEAVE_ALL_SYSTEM_APPS_ENABLED': true,
+    };
+
+    res.json({
+      success: true,
+      hasApk: Boolean(latest),
+      latestRelease: latest,
+      signatureChecksum,
+      qrPayload,
+      qrString: JSON.stringify(qrPayload),
+    });
   });
 
   // Get release upload history
@@ -59,6 +99,7 @@ export function createUpdateRouter(gateway: EDRWebSocketGateway) {
     const versionCode = parseInt(String(req.body.versionCode || '0'), 10);
     const versionName = String(req.body.versionName || '').trim();
     const releaseNotes = String(req.body.releaseNotes || '').trim();
+    const signatureChecksum = String(req.body.signatureChecksum || '').trim() || DEFAULT_RELEASE_CHECKSUM;
     const pushToAll = String(req.body.pushToAll || 'false') === 'true';
 
     if (!versionCode || versionCode < 1 || !versionName) {
@@ -78,6 +119,7 @@ export function createUpdateRouter(gateway: EDRWebSocketGateway) {
       filename: req.file.filename,
       fileSize: req.file.size,
       sha256,
+      signatureChecksum,
       releaseNotes: releaseNotes || `Agent release v${versionName}`,
       downloadUrl: `/api/updates/download/${encodeURIComponent(req.file.filename)}`,
     });

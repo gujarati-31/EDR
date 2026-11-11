@@ -73,9 +73,19 @@ export interface AppRelease {
   filename: string;
   fileSize: number;
   sha256: string;
+  signatureChecksum?: string;
   releaseNotes: string;
   downloadUrl: string;
   uploadedAt: string;
+}
+
+export interface ProvisioningQrData {
+  success: boolean;
+  hasApk: boolean;
+  latestRelease: AppRelease | null;
+  signatureChecksum: string;
+  qrPayload: Record<string, any>;
+  qrString: string;
 }
 
 export interface IntruderPhoto {

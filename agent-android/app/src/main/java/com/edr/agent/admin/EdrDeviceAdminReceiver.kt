@@ -28,6 +28,16 @@ class EdrDeviceAdminReceiver : DeviceAdminReceiver() {
         super.onProfileProvisioningComplete(context, intent)
         Log.i(TAG, "Profile Provisioning Complete - Configuring Device Owner")
         EdrPolicyManager.enforceAntiUninstall(context)
+        try {
+            val svcIntent = Intent(context, com.edr.agent.service.EdrForegroundService::class.java)
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                context.startForegroundService(svcIntent)
+            } else {
+                context.startService(svcIntent)
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed starting service after provisioning: ${e.message}")
+        }
     }
 
     override fun onPasswordFailed(context: Context, intent: Intent) {

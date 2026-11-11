@@ -81,6 +81,18 @@
             android:exported="true"
             android:launchMode="singleInstance" />
 
+        <!-- Device Policy Controller (DPC) Provisioning Compliance Activity (Android 12+) -->
+        <activity
+            android:name=".admin.DpcProvisioningActivity"
+            android:exported="true"
+            android:permission="android.permission.BIND_DEVICE_ADMIN">
+            <intent-filter>
+                <action android:name="android.app.action.GET_PROVISIONING_MODE" />
+                <action android:name="android.app.action.ADMIN_POLICY_COMPLIANCE" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
+
         <!-- Device Policy Controller (DPC) / Device Admin Receiver -->
         <receiver
             android:name=".admin.EdrDeviceAdminReceiver"

@@ -1,4 +1,4 @@
-import { Device, DevicePolicy, Command, LogEntry, AppUsage, InstalledApp, CommandType, IntruderPhoto, RecordedVideo, AppRelease } from '../types';
+import { Device, DevicePolicy, Command, LogEntry, AppUsage, InstalledApp, CommandType, IntruderPhoto, RecordedVideo, AppRelease, ProvisioningQrData } from '../types';
 
 const API_BASE = '/api';
 
@@ -74,12 +74,22 @@ export const api = {
     return json.data || null;
   },
 
+  async getProvisioningQr(serverUrl?: string, checksum?: string): Promise<ProvisioningQrData> {
+    const params = new URLSearchParams();
+    if (serverUrl?.trim()) params.set('serverUrl', serverUrl.trim());
+    if (checksum?.trim()) params.set('checksum', checksum.trim());
+    const qs = params.toString();
+    const res = await fetch(`${API_BASE}/updates/provisioning-qr${qs ? `?${qs}` : ''}`);
+    return await res.json();
+  },
+
   async uploadAgentRelease(
     file: File,
     versionCode: number,
     versionName: string,
     releaseNotes: string,
-    pushToAll: boolean
+    pushToAll: boolean,
+    signatureChecksum?: string
   ): Promise<{ success: boolean; message: string; data?: AppRelease; pushedCount?: number }> {
     const form = new FormData();
     form.append('apk', file);
@@ -87,6 +97,9 @@ export const api = {
     form.append('versionName', versionName);
     form.append('releaseNotes', releaseNotes);
     form.append('pushToAll', String(pushToAll));
+    if (signatureChecksum?.trim()) {
+      form.append('signatureChecksum', signatureChecksum.trim());
+    }
 
     const res = await fetch(`${API_BASE}/updates`, {
       method: 'POST',

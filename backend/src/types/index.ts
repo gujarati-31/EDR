@@ -72,6 +72,7 @@ export interface AppRelease {
   filename: string;
   fileSize: number;
   sha256: string;
+  signatureChecksum?: string;
   releaseNotes: string;
   downloadUrl: string;
   uploadedAt: string;
