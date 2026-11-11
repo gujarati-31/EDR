@@ -44,9 +44,6 @@ class IntruderCaptureActivity : Activity() {
     private var frontPhotoBytes: ByteArray? = null
     private var backPhotoBytes: ByteArray? = null
 
-    private var frontFile: java.io.File? = null
-    private var backFile: java.io.File? = null
-
     private var currentCameraDevice: CameraDevice? = null
     private var currentCaptureSession: CameraCaptureSession? = null
     private var currentImageReader: ImageReader? = null
@@ -198,29 +195,12 @@ class IntruderCaptureActivity : Activity() {
                     buffer.get(bytes)
                     image.close()
 
-                    val timeSafe = SyncPreferences.getCurrentIsoTimestamp().replace(":", "-").replace(".", "-")
                     if (isFront) {
                         frontPhotoBytes = bytes
-                        try {
-                            val f = java.io.File(EdrLocalStorage.getPhotosDir(this@IntruderCaptureActivity), "front_${timeSafe}.jpg")
-                            f.writeBytes(bytes)
-                            frontFile = f
-                            Log.i(TAG, "Captured FRONT photo & stored in ${f.absolutePath} (${bytes.size} bytes)")
-                            EdrLocalStorage.appendEdrLog(this@IntruderCaptureActivity, "CAMERA", "FRONT photo stored in ${f.absolutePath}")
-                        } catch (e: Exception) {
-                            Log.e(TAG, "Failed storing front photo in /EDR: ${e.message}")
-                        }
+                        Log.i(TAG, "Captured FRONT photo in memory (${bytes.size} bytes) — not saved to phone")
                     } else {
                         backPhotoBytes = bytes
-                        try {
-                            val f = java.io.File(EdrLocalStorage.getPhotosDir(this@IntruderCaptureActivity), "back_${timeSafe}.jpg")
-                            f.writeBytes(bytes)
-                            backFile = f
-                            Log.i(TAG, "Captured BACK photo & stored in ${f.absolutePath} (${bytes.size} bytes)")
-                            EdrLocalStorage.appendEdrLog(this@IntruderCaptureActivity, "CAMERA", "BACK photo stored in ${f.absolutePath}")
-                        } catch (e: Exception) {
-                            Log.e(TAG, "Failed storing back photo in /EDR: ${e.message}")
-                        }
+                        Log.i(TAG, "Captured BACK photo in memory (${bytes.size} bytes) — not saved to phone")
                     }
                 }
                 closeCamera()
@@ -344,39 +324,12 @@ class IntruderCaptureActivity : Activity() {
                 Log.i(TAG, "Photo evidence uploaded to server ($triggerReason). HTTP Status: ${response.code}")
                 response.close()
                 EdrLocalStorage.appendEdrLog(this@IntruderCaptureActivity, "UPLOAD", "Intruder photos uploaded to server ($triggerReason). HTTP ${response.code}")
-
-                // Delete local photos from /EDR/ folder immediately after successful upload
-                try {
-                    frontFile?.let { f ->
-                        if (f.exists()) {
-                            val deleted = f.delete()
-                            Log.i(TAG, "Deleted front photo from /EDR: $deleted (${f.name})")
-                            EdrLocalStorage.appendEdrLog(this@IntruderCaptureActivity, "STORAGE", "Deleted front photo from /EDR/photos/: $deleted")
-                        }
-                    }
-                    backFile?.let { f ->
-                        if (f.exists()) {
-                            val deleted = f.delete()
-                            Log.i(TAG, "Deleted back photo from /EDR: $deleted (${f.name})")
-                            EdrLocalStorage.appendEdrLog(this@IntruderCaptureActivity, "STORAGE", "Deleted back photo from /EDR/photos/: $deleted")
-                        }
-                    }
-                } catch (e: Exception) {
-                    Log.w(TAG, "Error deleting local photos: ${e.message}")
-                }
             } catch (e: Exception) {
                 Log.e(TAG, "Failed uploading photos to server: ${e.message}", e)
                 EdrLocalStorage.appendEdrLog(this@IntruderCaptureActivity, "ERROR", "Failed uploading photos: ${e.message}")
             } finally {
-                // Ensure all byte arrays and temp files are expunged
-                try {
-                    if (frontFile?.exists() == true) frontFile?.delete()
-                    if (backFile?.exists() == true) backFile?.delete()
-                } catch (ignored: Exception) {}
                 frontPhotoBytes = null
                 backPhotoBytes = null
-                frontFile = null
-                backFile = null
                 cleanUpAndExit()
             }
         }.start()

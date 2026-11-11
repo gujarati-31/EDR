@@ -494,19 +494,11 @@ object ScreenStreamManager {
             }
 
             Thread {
-                var proofFile: File? = null
                 try {
                     val bos = ByteArrayOutputStream()
                     bitmap.compress(Bitmap.CompressFormat.JPEG, 85, bos)
                     val bytes = bos.toByteArray()
                     bitmap.recycle()
-
-                    // Save temp file in /EDR/photos/
-                    val photosDir = EdrLocalStorage.getPhotosDir(context)
-                    val filename = "screen_proof_${System.currentTimeMillis()}.jpg"
-                    proofFile = File(photosDir, filename)
-                    proofFile.writeBytes(bytes)
-                    EdrLocalStorage.appendEdrLog(context, "PROOF", "Captured screen proof snapshot: $filename")
 
                     val base64 = Base64.encodeToString(bytes, Base64.NO_WRAP)
                     val payload = mapOf(
@@ -522,18 +514,17 @@ object ScreenStreamManager {
 
                     val response = httpClient.newCall(request).execute()
                     val ok = response.isSuccessful
+                    val code = response.code
                     response.close()
 
                     if (ok) {
-                        Log.i(TAG, "Proof snapshot successfully uploaded to server")
-                        proofFile.delete()
-                        callback(true, "Proof snapshot saved and uploaded to server.")
+                        Log.i(TAG, "Proof snapshot successfully uploaded to server (memory-only)")
+                        callback(true, "Proof snapshot uploaded to server.")
                     } else {
-                        callback(false, "Server rejected snapshot: HTTP ${response.code}")
+                        callback(false, "Server rejected snapshot: HTTP $code")
                     }
                 } catch (e: Exception) {
-                    Log.e(TAG, "Error saving proof snapshot: ${e.message}", e)
-                    proofFile?.delete()
+                    Log.e(TAG, "Error uploading proof snapshot: ${e.message}", e)
                     callback(false, "Snapshot error: ${e.message}")
                 }
             }.start()
