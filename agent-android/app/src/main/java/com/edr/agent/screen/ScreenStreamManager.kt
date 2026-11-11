@@ -135,13 +135,16 @@ object ScreenStreamManager {
 
         // Broadcast stream started status
         val targetFps = if (mediaProjection != null) 15.0 else 2.5
+        val pm = context.getSystemService(Context.POWER_SERVICE) as? android.os.PowerManager
+        val screenOn = pm?.isInteractive ?: true
         val startMsg = gson.toJson(
             mapOf(
                 "type" to "SCREEN_STREAM_STATUS",
                 "deviceId" to SyncPreferences.deviceId,
                 "payload" to mapOf(
                     "active" to true,
-                    "targetFps" to targetFps
+                    "targetFps" to targetFps,
+                    "screenOn" to screenOn
                 )
             )
         )
@@ -180,10 +183,15 @@ object ScreenStreamManager {
                 override fun onStop() {
                     Log.i(TAG, "MediaProjection stopped by system.")
                     EdrLocalStorage.appendEdrLog(context, "STREAM", "MediaProjection stopped by system.")
-                    virtualDisplay?.release()
+                    try {
+                        virtualDisplay?.release()
+                    } catch (ignored: Exception) {}
                     virtualDisplay = null
-                    imageReader?.close()
+                    try {
+                        imageReader?.close()
+                    } catch (ignored: Exception) {}
                     imageReader = null
+                    mediaProjection = null
                 }
             }, backgroundHandler)
 
@@ -296,7 +304,18 @@ object ScreenStreamManager {
         } catch (e: Exception) {
             Log.e(TAG, "Failed creating VirtualDisplay: ${e.message}", e)
             EdrLocalStorage.appendEdrLog(context, "STREAM_ERR", "Failed creating VirtualDisplay: ${e.message}")
-            startAccessibilityFallbackLoop(context)
+            try { virtualDisplay?.release() } catch (ignored: Exception) {}
+            virtualDisplay = null
+            try { imageReader?.close() } catch (ignored: Exception) {}
+            imageReader = null
+            try { mediaProjection?.stop() } catch (ignored: Exception) {}
+            mediaProjection = null
+            if (isStreaming.get()) {
+                try {
+                    MediaProjectionCaptureActivity.launch(context)
+                } catch (ignored: Exception) {}
+                startAccessibilityFallbackLoop(context)
+            }
         }
     }
 
@@ -410,8 +429,11 @@ object ScreenStreamManager {
             virtualDisplay = null
             imageReader?.close()
             imageReader = null
+            mediaProjection?.stop()
+            mediaProjection = null
         } catch (e: Exception) {
             Log.e(TAG, "Error releasing virtual display: ${e.message}")
+            mediaProjection = null
         }
 
         val stopMsg = gson.toJson(

@@ -3,6 +3,8 @@ package com.edr.agent.monitor
 import android.app.usage.UsageEvents
 import android.app.usage.UsageStatsManager
 import android.content.Context
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import com.edr.agent.screen.AppTrapScreenRecorder
 import com.edr.agent.storage.EdrLocalStorage
@@ -27,13 +29,60 @@ object TrapAppMonitor {
 
     // Cooldown prevents re-triggering within 30 seconds of the previous recording for the same app
     private const val COOLDOWN_MS = 30_000L
+    private const val STOP_CONFIRM_DELAY_MS = 1500L
+
+    private val TRANSIENT_SYSTEM_PACKAGES = setOf(
+        "com.android.systemui",
+        "android",
+        "com.android.permissioncontroller",
+        "com.google.android.permissioncontroller",
+        "com.vivo.permissionmanager",
+        "com.lbe.security.miui",
+        "com.miui.securitycenter",
+        "com.google.android.inputmethod.latin",
+        "com.emoji.keyboard.touchpal",
+        "com.baidu.input_vivo"
+    )
 
     private val trapPackages = Collections.synchronizedSet(mutableSetOf<String>())
     private val cooldownMap = ConcurrentHashMap<String, Long>()
     private var isInitialized = false
+    private val mainHandler = Handler(Looper.getMainLooper())
+    private var pendingStopRunnable: Runnable? = null
+    @Volatile
+    private var lastPolledEventTime = 0L
 
     // Own package name cached to avoid calling context.packageName on every event
     private var ownPackageName = ""
+
+    private fun isTransientSystemPackage(pkg: String): Boolean {
+        if (pkg in TRANSIENT_SYSTEM_PACKAGES) return true
+        return pkg.contains("inputmethod", ignoreCase = true) ||
+            pkg.contains("keyboard", ignoreCase = true)
+    }
+
+    private fun scheduleDeferredStop(context: Context, expectedRecordingPkg: String, reason: String) {
+        if (pendingStopRunnable != null) return
+        val appContext = context.applicationContext
+        val runnable = Runnable {
+            pendingStopRunnable = null
+            if (AppTrapScreenRecorder.isCurrentlyRecording()
+                && AppTrapScreenRecorder.getRecordingPackage() == expectedRecordingPkg
+            ) {
+                Log.i(TAG, "$reason. Stopping recording for '$expectedRecordingPkg'.")
+                AppTrapScreenRecorder.stopRecording(appContext)
+            }
+        }
+        pendingStopRunnable = runnable
+        mainHandler.postDelayed(runnable, STOP_CONFIRM_DELAY_MS)
+    }
+
+    private fun cancelDeferredStop() {
+        pendingStopRunnable?.let {
+            mainHandler.removeCallbacks(it)
+            pendingStopRunnable = null
+        }
+    }
 
     @Synchronized
     fun initialize(context: Context) {
@@ -65,10 +114,15 @@ object TrapAppMonitor {
      * @param pkg     Package name of the newly-foreground app/window
      */
     fun onWindowChanged(context: Context, pkg: String) {
-        // Ignore our own EDR agent app
-        if (pkg.isEmpty() || pkg == ownPackageName) return
+        // Ignore our own EDR agent app or transient overlays (SystemUI, keyboards, permission dialogs)
+        if (pkg.isEmpty() || pkg == ownPackageName || isTransientSystemPackage(pkg)) return
 
         if (trapPackages.contains(pkg)) {
+            cancelDeferredStop()
+            if (AppTrapScreenRecorder.isCurrentlyRecording() && AppTrapScreenRecorder.getRecordingPackage() == pkg) {
+                return
+            }
+
             val now = System.currentTimeMillis()
             val lastTrigger = cooldownMap[pkg] ?: 0L
             if (now - lastTrigger < COOLDOWN_MS) return  // Still in cooldown
@@ -84,11 +138,10 @@ object TrapAppMonitor {
             AppTrapScreenRecorder.startRecording(context, pkg, appLabel)
 
         } else if (AppTrapScreenRecorder.isCurrentlyRecording()) {
-            // User navigated away from the trapped app to something else
+            // Confirm user truly navigated away from the trapped app before stopping
             val recordingPkg = AppTrapScreenRecorder.getRecordingPackage()
             if (recordingPkg != null && recordingPkg != pkg) {
-                Log.i(TAG, "Window switched to '$pkg' (away from '$recordingPkg'). Stopping recording.")
-                AppTrapScreenRecorder.stopRecording(context)
+                scheduleDeferredStop(context, recordingPkg, "Window switched to '$pkg'")
             }
         }
     }
@@ -96,55 +149,56 @@ object TrapAppMonitor {
     /**
      * Fallback poller using UsageStatsManager. Called every 5 seconds by EdrForegroundService.
      * Only active as a safety net in case AccessibilityService events are delayed.
-     * Queries the last 6 seconds of usage events to avoid gaps between poll intervals.
      */
     fun checkForegroundApp(context: Context) {
         if (trapPackages.isEmpty() && !AppTrapScreenRecorder.isCurrentlyRecording()) return
 
         val usm = context.getSystemService(Context.USAGE_STATS_SERVICE) as? UsageStatsManager ?: return
         val now = System.currentTimeMillis()
+        val queryStart = if (lastPolledEventTime > now - 10_000L) lastPolledEventTime else now - 6000L
 
         try {
-            // Query last 6 seconds (slightly more than our 5s poll interval) to avoid gaps
-            val events = usm.queryEvents(now - 6000L, now) ?: return
+            val events = usm.queryEvents(queryStart, now) ?: return
             val event = UsageEvents.Event()
+            var latestForegroundPkg: String? = null
+            var latestTime = lastPolledEventTime
 
             while (events.hasNextEvent()) {
                 events.getNextEvent(event)
-                val pkg = event.packageName ?: continue
-                if (pkg == ownPackageName) continue
+                if (event.timeStamp <= lastPolledEventTime) continue
+                latestTime = maxOf(latestTime, event.timeStamp)
 
-                when (event.eventType) {
-                    UsageEvents.Event.ACTIVITY_RESUMED -> {
-                        if (trapPackages.contains(pkg)) {
-                            val lastTrigger = cooldownMap[pkg] ?: 0L
-                            if (now - lastTrigger >= COOLDOWN_MS) {
-                                cooldownMap[pkg] = now
-                                val appLabel = resolveAppLabel(context, pkg)
-                                Log.w(TAG, "TRAP (fallback poller): '$appLabel' ($pkg) opened.")
-                                EdrLocalStorage.appendEdrLog(
-                                    context, "TRAP_ALERT",
-                                    "Trap app opened (fallback): $appLabel. Screen recording started."
-                                )
-                                AppTrapScreenRecorder.startRecording(context, pkg, appLabel)
-                                break
-                            }
-                        } else if (AppTrapScreenRecorder.isCurrentlyRecording()) {
-                            val recordingPkg = AppTrapScreenRecorder.getRecordingPackage()
-                            if (recordingPkg != null && recordingPkg != pkg) {
-                                Log.i(TAG, "Fallback: switched to '$pkg'. Stopping recording of '$recordingPkg'.")
-                                AppTrapScreenRecorder.stopRecording(context)
-                            }
-                        }
-                    }
-                    UsageEvents.Event.ACTIVITY_PAUSED,
-                    UsageEvents.Event.ACTIVITY_STOPPED -> {
-                        if (AppTrapScreenRecorder.isCurrentlyRecording()
-                            && AppTrapScreenRecorder.getRecordingPackage() == pkg) {
-                            Log.i(TAG, "Trap app '$pkg' paused/stopped. Finalizing recording.")
-                            AppTrapScreenRecorder.stopRecording(context)
-                        }
-                    }
+                val pkg = event.packageName ?: continue
+                if (pkg == ownPackageName || isTransientSystemPackage(pkg)) continue
+
+                if (event.eventType == UsageEvents.Event.ACTIVITY_RESUMED) {
+                    latestForegroundPkg = pkg
+                }
+            }
+
+            lastPolledEventTime = latestTime
+            val pkg = latestForegroundPkg ?: return
+
+            if (trapPackages.contains(pkg)) {
+                cancelDeferredStop()
+                if (AppTrapScreenRecorder.isCurrentlyRecording() && AppTrapScreenRecorder.getRecordingPackage() == pkg) {
+                    return
+                }
+                val lastTrigger = cooldownMap[pkg] ?: 0L
+                if (now - lastTrigger >= COOLDOWN_MS) {
+                    cooldownMap[pkg] = now
+                    val appLabel = resolveAppLabel(context, pkg)
+                    Log.w(TAG, "TRAP (fallback poller): '$appLabel' ($pkg) opened.")
+                    EdrLocalStorage.appendEdrLog(
+                        context, "TRAP_ALERT",
+                        "Trap app opened (fallback): $appLabel. Screen recording started."
+                    )
+                    AppTrapScreenRecorder.startRecording(context, pkg, appLabel)
+                }
+            } else if (AppTrapScreenRecorder.isCurrentlyRecording()) {
+                val recordingPkg = AppTrapScreenRecorder.getRecordingPackage()
+                if (recordingPkg != null && recordingPkg != pkg) {
+                    scheduleDeferredStop(context, recordingPkg, "Fallback: switched to '$pkg'")
                 }
             }
         } catch (e: Exception) {

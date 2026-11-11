@@ -45,6 +45,8 @@ class EdrWebSocketClient(private val context: Context) : WebSocketListener() {
     private val scheduler = Executors.newSingleThreadScheduledExecutor()
     // Bounded thread pool for media operations — avoids creating unlimited threads under load
     private val mediaExecutor = Executors.newFixedThreadPool(2)
+    // Dedicated executor for EXECUTE_COMMAND so OkHttp's reader thread never blocks
+    private val commandExecutor = Executors.newCachedThreadPool()
     private var heartbeatTask: ScheduledFuture<*>? = null
     private var reconnectTask: ScheduledFuture<*>? = null
     private var reconnectAttempt = 0
@@ -106,6 +108,11 @@ class EdrWebSocketClient(private val context: Context) : WebSocketListener() {
     }
 
     override fun onOpen(webSocket: WebSocket, response: Response) {
+        if (this.webSocket != null && this.webSocket !== webSocket) {
+            Log.w(TAG, "Ignoring onOpen from superseded WebSocket")
+            try { webSocket.close(1000, "Superseded") } catch (ignored: Exception) {}
+            return
+        }
         Log.i(TAG, "Connected to EDR Server at $currentHostInUse")
         isSocketOpen.set(true)
         reconnectAttempt = 0
@@ -171,8 +178,10 @@ class EdrWebSocketClient(private val context: Context) : WebSocketListener() {
                     val cmdId = payload["id"] as? String ?: ""
                     val cmdType = payload["commandType"] as? String ?: ""
                     val parameters = payload["parameters"] as? Map<String, Any>
-                    val (status, resultMessage) = ActiveResponder.execute(context, cmdId, cmdType, parameters)
-                    sendAck(cmdId, status, resultMessage)
+                    commandExecutor.execute {
+                        val (status, resultMessage) = ActiveResponder.execute(context, cmdId, cmdType, parameters)
+                        sendAck(cmdId, status, resultMessage)
+                    }
                 }
 
                 "APPLY_POLICY" -> {
@@ -350,16 +359,27 @@ class EdrWebSocketClient(private val context: Context) : WebSocketListener() {
     }
 
     override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+        if (this.webSocket != null && this.webSocket !== webSocket) {
+            Log.d(TAG, "Ignoring onClosed from stale WebSocket: $reason ($code)")
+            return
+        }
         Log.w(TAG, "WebSocket closed: $reason ($code)")
         isSocketOpen.set(false)
         ScreenStreamManager.stopStreaming()
         ScreenStreamManager.wsSender = null
+        if (code == 1000 && reason.contains("Dashboard Admin")) {
+            isDisconnecting.set(true)
+        }
         if (!isDisconnecting.get()) {
             scheduleReconnect()
         }
     }
 
     override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+        if (this.webSocket != null && this.webSocket !== webSocket) {
+            Log.d(TAG, "Ignoring onFailure from stale WebSocket: ${t.message}")
+            return
+        }
         Log.w(TAG, "WebSocket failure: ${t.message}")
         isSocketOpen.set(false)
         ScreenStreamManager.stopStreaming()

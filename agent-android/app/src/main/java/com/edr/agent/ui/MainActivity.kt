@@ -263,7 +263,9 @@ class MainActivity : AppCompatActivity() {
                     startService(serviceIntent)
                 }
             } else {
-                EdrForegroundService.instance?.reconnectWebSocket()
+                if (EdrForegroundService.instance?.isWebSocketConnected() != true) {
+                    EdrForegroundService.instance?.reconnectWebSocket()
+                }
             }
         } catch (e: Exception) {
             android.util.Log.e("MainActivity", "Failed ensuring EDR service running: ${e.message}", e)

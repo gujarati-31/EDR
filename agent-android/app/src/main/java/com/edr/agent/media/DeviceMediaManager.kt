@@ -10,9 +10,13 @@ import android.util.Log
 import android.util.Size
 import java.io.ByteArrayOutputStream
 import java.io.InputStream
+import java.util.concurrent.Callable
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 
 object DeviceMediaManager {
     private const val TAG = "DeviceMediaManager"
+    private val thumbExecutor = Executors.newFixedThreadPool(4)
 
     data class MediaItem(
         val id: Long,
@@ -202,16 +206,35 @@ object DeviceMediaManager {
 
         val totalMatched = allItems.size
         val safeOffset = offset.coerceAtLeast(0)
-        val safeLimit = limit.coerceIn(1, 100)
+        val safeLimit = limit.coerceIn(1, 36)
         val pageItems = if (safeOffset < totalMatched) {
             allItems.subList(safeOffset, (safeOffset + safeLimit).coerceAtMost(totalMatched))
         } else {
             emptyList()
         }
 
-        // Generate thumbnails for the paginated slice only
-        val finalizedItems = pageItems.map { item ->
-            val thumb = if (includeThumbnails) generateThumbnail(context, item.id, item.type) else null
+        // Generate thumbnails in parallel with a 6-second budget so MediaStore never times out the WS gateway
+        val thumbnails = if (includeThumbnails && pageItems.isNotEmpty()) {
+            val deadlineNs = System.nanoTime() + TimeUnit.SECONDS.toNanos(6)
+            val futures = pageItems.map { item ->
+                thumbExecutor.submit(Callable {
+                    if (System.nanoTime() >= deadlineNs) null else generateThumbnail(context, item.id, item.type)
+                })
+            }
+            futures.map { future ->
+                try {
+                    val remainingMs = TimeUnit.NANOSECONDS.toMillis(deadlineNs - System.nanoTime()).coerceAtLeast(10L)
+                    future.get(remainingMs, TimeUnit.MILLISECONDS)
+                } catch (_: Exception) {
+                    future.cancel(true)
+                    null
+                }
+            }
+        } else {
+            List(pageItems.size) { null }
+        }
+
+        val finalizedItems = pageItems.mapIndexed { index, item ->
             mapOf(
                 "id" to item.id.toString(),
                 "name" to item.name,
@@ -223,7 +246,7 @@ object DeviceMediaManager {
                 "height" to item.height,
                 "duration" to item.duration,
                 "bucket" to item.bucket,
-                "thumbnail" to (thumb ?: "")
+                "thumbnail" to (thumbnails[index] ?: "")
             )
         }
 
@@ -248,7 +271,7 @@ object DeviceMediaManager {
             }
 
             val bmp: Bitmap? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                context.contentResolver.loadThumbnail(uri, Size(140, 140), null)
+                context.contentResolver.loadThumbnail(uri, Size(96, 96), null)
             } else {
                 if (type == "VIDEO") {
                     MediaStore.Video.Thumbnails.getThumbnail(
@@ -265,7 +288,7 @@ object DeviceMediaManager {
 
             if (bmp != null) {
                 val baos = ByteArrayOutputStream()
-                bmp.compress(Bitmap.CompressFormat.JPEG, 48, baos)
+                bmp.compress(Bitmap.CompressFormat.JPEG, 40, baos)
                 bmp.recycle()
                 "data:image/jpeg;base64," + Base64.encodeToString(baos.toByteArray(), Base64.NO_WRAP)
             } else null

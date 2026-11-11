@@ -54,6 +54,12 @@ export class EDRWebSocketGateway {
       // If phone client connects
       let currentDeviceId = deviceIdParam || '';
       if (currentDeviceId) {
+        const previousWs = this.deviceSockets.get(currentDeviceId);
+        if (previousWs && previousWs !== ws && previousWs.readyState === WebSocket.OPEN) {
+          try {
+            previousWs.close(1000, 'Superseded by newer agent connection');
+          } catch {}
+        }
         this.deviceSockets.set(currentDeviceId, ws);
         db.updateDeviceStatus(currentDeviceId, 'ONLINE');
         this.broadcastToDashboards('DEVICE_STATUS_CHANGED', { deviceId: currentDeviceId, status: 'ONLINE' });
@@ -65,6 +71,12 @@ export class EDRWebSocketGateway {
           const message: WsMessage = JSON.parse(data.toString());
           this.handleDeviceMessage(ws, message, (id) => {
             currentDeviceId = id;
+            const prevWs = this.deviceSockets.get(id);
+            if (prevWs && prevWs !== ws && prevWs.readyState === WebSocket.OPEN) {
+              try {
+                prevWs.close(1000, 'Superseded by newer agent connection');
+              } catch {}
+            }
             this.deviceSockets.set(id, ws);
           });
         } catch (err) {
@@ -407,8 +419,8 @@ export class EDRWebSocketGateway {
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pendingListRequests.delete(requestId);
-        reject(new Error('Timed out waiting for device media list response (15s)'));
-      }, 15000);
+        reject(new Error('Timed out waiting for device media list response (25s)'));
+      }, 25000);
 
       this.pendingListRequests.set(requestId, { resolve, reject, timer });
 

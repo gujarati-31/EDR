@@ -148,6 +148,8 @@ class EdrForegroundService : Service() {
         return START_STICKY
     }
 
+    fun isWebSocketConnected(): Boolean = wsClient?.isConnected == true
+
     fun sendWebSocketMessage(msg: String): Boolean {
         return wsClient?.send(msg) ?: false
     }

@@ -54,6 +54,7 @@ object AppTrapScreenRecorder {
 
     // Keep the most recent valid frame to repeat if transition animations temporarily block screenshots
     private var lastValidFrame: Bitmap? = null
+    private val encoderLock = Any()
 
     private val httpClient = OkHttpClient.Builder()
         .connectTimeout(30, TimeUnit.SECONDS)
@@ -135,33 +136,41 @@ object AppTrapScreenRecorder {
                     val a11y = EdrAccessibilityService.instance
                     if (a11y != null) {
                         a11y.takeSilentScreenshot(WIDTH) { bitmap ->
-                            if (!isRecording.get()) {
+                            val handler = recordHandler
+                            if (!isRecording.get() || handler == null) {
                                 bitmap?.recycle()
                                 return@takeSilentScreenshot
                             }
 
-                            if (bitmap != null) {
-                                // Update last valid frame
-                                lastValidFrame?.recycle()
-                                lastValidFrame = try {
-                                    bitmap.copy(bitmap.config ?: Bitmap.Config.ARGB_8888, false)
-                                } catch (e: Exception) {
-                                    null
+                            handler.post {
+                                synchronized(encoderLock) {
+                                    if (!isRecording.get()) {
+                                        bitmap?.recycle()
+                                        return@synchronized
+                                    }
+
+                                    if (bitmap != null) {
+                                        lastValidFrame?.recycle()
+                                        lastValidFrame = try {
+                                            bitmap.copy(bitmap.config ?: Bitmap.Config.ARGB_8888, false)
+                                        } catch (e: Exception) {
+                                            null
+                                        }
+
+                                        encodeFrame(bitmap)
+                                        bitmap.recycle()
+                                    } else {
+                                        // Reuse last valid frame during window animations so video does not drop frames
+                                        val cached = lastValidFrame
+                                        if (cached != null && !cached.isRecycled) {
+                                            encodeFrame(cached)
+                                        }
+                                    }
                                 }
 
-                                encodeFrame(bitmap)
-                                bitmap.recycle()
-                            } else {
-                                // Fallback: if screenshot failed due to window animation (error code 3),
-                                // reuse the last valid frame if available so video does not drop frames
-                                val cached = lastValidFrame
-                                if (cached != null && !cached.isRecycled) {
-                                    encodeFrame(cached)
+                                if (isRecording.get()) {
+                                    recordHandler?.postDelayed(this, (1000 / FPS).toLong())
                                 }
-                            }
-
-                            if (isRecording.get()) {
-                                recordHandler?.postDelayed(this, (1000 / FPS).toLong())
                             }
                         }
                     } else {
@@ -292,27 +301,29 @@ object AppTrapScreenRecorder {
         Log.i(TAG, "Stopping screen recording for $label ($pkg). Total duration: $durationFormatted")
         EdrLocalStorage.appendEdrLog(context, "TRAP_REC", "App closed. Finalizing video for $label ($durationFormatted)")
 
-        try {
-            // If total frames is low, pad with last valid frame to at least 15 frames for video stability
-            val cached = lastValidFrame
-            if (frameCount < 15 && cached != null && !cached.isRecycled) {
-                while (frameCount < 15) {
-                    encodeFrame(cached)
+        synchronized(encoderLock) {
+            try {
+                // If total frames is low, pad with last valid frame to at least 15 frames for video stability
+                val cached = lastValidFrame
+                if (frameCount < 15 && cached != null && !cached.isRecycled) {
+                    while (frameCount < 15) {
+                        encodeFrame(cached)
+                    }
                 }
+
+                // Signal End of Stream
+                val inputIndex = mediaCodec?.dequeueInputBuffer(10000L) ?: -1
+                if (inputIndex >= 0) {
+                    val ptsUs = frameCount * 1_000_000L / FPS
+                    mediaCodec?.queueInputBuffer(inputIndex, 0, 0, ptsUs, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
+                }
+                drainEncoder(true)
+            } catch (e: Exception) {
+                Log.e(TAG, "Error draining encoder on stop: ${e.message}")
             }
 
-            // Signal End of Stream
-            val inputIndex = mediaCodec?.dequeueInputBuffer(10000L) ?: -1
-            if (inputIndex >= 0) {
-                val ptsUs = frameCount * 1_000_000L / FPS
-                mediaCodec?.queueInputBuffer(inputIndex, 0, 0, ptsUs, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
-            }
-            drainEncoder(true)
-        } catch (e: Exception) {
-            Log.e(TAG, "Error draining encoder on stop: ${e.message}")
+            cleanup()
         }
-
-        cleanup()
 
         val video = outputFile
         if (video != null && video.exists() && video.length() > 1000) {

@@ -202,11 +202,15 @@ object RawSecurityAuditHarvester {
      */
     private fun harvestRawNetworkSockets(context: Context, timestamp: String): List<SiemEvent> {
         val events = mutableListOf<SiemEvent>()
+        // Android 10+ (API 29+) restricts /proc/net/tcp access for non-system UIDs via SELinux
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+            return events
+        }
         val pm = context.packageManager
 
         try {
             val tcpFile = File("/proc/net/tcp")
-            if (tcpFile.exists()) {
+            if (tcpFile.exists() && tcpFile.canRead()) {
                 val reader = BufferedReader(FileReader(tcpFile))
                 var line = reader.readLine() // skip header line
 
