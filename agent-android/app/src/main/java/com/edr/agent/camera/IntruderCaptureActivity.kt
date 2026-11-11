@@ -23,14 +23,13 @@ import android.os.Looper
 import android.util.Base64
 import android.util.Log
 import android.view.WindowManager
+import com.edr.agent.network.EdrHttpClient
 import com.edr.agent.storage.EdrLocalStorage
 import com.edr.agent.storage.SyncPreferences
 import com.google.gson.Gson
 import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
-import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 
 class IntruderCaptureActivity : Activity() {
@@ -52,11 +51,7 @@ class IntruderCaptureActivity : Activity() {
     private var currentCaptureSession: CameraCaptureSession? = null
     private var currentImageReader: ImageReader? = null
 
-    private val httpClient = OkHttpClient.Builder()
-        .connectTimeout(15, TimeUnit.SECONDS)
-        .writeTimeout(30, TimeUnit.SECONDS)
-        .readTimeout(30, TimeUnit.SECONDS)
-        .build()
+    private val httpClient = EdrHttpClient.apiClient
     private val gson = Gson()
     private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
 

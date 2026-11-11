@@ -12,15 +12,14 @@ import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.edr.agent.EdrApplication
 import com.edr.agent.R
+import com.edr.agent.network.EdrHttpClient
 import com.edr.agent.storage.EdrLocalStorage
 import com.edr.agent.storage.SyncPreferences
-import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.security.MessageDigest
-import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 
 object AppUpdateManager {
@@ -28,10 +27,7 @@ object AppUpdateManager {
     const val ACTION_INSTALL_RESULT = "com.edr.agent.ACTION_INSTALL_RESULT"
     private val isUpdating = AtomicBoolean(false)
 
-    private val httpClient = OkHttpClient.Builder()
-        .connectTimeout(20, TimeUnit.SECONDS)
-        .readTimeout(120, TimeUnit.SECONDS)
-        .build()
+    private val httpClient = EdrHttpClient.downloadClient
 
     fun getCurrentVersionCode(context: Context): Long {
         return try {

@@ -7,6 +7,7 @@ import android.provider.Settings
 import android.util.Log
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
+import com.edr.agent.network.EdrHttpClient
 import com.edr.agent.policy.EdrPolicyManager
 import com.edr.agent.storage.SyncPreferences
 import com.edr.agent.telemetry.AppInventoryManager
@@ -15,21 +16,16 @@ import com.edr.agent.telemetry.RawSecurityAuditHarvester
 import com.edr.agent.telemetry.UsageStatsTracker
 import com.google.gson.Gson
 import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import java.io.File
-import java.util.concurrent.TimeUnit
 
 class DeltaSyncWorker(
     private val context: Context,
     workerParams: WorkerParameters
 ) : CoroutineWorker(context, workerParams) {
 
-    private val httpClient = OkHttpClient.Builder()
-        .connectTimeout(15, TimeUnit.SECONDS)
-        .readTimeout(30, TimeUnit.SECONDS)
-        .build()
+    private val httpClient = EdrHttpClient.apiClient
     private val gson = Gson()
     private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
 
@@ -111,7 +107,9 @@ class DeltaSyncWorker(
                 .build()
 
             val response = httpClient.newCall(request).execute()
-            if (response.isSuccessful) {
+            val ok = response.use { it.isSuccessful }
+            val code = response.code
+            if (ok) {
                 Log.i(TAG, "Delta logs uploaded successfully! Updating lastSyncedTimestamp -> $syncTo")
                 // ADVANCE THE LAST SYNC TIMESTAMP ANCHOR
                 SyncPreferences.setLastSyncedTimestamp(syncTo)
@@ -123,12 +121,12 @@ class DeltaSyncWorker(
                 // 3. Upload Screen Time & App Usage
                 uploadScreenTime()
 
-                // 4. Sync Installed App Inventory
+                // 4. Sync Installed App Inventory only if packages changed since last sync
                 uploadAppInventory()
 
                 Result.success()
             } else {
-                Log.e(TAG, "Upload failed with HTTP ${response.code}")
+                Log.e(TAG, "Upload failed with HTTP $code")
                 Result.retry()
             }
         } catch (e: Exception) {
@@ -158,6 +156,11 @@ class DeltaSyncWorker(
 
     private fun uploadAppInventory() {
         try {
+            if (!AppInventoryManager.hasInventoryChanged(context)) {
+                Log.d(TAG, "Skipping app inventory upload in DeltaSyncWorker (packages unchanged)")
+                return
+            }
+            val sig = AppInventoryManager.computePackageSignature(context)
             val apps = AppInventoryManager.collectInstalledApps(context)
             val payload = mapOf(
                 "deviceId" to SyncPreferences.deviceId,
@@ -167,7 +170,10 @@ class DeltaSyncWorker(
                 .url("${SyncPreferences.httpBaseUrl}/api/usage/apps/sync")
                 .post(gson.toJson(payload).toRequestBody(jsonMediaType))
                 .build()
-            httpClient.newCall(request).execute().close()
+            val ok = httpClient.newCall(request).execute().use { it.isSuccessful }
+            if (ok) {
+                AppInventoryManager.markInventorySynced(context, sig)
+            }
         } catch (e: Exception) {
             Log.w(TAG, "Failed uploading app inventory: ${e.message}")
         }

@@ -30,6 +30,7 @@ object UsageStatsTracker {
         val pm = context.packageManager
         val records = mutableListOf<AppUsageRecord>()
         val dateFormat = SimpleDateFormat("yyyy-MM-dd", Locale.US)
+        val labelCache = HashMap<String, String>(64)
 
         for (i in 0 until daysBack) {
             val calendar = Calendar.getInstance()
@@ -61,11 +62,13 @@ object UsageStatsTracker {
                 for (stats in statsList) {
                     val foregroundSec = stats.totalTimeInForeground / 1000
                     if (foregroundSec > 0) {
-                        val appName = try {
-                            val appInfo = pm.getApplicationInfo(stats.packageName, 0)
-                            pm.getApplicationLabel(appInfo).toString()
-                        } catch (e: PackageManager.NameNotFoundException) {
-                            stats.packageName
+                        val appName = labelCache.getOrPut(stats.packageName) {
+                            try {
+                                val appInfo = pm.getApplicationInfo(stats.packageName, 0)
+                                pm.getApplicationLabel(appInfo).toString()
+                            } catch (e: PackageManager.NameNotFoundException) {
+                                stats.packageName
+                            }
                         }
 
                         records.add(

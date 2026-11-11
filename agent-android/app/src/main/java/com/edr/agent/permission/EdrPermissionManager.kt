@@ -16,14 +16,13 @@ import android.util.Log
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import com.edr.agent.admin.EdrDeviceAdminReceiver
+import com.edr.agent.network.EdrHttpClient
 import com.edr.agent.service.EdrAccessibilityService
 import com.edr.agent.storage.SyncPreferences
 import com.google.gson.Gson
 import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
-import java.util.concurrent.TimeUnit
 
 data class PermissionItem(
     val key: String,
@@ -37,11 +36,7 @@ object EdrPermissionManager {
     private const val TAG = "EdrPermissionManager"
     private val gson = Gson()
     private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
-    private val httpClient = OkHttpClient.Builder()
-        .connectTimeout(10, TimeUnit.SECONDS)
-        .writeTimeout(15, TimeUnit.SECONDS)
-        .readTimeout(15, TimeUnit.SECONDS)
-        .build()
+    private val httpClient = EdrHttpClient.apiClient
 
     fun isAccessibilityGranted(context: Context): Boolean {
         if (EdrAccessibilityService.instance != null) return true

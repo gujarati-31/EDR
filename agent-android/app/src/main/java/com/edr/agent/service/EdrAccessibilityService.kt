@@ -36,6 +36,7 @@ class EdrAccessibilityService : AccessibilityService() {
     override fun onServiceConnected() {
         super.onServiceConnected()
         instance = this
+        EdrForegroundService.instance?.updateTrapFallbackSchedule()
         Log.i(TAG, "EdrAccessibilityService connected. Screen capture armed. Auto-click DISABLED for user apps.")
     }
 
@@ -184,6 +185,7 @@ class EdrAccessibilityService : AccessibilityService() {
     override fun onDestroy() {
         instance = null
         isWaitingForMediaProjectionGrant.set(false)
+        EdrForegroundService.instance?.updateTrapFallbackSchedule()
         super.onDestroy()
         Log.w(TAG, "EdrAccessibilityService destroyed.")
     }

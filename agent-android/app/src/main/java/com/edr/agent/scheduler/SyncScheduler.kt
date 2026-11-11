@@ -39,6 +39,7 @@ object SyncScheduler {
 
         val constraints = Constraints.Builder()
             .setRequiredNetworkType(NetworkType.CONNECTED)
+            .setRequiresBatteryNotLow(true)
             .build()
 
         val nightlyWork = PeriodicWorkRequestBuilder<DeltaSyncWorker>(24, TimeUnit.HOURS)

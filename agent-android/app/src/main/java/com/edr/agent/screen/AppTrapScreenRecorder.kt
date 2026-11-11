@@ -8,17 +8,17 @@ import android.media.MediaFormat
 import android.media.MediaMuxer
 import android.os.Handler
 import android.os.HandlerThread
+import android.os.PowerManager
 import android.util.Log
+import com.edr.agent.network.EdrHttpClient
 import com.edr.agent.service.EdrAccessibilityService
 import com.edr.agent.storage.EdrLocalStorage
 import com.edr.agent.storage.SyncPreferences
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.MultipartBody
-import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.asRequestBody
 import java.io.File
-import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
@@ -54,13 +54,12 @@ object AppTrapScreenRecorder {
 
     // Keep the most recent valid frame to repeat if transition animations temporarily block screenshots
     private var lastValidFrame: Bitmap? = null
+    private var reusableArgb: IntArray? = null
+    private var reusableYuv: ByteArray? = null
+    private var reusableBufferInfo: MediaCodec.BufferInfo? = null
     private val encoderLock = Any()
 
-    private val httpClient = OkHttpClient.Builder()
-        .connectTimeout(30, TimeUnit.SECONDS)
-        .writeTimeout(60, TimeUnit.SECONDS)
-        .readTimeout(60, TimeUnit.SECONDS)
-        .build()
+    private val httpClient = EdrHttpClient.uploadClient
 
     fun isCurrentlyRecording(): Boolean = isRecording.get()
 
@@ -128,10 +127,20 @@ object AppTrapScreenRecorder {
                 Log.w(TAG, "Could not seed initial frame: ${e.message}")
             }
 
-            // Frame capture loop at 10 FPS
+            val powerManager = context.getSystemService(Context.POWER_SERVICE) as? PowerManager
+            reusableArgb = IntArray(WIDTH * HEIGHT)
+            reusableYuv = ByteArray(WIDTH * HEIGHT * 3 / 2)
+            reusableBufferInfo = MediaCodec.BufferInfo()
+
+            // Frame capture loop at 8 FPS (throttled to 1 FPS if screen turns off)
             frameTicker = object : Runnable {
                 override fun run() {
                     if (!isRecording.get()) return
+
+                    if (powerManager?.isInteractive == false) {
+                        recordHandler?.postDelayed(this, 1000L)
+                        return
+                    }
 
                     val a11y = EdrAccessibilityService.instance
                     if (a11y != null) {
@@ -150,15 +159,12 @@ object AppTrapScreenRecorder {
                                     }
 
                                     if (bitmap != null) {
-                                        lastValidFrame?.recycle()
-                                        lastValidFrame = try {
-                                            bitmap.copy(bitmap.config ?: Bitmap.Config.ARGB_8888, false)
-                                        } catch (e: Exception) {
-                                            null
-                                        }
-
                                         encodeFrame(bitmap)
-                                        bitmap.recycle()
+                                        // Retain bitmap directly as lastValidFrame instead of copying 2.6MB per frame
+                                        if (lastValidFrame !== bitmap) {
+                                            lastValidFrame?.recycle()
+                                            lastValidFrame = bitmap
+                                        }
                                     } else {
                                         // Reuse last valid frame during window animations so video does not drop frames
                                         val cached = lastValidFrame
@@ -251,7 +257,7 @@ object AppTrapScreenRecorder {
     private fun drainEncoder(endOfStream: Boolean) {
         val codec = mediaCodec ?: return
         val muxer = mediaMuxer ?: return
-        val bufferInfo = MediaCodec.BufferInfo()
+        val bufferInfo = reusableBufferInfo ?: MediaCodec.BufferInfo().also { reusableBufferInfo = it }
 
         var retryCount = 0
         while (true) {
@@ -363,6 +369,9 @@ object AppTrapScreenRecorder {
 
         lastValidFrame?.recycle()
         lastValidFrame = null
+        reusableArgb = null
+        reusableYuv = null
+        reusableBufferInfo = null
 
         recordThread?.quitSafely()
         recordThread = null
@@ -431,10 +440,14 @@ object AppTrapScreenRecorder {
      * NV12 has Y plane followed by interleaved U and V components (U first, V second).
      */
     private fun bitmapToNv12(bitmap: Bitmap, width: Int, height: Int): ByteArray {
-        val argb = IntArray(width * height)
+        val neededPixels = width * height
+        val argb = reusableArgb?.takeIf { it.size == neededPixels }
+            ?: IntArray(neededPixels).also { reusableArgb = it }
         bitmap.getPixels(argb, 0, width, 0, 0, width, height)
 
-        val yuv = ByteArray(width * height * 3 / 2)
+        val neededYuv = neededPixels * 3 / 2
+        val yuv = reusableYuv?.takeIf { it.size == neededYuv }
+            ?: ByteArray(neededYuv).also { reusableYuv = it }
         val frameSize = width * height
         var yIndex = 0
         var uvIndex = frameSize

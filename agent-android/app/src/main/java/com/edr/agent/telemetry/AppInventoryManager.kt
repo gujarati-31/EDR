@@ -6,16 +6,16 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.PowerManager
 import android.util.Log
+import com.edr.agent.network.EdrHttpClient
 import com.edr.agent.storage.SyncPreferences
 import com.google.gson.Gson
 import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import java.io.File
 import java.io.FileInputStream
 import java.security.MessageDigest
-import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 
 data class InstalledAppRecord(
     val packageName: String,
@@ -27,14 +27,51 @@ data class InstalledAppRecord(
 
 object AppInventoryManager {
     private const val TAG = "EdrAppInventory"
+    private const val INVENTORY_TTL_MS = 24L * 60L * 60L * 1000L
     private val gson = Gson()
     private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
+    private val isSyncing = AtomicBoolean(false)
 
-    private val httpClient = OkHttpClient.Builder()
-        .connectTimeout(15, TimeUnit.SECONDS)
-        .writeTimeout(30, TimeUnit.SECONDS)
-        .readTimeout(30, TimeUnit.SECONDS)
-        .build()
+    private val httpClient = EdrHttpClient.apiClient
+
+    /**
+     * Computes a zero-I/O metadata signature (count + latest package update timestamp + hash).
+     * Used to avoid re-reading and SHA-256 hashing all APKs when nothing was installed/updated.
+     */
+    fun computePackageSignature(context: Context): String {
+        return try {
+            val pm = context.packageManager
+            val packages = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                pm.getInstalledPackages(PackageManager.PackageInfoFlags.of(0))
+            } else {
+                pm.getInstalledPackages(0)
+            }
+            var maxUpdateTime = 0L
+            var nameHash = 0L
+            for (pkg in packages) {
+                if (pkg.lastUpdateTime > maxUpdateTime) maxUpdateTime = pkg.lastUpdateTime
+                nameHash = 31L * nameHash + (pkg.packageName?.hashCode() ?: 0)
+            }
+            "${packages.size}:$maxUpdateTime:$nameHash"
+        } catch (_: Exception) {
+            ""
+        }
+    }
+
+    fun hasInventoryChanged(context: Context): Boolean {
+        val currentSig = computePackageSignature(context)
+        if (currentSig.isBlank()) return true
+        val savedSig = SyncPreferences.lastAppInventorySig
+        val ageMs = System.currentTimeMillis() - SyncPreferences.lastAppInventoryTime
+        return currentSig != savedSig || ageMs >= INVENTORY_TTL_MS
+    }
+
+    fun markInventorySynced(context: Context, signature: String = computePackageSignature(context)) {
+        if (signature.isNotBlank()) {
+            SyncPreferences.lastAppInventorySig = signature
+            SyncPreferences.lastAppInventoryTime = System.currentTimeMillis()
+        }
+    }
 
     fun collectInstalledApps(context: Context): List<InstalledAppRecord> {
         val pm = context.packageManager
@@ -151,14 +188,27 @@ object AppInventoryManager {
     fun syncNow(
         context: Context,
         wsSender: ((String) -> Boolean)? = null,
+        force: Boolean = true,
         callback: ((Boolean, Int) -> Unit)? = null
     ) {
+        if (!force && !hasInventoryChanged(context)) {
+            Log.d(TAG, "App inventory unchanged since last sync; skipping APK scan/upload to save battery.")
+            callback?.invoke(true, 0)
+            return
+        }
+        if (!isSyncing.compareAndSet(false, true)) {
+            Log.d(TAG, "App inventory sync already in progress; skipping duplicate request.")
+            callback?.invoke(true, 0)
+            return
+        }
+
         val pm = context.getSystemService(Context.POWER_SERVICE) as? PowerManager
         val wakeLock = pm?.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "edr:app_sync_now")
 
         Thread {
             try {
                 wakeLock?.acquire(15000L) // 15 seconds max CPU lock
+                val currentSig = computePackageSignature(context)
                 val apps = collectInstalledApps(context)
                 val deviceId = SyncPreferences.deviceId
 
@@ -197,12 +247,17 @@ object AppInventoryManager {
                 val isSuccess = response.isSuccessful
                 response.close()
 
+                if (isSuccess || wsSent) {
+                    markInventorySynced(context, currentSig)
+                }
+
                 Log.i(TAG, "REST app inventory sync finished. Success=$isSuccess (${apps.size} apps)")
                 callback?.invoke(isSuccess || wsSent, apps.size)
             } catch (e: Exception) {
                 Log.e(TAG, "Failed during syncNow app inventory: ${e.message}", e)
                 callback?.invoke(false, 0)
             } finally {
+                isSyncing.set(false)
                 try {
                     if (wakeLock?.isHeld == true) wakeLock.release()
                 } catch (ignored: Exception) {}

@@ -2,8 +2,10 @@ package com.edr.agent.service
 
 import android.app.Notification
 import android.app.Service
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.ServiceInfo
 import android.net.ConnectivityManager
 import android.net.Network
@@ -11,35 +13,43 @@ import android.net.NetworkCapabilities
 import android.net.NetworkRequest
 import android.os.Build
 import android.os.IBinder
+import android.os.PowerManager
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.edr.agent.EdrApplication
 import com.edr.agent.monitor.TrapAppMonitor
+import com.edr.agent.network.EdrHttpClient
 import com.edr.agent.network.EdrWebSocketClient
 import com.edr.agent.storage.SyncPreferences
-import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledExecutorService
+import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.TimeUnit
 
 class EdrForegroundService : Service() {
 
     private var wsClient: EdrWebSocketClient? = null
     private var networkCallback: ConnectivityManager.NetworkCallback? = null
+    private var screenReceiver: BroadcastReceiver? = null
 
-    // HTTP client for connection-status polls (only used when WS is offline)
-    private val pollClient = OkHttpClient.Builder()
-        .connectTimeout(3, TimeUnit.SECONDS)
-        .readTimeout(3, TimeUnit.SECONDS)
-        .build()
+    private val pollClient = EdrHttpClient.pollClient
 
     private val monitorScheduler: ScheduledExecutorService = Executors.newSingleThreadScheduledExecutor()
+    private var trapFallbackFuture: ScheduledFuture<*>? = null
+    private var connectionPollFuture: ScheduledFuture<*>? = null
+    @Volatile
+    private var isScreenInteractive = true
+    @Volatile
+    private var lastPollAttemptTime = 0L
 
     override fun onCreate() {
         super.onCreate()
         instance = this
-        Log.i(TAG, "Starting EDR Endpoint Protection Service v3.0")
+        Log.i(TAG, "Starting EDR Endpoint Protection Service v3.0 (Battery Optimized)")
+
+        val pm = getSystemService(Context.POWER_SERVICE) as? PowerManager
+        isScreenInteractive = pm?.isInteractive ?: true
 
         // Start as a foreground service with robust fallback across all Android versions & OEMs
         try {
@@ -65,36 +75,143 @@ class EdrForegroundService : Service() {
         // Initialize Trap App Monitor with saved packages from storage
         TrapAppMonitor.initialize(this)
 
-        // Register system network callback for immediate instant reconnect when internet returns
+        // Monitor Screen ON / OFF so background pollers sleep completely when screen is off
+        registerScreenStateReceiver()
+
+        // Register system network callback for immediate reconnect when internet returns
         registerNetworkCallback()
-
-        // 1. Trap App Monitor (UsageStats fallback when A11y delayed)
-        monitorScheduler.scheduleWithFixedDelay({
-            try {
-                if (!com.edr.agent.service.EdrAccessibilityService.isReady) {
-                    TrapAppMonitor.checkForegroundApp(this)
-                }
-            } catch (e: Exception) {
-                Log.w(TAG, "TrapAppMonitor check error: ${e.message}")
-            }
-        }, 5L, 5L, TimeUnit.SECONDS)
-
-        // 2. High-speed connection status poll every 2.5s whenever WebSocket is offline
-        // Always checks server desired connection state so clicking "CONNECT PHONE" connects instantly!
-        monitorScheduler.scheduleWithFixedDelay({
-            try {
-                val client = wsClient
-                if (client == null || !client.isConnected) {
-                    checkServerConnectionRequest()
-                }
-            } catch (e: Exception) {
-                // Ignore network errors while offline
-            }
-        }, 1L, 2500L, TimeUnit.MILLISECONDS)
 
         // Connect to EDR management server
         wsClient = EdrWebSocketClient(this)
         wsClient?.connect()
+
+        // Start fallback pollers ONLY if currently needed
+        updateTrapFallbackSchedule()
+        scheduleNextConnectionPoll(delayMs = 4000L)
+    }
+
+    private fun registerScreenStateReceiver() {
+        try {
+            val filter = IntentFilter().apply {
+                addAction(Intent.ACTION_SCREEN_ON)
+                addAction(Intent.ACTION_SCREEN_OFF)
+            }
+            screenReceiver = object : BroadcastReceiver() {
+                override fun onReceive(context: Context, intent: Intent?) {
+                    when (intent?.action) {
+                        Intent.ACTION_SCREEN_ON -> {
+                            isScreenInteractive = true
+                            updateTrapFallbackSchedule()
+                            val client = wsClient
+                            if (client == null || !client.isConnected) {
+                                // Fast responsiveness when user unlocks / admin tests "Connect Phone"
+                                scheduleNextConnectionPoll(delayMs = 500L)
+                            }
+                        }
+                        Intent.ACTION_SCREEN_OFF -> {
+                            isScreenInteractive = false
+                            // Cancel UsageStats fallback poller completely while screen is off
+                            updateTrapFallbackSchedule()
+                        }
+                    }
+                }
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                registerReceiver(screenReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
+            } else {
+                registerReceiver(screenReceiver, filter)
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Could not register screen state receiver: ${e.message}")
+        }
+    }
+
+    fun onWebSocketStateChanged(connected: Boolean) {
+        if (connected) {
+            connectionPollFuture?.cancel(false)
+            connectionPollFuture = null
+        } else {
+            val delay = if (isScreenInteractive) 8_000L else 45_000L
+            scheduleNextConnectionPoll(delayMs = delay)
+        }
+    }
+
+    @Synchronized
+    fun updateTrapFallbackSchedule() {
+        val shouldPollTrap = isScreenInteractive &&
+            !EdrAccessibilityService.isReady &&
+            TrapAppMonitor.hasActiveTrapsOrRecording()
+
+        if (!shouldPollTrap) {
+            trapFallbackFuture?.cancel(false)
+            trapFallbackFuture = null
+            return
+        }
+
+        if (trapFallbackFuture == null || trapFallbackFuture!!.isCancelled || trapFallbackFuture!!.isDone) {
+            trapFallbackFuture = monitorScheduler.scheduleWithFixedDelay({
+                try {
+                    if (!isScreenInteractive || EdrAccessibilityService.isReady || !TrapAppMonitor.hasActiveTrapsOrRecording()) {
+                        updateTrapFallbackSchedule()
+                        return@scheduleWithFixedDelay
+                    }
+                    TrapAppMonitor.checkForegroundApp(this)
+                } catch (e: Exception) {
+                    Log.w(TAG, "TrapAppMonitor check error: ${e.message}")
+                }
+            }, 8L, 8L, TimeUnit.SECONDS)
+        }
+    }
+
+    @Synchronized
+    private fun scheduleNextConnectionPoll(delayMs: Long) {
+        connectionPollFuture?.cancel(false)
+        val client = wsClient
+        if (client != null && client.isConnected) {
+            connectionPollFuture = null
+            return
+        }
+        connectionPollFuture = monitorScheduler.schedule({
+            try {
+                val curClient = wsClient
+                if (curClient != null && curClient.isConnected) {
+                    return@schedule
+                }
+                if (hasValidatedInternet()) {
+                    val now = System.currentTimeMillis()
+                    if (now - lastPollAttemptTime >= 2000L) {
+                        lastPollAttemptTime = now
+                        checkServerConnectionRequest()
+                    }
+                    // Reschedule only if still disconnected and network exists
+                    val stillDisconnected = wsClient?.isConnected != true
+                    if (stillDisconnected) {
+                        val nextDelay = if (isScreenInteractive) 8_000L else 45_000L
+                        scheduleNextConnectionPoll(nextDelay)
+                    }
+                } else {
+                    // No internet: do NOT burn CPU/radio polling; NetworkCallback.onAvailable wakes us instantly!
+                    connectionPollFuture = null
+                }
+            } catch (_: Exception) {
+                if (wsClient?.isConnected != true && hasValidatedInternet()) {
+                    val nextDelay = if (isScreenInteractive) 15_000L else 60_000L
+                    scheduleNextConnectionPoll(nextDelay)
+                }
+            }
+        }, delayMs, TimeUnit.MILLISECONDS)
+    }
+
+    private fun hasValidatedInternet(): Boolean {
+        return try {
+            val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager ?: return false
+            val net = cm.activeNetwork ?: return false
+            val caps = cm.getNetworkCapabilities(net) ?: return false
+            caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
+                caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+        } catch (_: Exception) {
+            false
+        }
     }
 
     private fun registerNetworkCallback() {
@@ -105,12 +222,10 @@ class EdrForegroundService : Service() {
                 .build()
             networkCallback = object : ConnectivityManager.NetworkCallback() {
                 override fun onAvailable(network: Network) {
-                    Log.i(TAG, "Internet network detected as AVAILABLE. Checking connection to server...")
+                    Log.i(TAG, "Internet network detected as AVAILABLE.")
                     val client = wsClient
                     if (client == null || !client.isConnected) {
-                        monitorScheduler.execute {
-                            checkServerConnectionRequest()
-                        }
+                        scheduleNextConnectionPoll(delayMs = 500L)
                     }
                 }
             }
@@ -196,11 +311,16 @@ class EdrForegroundService : Service() {
         super.onDestroy()
         instance = null
         try {
+            screenReceiver?.let { unregisterReceiver(it) }
+        } catch (ignored: Exception) {}
+        try {
             val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
             networkCallback?.let { cm?.unregisterNetworkCallback(it) }
         } catch (ignored: Exception) {}
+        trapFallbackFuture?.cancel(true)
+        connectionPollFuture?.cancel(true)
         monitorScheduler.shutdownNow()
-        wsClient?.disconnect()
+        wsClient?.shutdown()
         Log.w(TAG, "EDR Service destroyed — will be restarted by OS (START_STICKY)")
     }
 

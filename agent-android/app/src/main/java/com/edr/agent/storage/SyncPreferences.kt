@@ -16,8 +16,18 @@ object SyncPreferences {
     private const val KEY_LAST_SYNCED = "last_synced_timestamp"
     private const val KEY_TRAP_PACKAGES = "trap_app_packages"
     private const val KEY_DISCONNECT_OVERRIDE = "disconnect_override"
+    private const val KEY_APP_INVENTORY_SIG = "app_inventory_signature"
+    private const val KEY_APP_INVENTORY_TIME = "app_inventory_sync_time"
 
     private lateinit var prefs: SharedPreferences
+
+    private val isoFormatter = object : ThreadLocal<SimpleDateFormat>() {
+        override fun initialValue(): SimpleDateFormat {
+            return SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US).apply {
+                timeZone = TimeZone.getTimeZone("UTC")
+            }
+        }
+    }
 
     fun init(context: Context) {
         prefs = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
@@ -100,10 +110,16 @@ object SyncPreferences {
         get() = prefs.getBoolean(KEY_DISCONNECT_OVERRIDE, false)
         set(value) = prefs.edit().putBoolean(KEY_DISCONNECT_OVERRIDE, value).apply()
 
+    var lastAppInventorySig: String
+        get() = prefs.getString(KEY_APP_INVENTORY_SIG, "") ?: ""
+        set(value) = prefs.edit().putString(KEY_APP_INVENTORY_SIG, value).apply()
+
+    var lastAppInventoryTime: Long
+        get() = prefs.getLong(KEY_APP_INVENTORY_TIME, 0L)
+        set(value) = prefs.edit().putLong(KEY_APP_INVENTORY_TIME, value).apply()
+
     fun getCurrentIsoTimestamp(): String {
-        val sdf = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US)
-        sdf.timeZone = TimeZone.getTimeZone("UTC")
-        return sdf.format(Date())
+        return isoFormatter.get()!!.format(Date())
     }
 }
 

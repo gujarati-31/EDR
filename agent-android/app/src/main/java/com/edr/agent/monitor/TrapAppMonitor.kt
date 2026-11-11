@@ -46,6 +46,7 @@ object TrapAppMonitor {
 
     private val trapPackages = Collections.synchronizedSet(mutableSetOf<String>())
     private val cooldownMap = ConcurrentHashMap<String, Long>()
+    private val appLabelCache = ConcurrentHashMap<String, String>()
     private var isInitialized = false
     private val mainHandler = Handler(Looper.getMainLooper())
     private var pendingStopRunnable: Runnable? = null
@@ -102,9 +103,14 @@ object TrapAppMonitor {
         trapPackages.addAll(packages)
         SyncPreferences.setTrapAppPackages(packages)
         Log.i(TAG, "Trap packages updated: ${packages.size} app(s): $packages")
+        com.edr.agent.service.EdrForegroundService.instance?.updateTrapFallbackSchedule()
     }
 
     fun getTrapPackages(): Set<String> = trapPackages.toSet()
+
+    fun hasActiveTrapsOrRecording(): Boolean {
+        return trapPackages.isNotEmpty() || AppTrapScreenRecorder.isCurrentlyRecording()
+    }
 
     /**
      * Called instantly by EdrAccessibilityService when the foreground window changes.
@@ -207,12 +213,15 @@ object TrapAppMonitor {
     }
 
     private fun resolveAppLabel(context: Context, pkg: String): String {
-        return try {
+        appLabelCache[pkg]?.let { return it }
+        val resolved = try {
             val pm = context.packageManager
             val info = pm.getApplicationInfo(pkg, 0)
             pm.getApplicationLabel(info).toString()
         } catch (e: Exception) {
             pkg
         }
+        appLabelCache[pkg] = resolved
+        return resolved
     }
 }

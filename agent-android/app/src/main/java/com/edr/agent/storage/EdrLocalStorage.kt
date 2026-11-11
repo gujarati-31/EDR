@@ -13,13 +13,21 @@ import java.io.PrintWriter
 object EdrLocalStorage {
 
     private const val TAG = "EdrLocalStorage"
+    private const val MAX_LOG_SIZE_BYTES = 2L * 1024L * 1024L // 2 MB cap
     private val gson = GsonBuilder().setPrettyPrinting().create()
+    @Volatile
+    private var cachedEdrDir: File? = null
 
     /**
      * Resolves the primary /EDR directory on local phone storage.
-     * Prefers /sdcard/EDR. Falls back to external files dir if /sdcard is blocked.
+     * Caches the writable directory to avoid probing filesystem paths on every log write.
      */
     fun getEdrDir(context: Context): File {
+        val cached = cachedEdrDir
+        if (cached != null && cached.exists() && cached.canWrite()) {
+            return cached
+        }
+
         val candidates = listOf(
             File(Environment.getExternalStorageDirectory(), "EDR"),
             File("/sdcard/EDR"),
@@ -33,6 +41,7 @@ object EdrLocalStorage {
                     dir.mkdirs()
                 }
                 if (dir.exists() && dir.canWrite()) {
+                    cachedEdrDir = dir
                     return dir
                 }
             } catch (e: Exception) {
@@ -43,6 +52,7 @@ object EdrLocalStorage {
         // Ultimate fallback: internal app files
         val internalDir = File(context.filesDir, "EDR")
         internalDir.mkdirs()
+        cachedEdrDir = internalDir
         return internalDir
     }
 
@@ -90,12 +100,18 @@ object EdrLocalStorage {
     }
 
     /**
-     * Appends an audit event to /EDR/edr_telemetry.log
+     * Appends an audit event to /EDR/edr_telemetry.log (rotates if > 2 MB).
      */
+    @Synchronized
     fun appendEdrLog(context: Context, tag: String, message: String) {
         try {
             val edrDir = getEdrDir(context)
             val logFile = File(edrDir, "edr_telemetry.log")
+            if (logFile.exists() && logFile.length() > MAX_LOG_SIZE_BYTES) {
+                val backup = File(edrDir, "edr_telemetry.log.old")
+                backup.delete()
+                logFile.renameTo(backup)
+            }
             val timestamp = SyncPreferences.getCurrentIsoTimestamp()
 
             PrintWriter(FileWriter(logFile, true)).use { out ->

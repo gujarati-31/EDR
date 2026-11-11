@@ -77,7 +77,7 @@ object ActiveResponder {
                 "GET_APPS" -> {
                     com.edr.agent.telemetry.AppInventoryManager.syncNow(context, { msg ->
                         com.edr.agent.service.EdrForegroundService.instance?.sendWebSocketMessage(msg) ?: false
-                    })
+                    }, force = true)
                     Pair("EXECUTED", "Instant application inventory scan and sync initiated")
                 }
 
@@ -85,7 +85,7 @@ object ActiveResponder {
                     // Trigger immediate delta harvest, device info, screen time, and app inventory forward!
                     com.edr.agent.telemetry.AppInventoryManager.syncNow(context, { msg ->
                         com.edr.agent.service.EdrForegroundService.instance?.sendWebSocketMessage(msg) ?: false
-                    })
+                    }, force = false)
                     SyncScheduler.triggerImmediateSync(context)
                     Pair("EXECUTED", "Immediate device telemetry & log harvest initiated")
                 }
