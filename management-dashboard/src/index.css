@@ -12,7 +12,16 @@
       radial-gradient(circle at 100% 100%, rgba(139, 92, 246, 0.05) 0%, transparent 50%);
     background-attachment: fixed;
     min-height: 100vh;
+    overflow-x: hidden;
   }
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
 }
 
 /* Cyber Scanline & Glow Utilities */

@@ -625,9 +625,9 @@ export const LiveScreenViewer: React.FC<LiveScreenViewerProps> = ({
       {/* Main Streaming Display Area */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
         {/* Left Column: Phone Bezel Container with GPU Hardware Accelerated Canvas */}
-        <div className="lg:col-span-7 flex flex-col items-center justify-center p-6 bg-slate-950/80 rounded-2xl border border-slate-800/80 shadow-inner">
+        <div className="lg:col-span-7 flex flex-col items-center justify-center p-3 sm:p-6 bg-slate-950/80 rounded-2xl border border-slate-800/80 shadow-inner">
           {/* Realistic Phone Bezel */}
-          <div className="relative w-[310px] sm:w-[340px] aspect-[9/19.5] bg-black rounded-[44px] p-3.5 shadow-2xl shadow-black ring-1 ring-slate-800 border-4 border-slate-850 flex flex-col">
+          <div className="relative w-full max-w-[300px] sm:max-w-[340px] aspect-[9/19.5] bg-black rounded-[38px] sm:rounded-[44px] p-2.5 sm:p-3.5 shadow-2xl shadow-black ring-1 ring-slate-800 border-4 border-slate-850 flex flex-col">
             {/* Top Speaker Notch */}
             <div className="absolute top-4 left-1/2 -translate-x-1/2 w-24 h-4 bg-black rounded-full z-20 flex items-center justify-center space-x-2">
               <div className="w-2.5 h-2.5 rounded-full bg-slate-900 ring-1 ring-slate-800"></div>

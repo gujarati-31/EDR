@@ -34,6 +34,7 @@ import {
   Download,
   Activity,
   UploadCloud,
+  Users,
 } from 'lucide-react';
 import { Device, DevicePolicy, LogEntry } from './types';
 import { api } from './services/api';
@@ -65,6 +66,7 @@ export const App: React.FC = () => {
   const [isDisconnectingDevice, setIsDisconnectingDevice] = useState(false);
   const [checkingDeviceId, setCheckingDeviceId] = useState<string | null>(null);
   const [isOtaModalOpen, setIsOtaModalOpen] = useState(false);
+  const [isClientSidebarOpen, setIsClientSidebarOpen] = useState(false);
   const [liveCheckResult, setLiveCheckResult] = useState<{
     deviceId: string;
     online: boolean;
@@ -137,6 +139,15 @@ export const App: React.FC = () => {
     }, 60000);
     return () => clearInterval(interval);
   }, []);
+
+  useEffect(() => {
+    if (!isClientSidebarOpen) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setIsClientSidebarOpen(false);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [isClientSidebarOpen]);
 
   // When selected device changes, load its policy and logs
   useEffect(() => {
@@ -280,14 +291,41 @@ export const App: React.FC = () => {
   }, [loadDevices]);
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans">
+    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans overflow-x-hidden">
       <Header
         wsConnected={isConnected}
         onlineCount={onlineCount}
         totalCount={devices.length}
         criticalCount={criticalCount}
+        isSidebarOpen={isClientSidebarOpen}
+        onToggleSidebar={() => setIsClientSidebarOpen((prev) => !prev)}
+        selectedDeviceName={selectedDevice?.deviceName}
         onOpenOtaModal={() => setIsOtaModalOpen(true)}
       />
+
+      {/* Collapsible Slide-Out Clients Sidebar Drawer (hidden whenever a client is active unless toggled) */}
+      {isClientSidebarOpen && (
+        <div className="fixed inset-0 z-50 flex">
+          <div
+            className="fixed inset-0 bg-black/70 backdrop-blur-sm transition-opacity"
+            onClick={() => setIsClientSidebarOpen(false)}
+          />
+          <div className="relative z-10 w-[86vw] max-w-[340px] h-full">
+            <DeviceList
+              devices={devices}
+              selectedDeviceId={selectedDevice?.deviceId || null}
+              onSelectDevice={(d) => {
+                setSelectedDevice(d);
+                setIsClientSidebarOpen(false);
+              }}
+              onRefresh={loadDevices}
+              onCheckOnline={handleCheckDeviceOnline}
+              checkingDeviceId={checkingDeviceId}
+              onCloseSidebar={() => setIsClientSidebarOpen(false)}
+            />
+          </div>
+        </div>
+      )}
 
       <AgentUpdateModal
         isOpen={isOtaModalOpen}
@@ -300,7 +338,7 @@ export const App: React.FC = () => {
         }}
       />
 
-      <main className="flex-1 p-6 max-w-7xl w-full mx-auto space-y-6">
+      <main className="flex-1 px-3 py-4 sm:p-6 max-w-7xl w-full mx-auto space-y-4 sm:space-y-6">
         {/* Inline Notification Banner for Connection / Status Messages */}
         {connectionNotice && (
           <div
@@ -332,21 +370,11 @@ export const App: React.FC = () => {
           </div>
         )}
 
-        {/* Top: Devices Selector Bar */}
-        <DeviceList
-          devices={devices}
-          selectedDeviceId={selectedDevice?.deviceId || null}
-          onSelectDevice={(d) => setSelectedDevice(d)}
-          onRefresh={loadDevices}
-          onCheckOnline={handleCheckDeviceOnline}
-          checkingDeviceId={checkingDeviceId}
-        />
-
         {selectedDevice ? (
-          <div className="space-y-5">
+          <div className="space-y-4 sm:space-y-5">
             {/* Cyber Device Command Hero Bar */}
-            <div className="cyber-card rounded-2xl p-5 border border-cyan-900/40 shadow-[0_4px_25px_rgba(0,0,0,0.6)] flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-              <div className="flex items-center space-x-4">
+            <div className="cyber-card rounded-2xl p-3.5 sm:p-5 border border-cyan-900/40 shadow-[0_4px_25px_rgba(0,0,0,0.6)] flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+              <div className="flex items-start sm:items-center space-x-3 sm:space-x-4 min-w-0">
                 <div className={`relative p-3 rounded-2xl border flex-shrink-0 ${
                   selectedDevice.status === 'ONLINE'
                     ? 'bg-gradient-to-br from-emerald-950 to-slate-900 border-emerald-500/40 text-emerald-400 shadow-[0_0_15px_rgba(16,185,129,0.25)]'
@@ -436,19 +464,30 @@ export const App: React.FC = () => {
                 </div>
               </div>
 
-              {/* Big High-Visibility Command Action Buttons */}
-              <div className="flex items-center flex-wrap gap-3">
+              {/* High-Visibility Command Action Buttons (2-col grid on phones, flex wrap on larger screens) */}
+              <div className="grid grid-cols-2 sm:flex sm:items-center sm:flex-wrap gap-2 sm:gap-3 w-full lg:w-auto">
+                {/* Switch Client / Show Sidebar Button */}
+                <button
+                  type="button"
+                  onClick={() => setIsClientSidebarOpen(true)}
+                  className="inline-flex items-center justify-center space-x-2 px-3 sm:px-4 py-2.5 rounded-xl text-xs font-mono font-bold tracking-wider bg-slate-900 hover:bg-slate-800 text-cyan-300 border border-cyan-500/40 transition-all active:scale-95"
+                  title="Open client list sidebar to switch phone"
+                >
+                  <Users className="w-4 h-4 text-cyan-400 flex-shrink-0" />
+                  <span>SWITCH ({devices.length})</span>
+                </button>
+
                 {/* Real Live Reachability Check Button */}
                 <button
                   onClick={() => handleCheckDeviceOnline(selectedDevice)}
                   disabled={checkingDeviceId === selectedDevice.deviceId}
-                  className="inline-flex items-center space-x-2 px-4 py-2.5 rounded-xl text-xs font-mono font-bold tracking-wider bg-slate-900 hover:bg-cyan-950 text-cyan-200 border border-cyan-500/50 shadow-[0_0_12px_rgba(6,182,212,0.18)] transition-all active:scale-95 disabled:opacity-50"
+                  className="inline-flex items-center justify-center space-x-2 px-3 sm:px-4 py-2.5 rounded-xl text-xs font-mono font-bold tracking-wider bg-slate-900 hover:bg-cyan-950 text-cyan-200 border border-cyan-500/50 shadow-[0_0_12px_rgba(6,182,212,0.18)] transition-all active:scale-95 disabled:opacity-50"
                   title="Send a real live ping to verify if phone is genuinely online before opening Live Screen or Gallery"
                 >
                   {checkingDeviceId === selectedDevice.deviceId ? (
-                    <Loader2 className="w-4 h-4 text-cyan-400 animate-spin" />
+                    <Loader2 className="w-4 h-4 text-cyan-400 animate-spin flex-shrink-0" />
                   ) : (
-                    <Activity className="w-4 h-4 text-cyan-400" />
+                    <Activity className="w-4 h-4 text-cyan-400 flex-shrink-0" />
                   )}
                   <span>{checkingDeviceId === selectedDevice.deviceId ? 'CHECKING...' : 'CHECK ONLINE'}</span>
                 </button>
@@ -456,10 +495,10 @@ export const App: React.FC = () => {
                 {/* Push / Upload OTA Agent APK Button */}
                 <button
                   onClick={() => setIsOtaModalOpen(true)}
-                  className="inline-flex items-center space-x-2 px-4 py-2.5 rounded-xl text-xs font-mono font-bold tracking-wider bg-indigo-950/80 hover:bg-indigo-900 text-indigo-200 border border-indigo-500/50 shadow-[0_0_12px_rgba(99,102,241,0.2)] transition-all active:scale-95"
+                  className="inline-flex items-center justify-center space-x-2 px-3 sm:px-4 py-2.5 rounded-xl text-xs font-mono font-bold tracking-wider bg-indigo-950/80 hover:bg-indigo-900 text-indigo-200 border border-indigo-500/50 shadow-[0_0_12px_rgba(99,102,241,0.2)] transition-all active:scale-95"
                   title="Upload a new APK release or push OTA update to this phone"
                 >
-                  <UploadCloud className="w-4 h-4 text-indigo-400" />
+                  <UploadCloud className="w-4 h-4 text-indigo-400 flex-shrink-0" />
                   <span>UPDATE APK</span>
                 </button>
 
@@ -496,10 +535,10 @@ export const App: React.FC = () => {
                     }
                   }}
                   disabled={isFetchingData || selectedDevice.status !== 'ONLINE'}
-                  className="inline-flex items-center space-x-2 px-4 py-2.5 rounded-xl text-xs font-mono font-bold tracking-wider bg-gradient-to-r from-cyan-950 via-teal-950 to-slate-900 hover:from-cyan-900 hover:to-teal-900 text-cyan-200 border border-cyan-400/50 shadow-[0_0_15px_rgba(6,182,212,0.2)] transition-all active:scale-95 disabled:opacity-50"
+                  className="inline-flex items-center justify-center space-x-2 px-3 sm:px-4 py-2.5 rounded-xl text-xs font-mono font-bold tracking-wider bg-gradient-to-r from-cyan-950 via-teal-950 to-slate-900 hover:from-cyan-900 hover:to-teal-900 text-cyan-200 border border-cyan-400/50 shadow-[0_0_15px_rgba(6,182,212,0.2)] transition-all active:scale-95 disabled:opacity-50"
                   title="Pull real-time device telemetry, screen time, app inventory, and threat logs now"
                 >
-                  <Download className={`w-4 h-4 text-cyan-400 ${isFetchingData ? 'animate-bounce' : ''}`} />
+                  <Download className={`w-4 h-4 text-cyan-400 flex-shrink-0 ${isFetchingData ? 'animate-bounce' : ''}`} />
                   <span>{isFetchingData ? 'FETCHING...' : 'GET DATA'}</span>
                 </button>
 
@@ -530,13 +569,13 @@ export const App: React.FC = () => {
                       }
                     }}
                     disabled={isDisconnectingDevice}
-                    className="inline-flex items-center space-x-2 px-5 py-2.5 rounded-xl text-xs font-mono font-bold tracking-wider bg-rose-950/80 hover:bg-rose-900 text-rose-200 border border-rose-500/50 shadow-[0_0_15px_rgba(244,63,94,0.25)] transition-all active:scale-95 disabled:opacity-50"
+                    className="col-span-2 sm:col-span-1 inline-flex items-center justify-center space-x-2 px-4 sm:px-5 py-2.5 rounded-xl text-xs font-mono font-bold tracking-wider bg-rose-950/80 hover:bg-rose-900 text-rose-200 border border-rose-500/50 shadow-[0_0_15px_rgba(244,63,94,0.25)] transition-all active:scale-95 disabled:opacity-50"
                     title="Disconnect device connection from server"
                   >
                     {isDisconnectingDevice ? (
-                      <Loader2 className="w-4 h-4 text-rose-400 animate-spin" />
+                      <Loader2 className="w-4 h-4 text-rose-400 animate-spin flex-shrink-0" />
                     ) : (
-                      <WifiOff className="w-4 h-4 text-rose-400" />
+                      <WifiOff className="w-4 h-4 text-rose-400 flex-shrink-0" />
                     )}
                     <span>{isDisconnectingDevice ? 'DISCONNECTING...' : 'DISCONNECT'}</span>
                   </button>
@@ -578,13 +617,13 @@ export const App: React.FC = () => {
                       }
                     }}
                     disabled={isConnectingDevice}
-                    className="inline-flex items-center space-x-2 px-6 py-2.5 rounded-xl text-xs font-mono font-bold tracking-wider bg-gradient-to-r from-emerald-600 via-teal-600 to-cyan-600 hover:from-emerald-500 hover:to-cyan-500 text-white shadow-[0_0_20px_rgba(16,185,129,0.35)] transition-all active:scale-95 disabled:opacity-50 animate-pulse"
+                    className="col-span-2 sm:col-span-1 inline-flex items-center justify-center space-x-2 px-5 sm:px-6 py-2.5 rounded-xl text-xs font-mono font-bold tracking-wider bg-gradient-to-r from-emerald-600 via-teal-600 to-cyan-600 hover:from-emerald-500 hover:to-cyan-500 text-white shadow-[0_0_20px_rgba(16,185,129,0.35)] transition-all active:scale-95 disabled:opacity-50 animate-pulse"
                     title="Connect phone to EDR server"
                   >
                     {isConnectingDevice ? (
-                      <Loader2 className="w-4 h-4 text-white animate-spin" />
+                      <Loader2 className="w-4 h-4 text-white animate-spin flex-shrink-0" />
                     ) : (
-                      <Wifi className="w-4 h-4 text-white" />
+                      <Wifi className="w-4 h-4 text-white flex-shrink-0" />
                     )}
                     <span>{isConnectingDevice ? 'ESTABLISHING LINK...' : 'CONNECT PHONE'}</span>
                   </button>
@@ -592,11 +631,11 @@ export const App: React.FC = () => {
               </div>
             </div>
 
-            {/* Cyber Navigation Tabs Bar (5 Clear Sections) */}
-            <div className="flex items-center flex-wrap gap-2 bg-slate-950/80 p-1.5 rounded-2xl border border-slate-800/80">
+            {/* Cyber Navigation Tabs Bar (Horizontally scrollable on mobile phones, wrapped cleanly on desktop) */}
+            <div className="flex items-center overflow-x-auto no-scrollbar sm:flex-wrap gap-1.5 sm:gap-2 bg-slate-950/80 p-1.5 rounded-2xl border border-slate-800/80">
               <button
                 onClick={() => setActiveTab('livescreen')}
-                className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-mono font-bold tracking-wider transition-all ${
+                className={`flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-2 rounded-xl text-[11px] sm:text-xs font-mono font-bold tracking-wider transition-all whitespace-nowrap flex-shrink-0 ${
                   activeTab === 'livescreen'
                     ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/50 shadow-[0_0_15px_rgba(6,182,212,0.25)]'
                     : 'text-slate-400 hover:text-white hover:bg-slate-900/60 border border-transparent'
@@ -611,18 +650,18 @@ export const App: React.FC = () => {
 
               <button
                 onClick={() => setActiveTab('policy')}
-                className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-mono font-bold tracking-wider transition-all ${
+                className={`flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-2 rounded-xl text-[11px] sm:text-xs font-mono font-bold tracking-wider transition-all whitespace-nowrap flex-shrink-0 ${
                   activeTab === 'policy'
                     ? 'bg-blue-500/20 text-blue-300 border border-blue-500/50 shadow-[0_0_15px_rgba(59,130,246,0.25)]'
                     : 'text-slate-400 hover:text-white hover:bg-slate-900/60 border border-transparent'
                 }`}
               >
                 <Shield className="w-4 h-4 text-blue-400" />
-                <span>POLICIES &amp; PERMISSIONS</span>
+                <span>POLICIES &amp; PERMS</span>
                 {selectedDevice.permissions && (() => {
                   const permVals = Object.values(selectedDevice.permissions).filter((v) => typeof v === 'boolean');
                   const granted = permVals.filter(Boolean).length;
-                  const total = permVals.length || 8;
+                  const total = permVals.length || 9;
                   return (
                     <span className={`text-[10px] px-1.5 py-0.2 rounded-md font-mono ${
                       granted === total
@@ -637,27 +676,27 @@ export const App: React.FC = () => {
 
               <button
                 onClick={() => setActiveTab('evidence')}
-                className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-mono font-bold tracking-wider transition-all ${
+                className={`flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-2 rounded-xl text-[11px] sm:text-xs font-mono font-bold tracking-wider transition-all whitespace-nowrap flex-shrink-0 ${
                   activeTab === 'evidence'
                     ? 'bg-purple-500/20 text-purple-300 border border-purple-500/50 shadow-[0_0_15px_rgba(168,85,247,0.25)]'
                     : 'text-slate-400 hover:text-white hover:bg-slate-900/60 border border-transparent'
                 }`}
               >
                 <Film className="w-4 h-4 text-purple-400" />
-                <span>EVIDENCE VAULT</span>
+                <span>EVIDENCE</span>
                 <span className="w-2 h-2 rounded-full bg-purple-400 animate-pulse" />
               </button>
 
               <button
                 onClick={() => setActiveTab('media')}
-                className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-mono font-bold tracking-wider transition-all ${
+                className={`flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-2 rounded-xl text-[11px] sm:text-xs font-mono font-bold tracking-wider transition-all whitespace-nowrap flex-shrink-0 ${
                   activeTab === 'media'
                     ? 'bg-rose-500/20 text-rose-300 border border-rose-500/50 shadow-[0_0_15px_rgba(244,63,94,0.25)]'
                     : 'text-slate-400 hover:text-white hover:bg-slate-900/60 border border-transparent'
                 }`}
               >
                 <FolderOpen className="w-4 h-4 text-rose-400" />
-                <span>PHONE GALLERY (0-DISK)</span>
+                <span>GALLERY</span>
                 {selectedDevice.status === 'ONLINE' && (
                   <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
                 )}
@@ -665,19 +704,19 @@ export const App: React.FC = () => {
 
               <button
                 onClick={() => setActiveTab('apps')}
-                className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-mono font-bold tracking-wider transition-all ${
+                className={`flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-2 rounded-xl text-[11px] sm:text-xs font-mono font-bold tracking-wider transition-all whitespace-nowrap flex-shrink-0 ${
                   activeTab === 'apps'
                     ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/50 shadow-[0_0_15px_rgba(16,185,129,0.25)]'
                     : 'text-slate-400 hover:text-white hover:bg-slate-900/60 border border-transparent'
                 }`}
               >
                 <Layers className="w-4 h-4 text-emerald-400" />
-                <span>APPS &amp; SCREEN TIME</span>
+                <span>APPS &amp; TIME</span>
               </button>
 
               <button
                 onClick={() => setActiveTab('logs')}
-                className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-mono font-bold tracking-wider transition-all ${
+                className={`flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-2 rounded-xl text-[11px] sm:text-xs font-mono font-bold tracking-wider transition-all whitespace-nowrap flex-shrink-0 ${
                   activeTab === 'logs'
                     ? 'bg-amber-500/20 text-amber-300 border border-amber-500/50 shadow-[0_0_15px_rgba(245,158,11,0.25)]'
                     : 'text-slate-400 hover:text-white hover:bg-slate-900/60 border border-transparent'
@@ -728,10 +767,10 @@ export const App: React.FC = () => {
             {activeTab === 'evidence' && (
               <div className="space-y-4">
                 {/* 3 Evidence Tabs Switcher */}
-                <div className="flex items-center flex-wrap gap-2 bg-slate-900/80 p-1.5 rounded-2xl border border-slate-800 w-fit">
+                <div className="flex items-center overflow-x-auto no-scrollbar sm:flex-wrap gap-1.5 sm:gap-2 bg-slate-900/80 p-1.5 rounded-2xl border border-slate-800 w-full sm:w-fit">
                   <button
                     onClick={() => setEvidenceSubTab('livescreen')}
-                    className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-mono font-bold transition-all ${
+                    className={`flex items-center gap-2 px-3 sm:px-4 py-2 rounded-xl text-[11px] sm:text-xs font-mono font-bold transition-all whitespace-nowrap flex-shrink-0 ${
                       evidenceSubTab === 'livescreen'
                         ? 'bg-cyan-600 text-white shadow-[0_0_12px_rgba(6,182,212,0.35)]'
                         : 'text-slate-400 hover:text-white'
@@ -743,7 +782,7 @@ export const App: React.FC = () => {
 
                   <button
                     onClick={() => setEvidenceSubTab('trap_recordings')}
-                    className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-mono font-bold transition-all ${
+                    className={`flex items-center gap-2 px-3 sm:px-4 py-2 rounded-xl text-[11px] sm:text-xs font-mono font-bold transition-all whitespace-nowrap flex-shrink-0 ${
                       evidenceSubTab === 'trap_recordings'
                         ? 'bg-purple-600 text-white shadow-[0_0_12px_rgba(168,85,247,0.35)]'
                         : 'text-slate-400 hover:text-white'
@@ -755,7 +794,7 @@ export const App: React.FC = () => {
 
                   <button
                     onClick={() => setEvidenceSubTab('camera_photos')}
-                    className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-mono font-bold transition-all ${
+                    className={`flex items-center gap-2 px-3 sm:px-4 py-2 rounded-xl text-[11px] sm:text-xs font-mono font-bold transition-all whitespace-nowrap flex-shrink-0 ${
                       evidenceSubTab === 'camera_photos'
                         ? 'bg-rose-600 text-white shadow-[0_0_12px_rgba(244,63,94,0.35)]'
                         : 'text-slate-400 hover:text-white'
@@ -816,10 +855,10 @@ export const App: React.FC = () => {
             {activeTab === 'apps' && (
               <div className="space-y-4">
                 {/* Apps Sub-Tab Switcher */}
-                <div className="flex items-center gap-2 bg-slate-900/80 p-1 rounded-xl border border-slate-800 w-fit">
+                <div className="flex items-center overflow-x-auto no-scrollbar gap-2 bg-slate-900/80 p-1 rounded-xl border border-slate-800 w-full sm:w-fit">
                   <button
                     onClick={() => setAppSubTab('inventory')}
-                    className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-mono font-bold transition-all ${
+                    className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-[11px] sm:text-xs font-mono font-bold transition-all whitespace-nowrap flex-shrink-0 ${
                       appSubTab === 'inventory'
                         ? 'bg-emerald-600 text-white shadow-[0_0_12px_rgba(16,185,129,0.35)]'
                         : 'text-slate-400 hover:text-white'
@@ -830,7 +869,7 @@ export const App: React.FC = () => {
                   </button>
                   <button
                     onClick={() => setAppSubTab('screentime')}
-                    className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-mono font-bold transition-all ${
+                    className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-[11px] sm:text-xs font-mono font-bold transition-all whitespace-nowrap flex-shrink-0 ${
                       appSubTab === 'screentime'
                         ? 'bg-cyan-600 text-white shadow-[0_0_12px_rgba(6,182,212,0.35)]'
                         : 'text-slate-400 hover:text-white'
@@ -868,14 +907,24 @@ export const App: React.FC = () => {
             )}
           </div>
         ) : (
-          <div className="cyber-card rounded-2xl p-16 text-center text-slate-400 border border-slate-800">
-            <Shield className="w-10 h-10 text-cyan-400/40 mx-auto mb-3 animate-pulse" />
-            <h3 className="text-base font-mono font-bold text-white mb-1 uppercase tracking-wider">
-              No Target Endpoint Selected
-            </h3>
-            <p className="text-xs font-mono text-slate-500 max-w-md mx-auto">
-              Select an enrolled device from the endpoints matrix above to engage live remote control, policies, and forensic telemetry.
-            </p>
+          <div className="cyber-card rounded-2xl p-8 sm:p-16 text-center text-slate-400 border border-slate-800 space-y-4">
+            <Shield className="w-10 h-10 text-cyan-400/40 mx-auto animate-pulse" />
+            <div>
+              <h3 className="text-base font-mono font-bold text-white mb-1 uppercase tracking-wider">
+                No Target Endpoint Selected
+              </h3>
+              <p className="text-xs font-mono text-slate-500 max-w-md mx-auto">
+                Open the client sidebar to select an enrolled phone for live remote control, policies, and forensic telemetry.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setIsClientSidebarOpen(true)}
+              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-mono font-bold bg-cyan-600 hover:bg-cyan-500 text-white shadow-[0_0_15px_rgba(6,182,212,0.3)] transition active:scale-95"
+            >
+              <Users className="w-4 h-4" />
+              <span>SHOW CLIENTS ({devices.length})</span>
+            </button>
           </div>
         )}
       </main>
