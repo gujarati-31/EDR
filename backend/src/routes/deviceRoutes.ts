@@ -575,11 +575,25 @@ export function createDeviceRouter(gateway: EDRWebSocketGateway) {
     },
     filename: (req, file, cb) => {
       const deviceId = req.params.deviceId || 'device';
-      const timeSafe = new Date().toISOString().replace(/[:.]/g, '-');
+      const now = new Date();
+      const pad = (n: number) => String(n).padStart(2, '0');
+      const dateStr = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+      const timeStr = `${pad(now.getHours())}-${pad(now.getMinutes())}-${pad(now.getSeconds())}`;
       const ext = path.extname(file.originalname) || '.mp4';
       const isTrap = file.originalname.startsWith('trap_');
-      const prefix = isTrap ? 'trap' : 'livescreen';
-      cb(null, `${prefix}_${deviceId}_${timeSafe}${ext}`);
+      if (isTrap) {
+        const base = path.basename(file.originalname, ext);
+        const parts = base.replace(/^trap_/, '').split('__');
+        if (parts.length >= 3) {
+          const safeApp = parts[0].replace(/[^a-zA-Z0-9._ -]/g, '_').trim() || 'App';
+          cb(null, `trap_${safeApp} - ${parts[1]} - ${parts[2]}${ext}`);
+          return;
+        }
+        const rawApp = (req.body?.appName || 'App').toString().replace(/[^a-zA-Z0-9._ -]/g, '_').trim() || 'App';
+        cb(null, `trap_${rawApp} - ${dateStr} - ${timeStr}${ext}`);
+        return;
+      }
+      cb(null, `livescreen_${deviceId}_${dateStr}_${timeStr}${ext}`);
     },
   });
 
@@ -588,7 +602,7 @@ export function createDeviceRouter(gateway: EDRWebSocketGateway) {
   // Upload a live screen or trap video recording
   router.post('/:deviceId/recordings', uploadRecording.single('video'), (req, res) => {
     const { deviceId } = req.params;
-    const { duration, recordingType } = req.body;
+    const { duration, recordingType, appName, packageName } = req.body;
     const device = db.getDeviceById(deviceId);
     if (!device) {
       return res.status(404).json({ success: false, message: 'Device not found' });
@@ -599,6 +613,10 @@ export function createDeviceRouter(gateway: EDRWebSocketGateway) {
 
     const isTrap = req.file.filename.startsWith('trap_') || recordingType === 'APP_TRAP';
     const resolvedType: 'APP_TRAP' | 'LIVE_SCREEN' = isTrap ? 'APP_TRAP' : 'LIVE_SCREEN';
+    const parsedAppFromFile = req.file.filename.startsWith('trap_')
+      ? req.file.filename.replace(/^trap_/, '').split(' - ')[0]?.replace(/_/g, ' ').trim()
+      : undefined;
+    const resolvedAppName = (appName && String(appName).trim()) || parsedAppFromFile || undefined;
 
     // Encrypt video file in-place on disk with AES-256-GCM
     try {
@@ -612,6 +630,8 @@ export function createDeviceRouter(gateway: EDRWebSocketGateway) {
       filename: req.file.filename,
       url: `/uploads/recordings/${req.file.filename}`,
       recordingType: resolvedType,
+      appName: resolvedAppName,
+      packageName: packageName ? String(packageName) : undefined,
       duration: duration || '00:00',
       sizeBytes: req.file.size,
       timestamp: new Date().toISOString(),
@@ -665,10 +685,32 @@ export function createDeviceRouter(gateway: EDRWebSocketGateway) {
 
     try {
       const decrypted = readAndDecryptFile(filePath);
+      const total = decrypted.length;
+      const range = req.headers.range;
+
       res.setHeader('Content-Type', 'video/mp4');
-      res.setHeader('Content-Length', decrypted.length);
       res.setHeader('Accept-Ranges', 'bytes');
-      res.send(decrypted);
+      res.setHeader('Cache-Control', 'no-store');
+
+      if (range) {
+        const match = range.match(/bytes=(\d*)-(\d*)/);
+        if (!match) {
+          return res.status(416).setHeader('Content-Range', `bytes */${total}`).end();
+        }
+        const start = match[1] ? parseInt(match[1], 10) : 0;
+        const end = match[2] ? Math.min(parseInt(match[2], 10), total - 1) : total - 1;
+        if (start >= total || start > end) {
+          return res.status(416).setHeader('Content-Range', `bytes */${total}`).end();
+        }
+        const chunk = decrypted.subarray(start, end + 1);
+        res.status(206);
+        res.setHeader('Content-Range', `bytes ${start}-${end}/${total}`);
+        res.setHeader('Content-Length', chunk.length);
+        return res.send(chunk);
+      }
+
+      res.setHeader('Content-Length', total);
+      return res.send(decrypted);
     } catch (e: any) {
       res.status(500).json({ success: false, message: 'Decryption failed: ' + e.message });
     }

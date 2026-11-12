@@ -19,6 +19,9 @@ import okhttp3.MultipartBody
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.asRequestBody
 import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
@@ -36,7 +39,10 @@ object AppTrapScreenRecorder {
 
     private var recordThread: HandlerThread? = null
     private var recordHandler: Handler? = null
+    private var captureThread: HandlerThread? = null
+    private var captureHandler: Handler? = null
     private var frameTicker: Runnable? = null
+    private var screenshotTicker: Runnable? = null
 
     private var outputFile: File? = null
     private var mediaMuxer: MediaMuxer? = null
@@ -45,15 +51,18 @@ object AppTrapScreenRecorder {
     private var isMuxerStarted = false
     private var frameCount = 0L
 
-    // Forensic-grade resolution: 540p (540x1200) aligned to 16-pixel macroblocks.
-    // Good quality for identifying attacker activity. Lower than 720p to save battery & CPU.
-    private const val WIDTH = 544   // must be multiple of 16 → nearest to 540
-    private const val HEIGHT = 1200 // multiple of 16 → matches common screen aspect ratio
-    private const val BITRATE = 1_200_000 // 1.2 Mbps — sufficient for clear text/UI recognition
-    private const val FPS = 8 // 8 FPS — smooth enough for UI, much lower CPU/power than 10+ FPS
+    // Smooth 16 FPS resolution: 368x800 aligned to 16-pixel macroblocks.
+    // Matches the OS silent capture throughput (~16 unique FPS) so every encoded frame is fresh with zero stutter.
+    private const val WIDTH = 368   // must be multiple of 16 (23 * 16)
+    private const val HEIGHT = 800  // must be multiple of 16 (50 * 16)
+    private const val BITRATE = 1_500_000 // 1.5 Mbps — crisp video
+    private const val FPS = 16 // 16 FPS (62.5ms/frame) — smooth 1:1 playback matching capture rate
 
-    // Keep the most recent valid frame to repeat if transition animations temporarily block screenshots
-    private var lastValidFrame: Bitmap? = null
+    // Decoupled CFR frame buffer: capture thread updates latestYuv; encoder thread emits at exact 12 FPS
+    private val isTakingScreenshot = AtomicBoolean(false)
+    private val latestYuvLock = Any()
+    private var latestYuv: ByteArray? = null
+    private var tempYuv: ByteArray? = null
     private var reusableArgb: IntArray? = null
     private var reusableYuv: ByteArray? = null
     private var reusableBufferInfo: MediaCodec.BufferInfo? = null
@@ -80,7 +89,11 @@ object AppTrapScreenRecorder {
             val recDir = File(edrDir, "trap_recordings")
             if (!recDir.exists()) recDir.mkdirs()
 
-            val filename = "trap_${packageName}_${System.currentTimeMillis()}.mp4"
+            val now = Date()
+            val dateStr = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(now)
+            val timeStr = SimpleDateFormat("HH-mm-ss", Locale.US).format(now)
+            val safeAppName = appLabel.replace(Regex("[^a-zA-Z0-9._-]"), "_").trim('_').ifEmpty { packageName }
+            val filename = "trap_${safeAppName}__${dateStr}__${timeStr}.mp4"
             outputFile = File(recDir, filename)
 
             currentPackageName = packageName
@@ -89,8 +102,7 @@ object AppTrapScreenRecorder {
             frameCount = 0L
             isMuxerStarted = false
             videoTrackIndex = -1
-            lastValidFrame?.recycle()
-            lastValidFrame = null
+            isTakingScreenshot.set(false)
 
             // Setup MediaCodec H.264 video encoder
             val encoder = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_VIDEO_AVC)
@@ -111,83 +123,112 @@ object AppTrapScreenRecorder {
 
             recordThread = HandlerThread("EDR_TrapRecorderThread").apply { start() }
             recordHandler = Handler(recordThread!!.looper)
+            captureThread = HandlerThread("EDR_TrapCaptureThread").apply { start() }
+            captureHandler = Handler(captureThread!!.looper)
+
+            val yuvSize = WIDTH * HEIGHT * 3 / 2
+            reusableArgb = IntArray(WIDTH * HEIGHT)
+            reusableYuv = ByteArray(yuvSize)
+            latestYuv = ByteArray(yuvSize)
+            tempYuv = ByteArray(yuvSize)
+            reusableBufferInfo = MediaCodec.BufferInfo()
 
             isRecording.set(true)
             Log.i(TAG, "Started App Trap screen recording for $appLabel ($packageName) -> ${outputFile!!.name}")
             EdrLocalStorage.appendEdrLog(context, "TRAP_REC", "Started screen recording for $appLabel ($packageName)")
 
-            // Immediate baseline frame so MediaCodec emits format and MediaMuxer starts right away
+            // Seed initial dark frame into latestYuv and encode frame #0 immediately
             try {
                 val initialBitmap = Bitmap.createBitmap(WIDTH, HEIGHT, Bitmap.Config.ARGB_8888)
                 val canvas = android.graphics.Canvas(initialBitmap)
                 canvas.drawColor(android.graphics.Color.rgb(15, 23, 42))
-                encodeFrame(initialBitmap)
-                lastValidFrame = initialBitmap
+                val seedYuv = bitmapToNv12(initialBitmap, WIDTH, HEIGHT)
+                synchronized(latestYuvLock) {
+                    System.arraycopy(seedYuv, 0, latestYuv!!, 0, yuvSize)
+                }
+                initialBitmap.recycle()
+                encodeYuvFrame(seedYuv)
             } catch (e: Exception) {
                 Log.w(TAG, "Could not seed initial frame: ${e.message}")
             }
 
             val powerManager = context.getSystemService(Context.POWER_SERVICE) as? PowerManager
-            reusableArgb = IntArray(WIDTH * HEIGHT)
-            reusableYuv = ByteArray(WIDTH * HEIGHT * 3 / 2)
-            reusableBufferInfo = MediaCodec.BufferInfo()
 
-            // Frame capture loop at 8 FPS (throttled to 1 FPS if screen turns off)
-            frameTicker = object : Runnable {
+            // Loop A: Independent silent screenshot grabber on captureThread.
+            // Chains next capture 35ms after completion to maximize smoothness without overlapping.
+            screenshotTicker = object : Runnable {
                 override fun run() {
                     if (!isRecording.get()) return
-
                     if (powerManager?.isInteractive == false) {
-                        recordHandler?.postDelayed(this, 1000L)
+                        captureHandler?.postDelayed(this, 800L)
                         return
                     }
 
                     val a11y = EdrAccessibilityService.instance
-                    if (a11y != null) {
-                        a11y.takeSilentScreenshot(WIDTH) { bitmap ->
-                            val handler = recordHandler
-                            if (!isRecording.get() || handler == null) {
-                                bitmap?.recycle()
-                                return@takeSilentScreenshot
-                            }
-
-                            handler.post {
-                                synchronized(encoderLock) {
-                                    if (!isRecording.get()) {
-                                        bitmap?.recycle()
-                                        return@synchronized
-                                    }
-
-                                    if (bitmap != null) {
-                                        encodeFrame(bitmap)
-                                        // Retain bitmap directly as lastValidFrame instead of copying 2.6MB per frame
-                                        if (lastValidFrame !== bitmap) {
-                                            lastValidFrame?.recycle()
-                                            lastValidFrame = bitmap
-                                        }
+                    if (a11y != null && isTakingScreenshot.compareAndSet(false, true)) {
+                        a11y.takeSilentScreenshot(WIDTH, HEIGHT) { bitmap ->
+                            try {
+                                if (isRecording.get() && bitmap != null) {
+                                    val scaled = if (bitmap.width == WIDTH && bitmap.height == HEIGHT) {
+                                        bitmap
                                     } else {
-                                        // Reuse last valid frame during window animations so video does not drop frames
-                                        val cached = lastValidFrame
-                                        if (cached != null && !cached.isRecycled) {
-                                            encodeFrame(cached)
+                                        Bitmap.createScaledBitmap(bitmap, WIDTH, HEIGHT, false)
+                                    }
+                                    val converted = bitmapToNv12(scaled, WIDTH, HEIGHT)
+                                    if (scaled !== bitmap) scaled.recycle()
+                                    bitmap.recycle()
+                                    synchronized(latestYuvLock) {
+                                        latestYuv?.let { dest ->
+                                            System.arraycopy(converted, 0, dest, 0, dest.size)
                                         }
                                     }
+                                } else {
+                                    bitmap?.recycle()
                                 }
-
+                            } catch (e: Exception) {
+                                Log.w(TAG, "Screenshot conversion error: ${e.message}")
+                                try { bitmap?.recycle() } catch (_: Exception) {}
+                            } finally {
+                                isTakingScreenshot.set(false)
                                 if (isRecording.get()) {
-                                    recordHandler?.postDelayed(this, (1000 / FPS).toLong())
+                                    captureHandler?.post(screenshotTicker!!)
                                 }
                             }
                         }
-                    } else {
-                        if (isRecording.get()) {
-                            recordHandler?.postDelayed(this, (1000 / FPS).toLong())
-                        }
+                    } else if (isRecording.get()) {
+                        captureHandler?.postDelayed(this, 30L)
                     }
                 }
             }
 
-            recordHandler?.post(frameTicker!!)
+            // Loop B: Exact Constant Frame Rate (CFR = 12 FPS) encoder loop.
+            // Emits 1 frame every 83ms aligned to real wall-clock time so 10s real = 10.0s MP4!
+            frameTicker = object : Runnable {
+                override fun run() {
+                    if (!isRecording.get()) return
+
+                    synchronized(encoderLock) {
+                        if (!isRecording.get()) return@synchronized
+                        val bufToEncode = tempYuv
+                        val src = latestYuv
+                        if (bufToEncode != null && src != null) {
+                            synchronized(latestYuvLock) {
+                                System.arraycopy(src, 0, bufToEncode, 0, bufToEncode.size)
+                            }
+                            encodeYuvFrame(bufToEncode)
+                        }
+                    }
+
+                    if (isRecording.get()) {
+                        val nextTargetMs = recordingStartTime + (frameCount * 1000L / FPS)
+                        val delay = (nextTargetMs - System.currentTimeMillis()).coerceIn(1L, (1000L / FPS))
+                        recordHandler?.postDelayed(this, delay)
+                    }
+                }
+            }
+
+            captureHandler?.post(screenshotTicker!!)
+            recordHandler?.postDelayed(frameTicker!!, (1000L / FPS))
         } catch (e: Exception) {
             Log.e(TAG, "Failed to start screen recorder: ${e.message}", e)
             EdrLocalStorage.appendEdrLog(context, "TRAP_ERR", "Failed starting trap recorder: ${e.message}")
@@ -218,34 +259,23 @@ object AppTrapScreenRecorder {
     }
 
     /**
-     * Encodes a single Bitmap into H.264 and muxes into MP4.
+     * Encodes a single NV12/YUV420 frame into H.264 at a strict constant frame rate (CFR)
+     * and muxes it into MP4. Every frame is spaced by exact 1_000_000L / FPS microseconds
+     * so playback duration matches real-time 1:1.
      */
-    private fun encodeFrame(bitmap: Bitmap) {
+    private fun encodeYuvFrame(yuv: ByteArray) {
         val codec = mediaCodec ?: return
 
         try {
-            // Ensure bitmap matches exact width & height
-            val scaledBitmap = if (bitmap.width == WIDTH && bitmap.height == HEIGHT) {
-                bitmap
-            } else {
-                Bitmap.createScaledBitmap(bitmap, WIDTH, HEIGHT, false)
-            }
-
             val inputIndex = codec.dequeueInputBuffer(10000L)
             if (inputIndex >= 0) {
                 val inputBuffer = codec.getInputBuffer(inputIndex) ?: return
                 inputBuffer.clear()
-
-                val yuv = bitmapToNv12(scaledBitmap, WIDTH, HEIGHT)
                 inputBuffer.put(yuv)
 
-                val ptsUs = (frameCount * 1_000_000L / FPS)
+                val ptsUs = frameCount * 1_000_000L / FPS
                 frameCount++
                 codec.queueInputBuffer(inputIndex, 0, yuv.size, ptsUs, 0)
-            }
-
-            if (scaledBitmap != bitmap) {
-                scaledBitmap.recycle()
             }
 
             drainEncoder(false)
@@ -309,15 +339,7 @@ object AppTrapScreenRecorder {
 
         synchronized(encoderLock) {
             try {
-                // If total frames is low, pad with last valid frame to at least 15 frames for video stability
-                val cached = lastValidFrame
-                if (frameCount < 15 && cached != null && !cached.isRecycled) {
-                    while (frameCount < 15) {
-                        encodeFrame(cached)
-                    }
-                }
-
-                // Signal End of Stream
+                // Signal End of Stream at exact CFR PTS
                 val inputIndex = mediaCodec?.dequeueInputBuffer(10000L) ?: -1
                 if (inputIndex >= 0) {
                     val ptsUs = frameCount * 1_000_000L / FPS
@@ -367,8 +389,11 @@ object AppTrapScreenRecorder {
         } catch (ignored: Exception) {}
         mediaMuxer = null
 
-        lastValidFrame?.recycle()
-        lastValidFrame = null
+        synchronized(latestYuvLock) {
+            latestYuv = null
+        }
+        tempYuv = null
+        isTakingScreenshot.set(false)
         reusableArgb = null
         reusableYuv = null
         reusableBufferInfo = null
@@ -376,7 +401,11 @@ object AppTrapScreenRecorder {
         recordThread?.quitSafely()
         recordThread = null
         recordHandler = null
+        captureThread?.quitSafely()
+        captureThread = null
+        captureHandler = null
         frameTicker = null
+        screenshotTicker = null
         currentPackageName = null
         currentAppLabel = null
     }
@@ -401,6 +430,8 @@ object AppTrapScreenRecorder {
                     .setType(MultipartBody.FORM)
                     .addFormDataPart("duration", duration)
                     .addFormDataPart("recordingType", "APP_TRAP")
+                    .addFormDataPart("appName", appLabel)
+                    .addFormDataPart("packageName", packageName)
                     .addFormDataPart(
                         "video",
                         file.name,
@@ -461,6 +492,7 @@ object AppTrapScreenRecorder {
         var index = 0
 
         for (j in 0 until height) {
+            val evenRow = (j and 1) == 0
             for (i in 0 until width) {
                 val pixel = argb[index++]
                 r = (pixel shr 16) and 0xff
@@ -469,14 +501,14 @@ object AppTrapScreenRecorder {
 
                 // Standard ITU-R BT.601 conversion formula
                 y = ((66 * r + 129 * g + 25 * b + 128) shr 8) + 16
-                yuv[yIndex++] = y.coerceIn(0, 255).toByte()
+                yuv[yIndex++] = (if (y < 0) 0 else if (y > 255) 255 else y).toByte()
 
                 // NV12 format: U then V interleaved for every 2x2 block
-                if (j % 2 == 0 && i % 2 == 0) {
+                if (evenRow && (i and 1) == 0) {
                     u = ((-38 * r - 74 * g + 112 * b + 128) shr 8) + 128
                     v = ((112 * r - 94 * g - 18 * b + 128) shr 8) + 128
-                    yuv[uvIndex++] = u.coerceIn(0, 255).toByte()
-                    yuv[uvIndex++] = v.coerceIn(0, 255).toByte()
+                    yuv[uvIndex++] = (if (u < 0) 0 else if (u > 255) 255 else u).toByte()
+                    yuv[uvIndex++] = (if (v < 0) 0 else if (v > 255) 255 else v).toByte()
                 }
             }
         }

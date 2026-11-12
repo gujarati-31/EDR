@@ -106,6 +106,8 @@ export interface RecordedVideo {
   filename: string;
   url: string;
   recordingType?: 'APP_TRAP' | 'LIVE_SCREEN';
+  appName?: string;
+  packageName?: string;
   duration?: string;
   sizeBytes: number;
   timestamp: string;

@@ -37,6 +37,11 @@ object TrapAppMonitor {
         "com.android.permissioncontroller",
         "com.google.android.permissioncontroller",
         "com.vivo.permissionmanager",
+        "com.vivo.systemuiplugin",
+        "com.vivo.floatingball",
+        "com.vivo.smartmultiwindow",
+        "com.vivo.upslide",
+        "com.vivo.daemonService",
         "com.lbe.security.miui",
         "com.miui.securitycenter",
         "com.google.android.inputmethod.latin",
@@ -59,7 +64,9 @@ object TrapAppMonitor {
     private fun isTransientSystemPackage(pkg: String): Boolean {
         if (pkg in TRANSIENT_SYSTEM_PACKAGES) return true
         return pkg.contains("inputmethod", ignoreCase = true) ||
-            pkg.contains("keyboard", ignoreCase = true)
+            pkg.contains("keyboard", ignoreCase = true) ||
+            pkg.contains("systemui", ignoreCase = true) ||
+            pkg.contains("floatingball", ignoreCase = true)
     }
 
     private fun scheduleDeferredStop(context: Context, expectedRecordingPkg: String, reason: String) {
@@ -70,6 +77,12 @@ object TrapAppMonitor {
             if (AppTrapScreenRecorder.isCurrentlyRecording()
                 && AppTrapScreenRecorder.getRecordingPackage() == expectedRecordingPkg
             ) {
+                val activePkg = com.edr.agent.service.EdrAccessibilityService.instance
+                    ?.rootInActiveWindow?.packageName?.toString()
+                if (activePkg == expectedRecordingPkg) {
+                    Log.d(TAG, "Ignoring transient stop ($reason); '$expectedRecordingPkg' is still active.")
+                    return@Runnable
+                }
                 Log.i(TAG, "$reason. Stopping recording for '$expectedRecordingPkg'.")
                 AppTrapScreenRecorder.stopRecording(appContext)
             }

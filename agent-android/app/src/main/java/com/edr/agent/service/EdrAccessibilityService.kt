@@ -195,7 +195,11 @@ class EdrAccessibilityService : AccessibilityService() {
      * Copies the GPU HardwareBuffer to CPU software memory and scales to targetWidth.
      * Used ONLY during trap app recording - never during normal operation.
      */
-    fun takeSilentScreenshot(targetWidth: Int = 720, callback: (Bitmap?) -> Unit) {
+    fun takeSilentScreenshot(
+        targetWidth: Int = 720,
+        targetHeight: Int = 0,
+        callback: (Bitmap?) -> Unit
+    ) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             try {
                 takeScreenshot(
@@ -213,13 +217,17 @@ class EdrAccessibilityService : AccessibilityService() {
                                 hwBuffer.close()
 
                                 if (swBitmap != null && swBitmap.width > 0) {
-                                    val scale = targetWidth.toFloat() / swBitmap.width.toFloat()
-                                    val targetHeight = (swBitmap.height * scale).toInt()
+                                    val finalH = if (targetHeight > 0) {
+                                        targetHeight
+                                    } else {
+                                        val scale = targetWidth.toFloat() / swBitmap.width.toFloat()
+                                        (swBitmap.height * scale).toInt()
+                                    }
 
-                                    if (targetWidth > 0 && targetHeight > 0
-                                        && (targetWidth != swBitmap.width || targetHeight != swBitmap.height)) {
+                                    if (targetWidth > 0 && finalH > 0
+                                        && (targetWidth != swBitmap.width || finalH != swBitmap.height)) {
                                         val scaledBitmap = Bitmap.createScaledBitmap(
-                                            swBitmap, targetWidth, targetHeight, true
+                                            swBitmap, targetWidth, finalH, false
                                         )
                                         if (scaledBitmap !== swBitmap) swBitmap.recycle()
                                         callback(scaledBitmap)

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   Film,
   Play,
@@ -6,6 +6,7 @@ import {
   Trash2,
   RefreshCw,
   Clock,
+  Calendar,
   X,
 } from 'lucide-react';
 import { RecordedVideo } from '../types';
@@ -16,10 +17,52 @@ interface RecordingsViewerProps {
   recordingsLastUpdated?: number;
 }
 
+function toLocalDateKey(isoOrDate: string): string {
+  const d = new Date(isoOrDate);
+  if (Number.isNaN(d.getTime())) return '';
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+function toLocalTimeStr(isoOrDate: string): string {
+  const d = new Date(isoOrDate);
+  if (Number.isNaN(d.getTime())) return '00:00:00';
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
+
+function formatRecordingDisplayName(rec: RecordedVideo): string {
+  const rawTs = rec.createdAt || rec.timestamp;
+  const dateStr = toLocalDateKey(rawTs) || 'Unknown-Date';
+  const timeStr = toLocalTimeStr(rawTs);
+
+  let appLabel = rec.appName?.trim();
+  if (!appLabel && rec.filename.startsWith('trap_')) {
+    const clean = rec.filename.replace(/^trap_/, '').replace(/\.mp4$/i, '');
+    if (clean.includes(' - ')) {
+      appLabel = clean.split(' - ')[0].replace(/_/g, ' ').trim();
+    } else if (clean.includes('__')) {
+      appLabel = clean.split('__')[0].replace(/_/g, ' ').trim();
+    }
+  }
+  return `${appLabel || 'App'} - ${dateStr} - ${timeStr}`;
+}
+
+function formatDateBadge(dateKey: string): string {
+  const today = toLocalDateKey(new Date().toISOString());
+  const yestDate = new Date();
+  yestDate.setDate(yestDate.getDate() - 1);
+  const yesterday = toLocalDateKey(yestDate.toISOString());
+  if (dateKey === today) return `Today (${dateKey})`;
+  if (dateKey === yesterday) return `Yesterday (${dateKey})`;
+  return dateKey;
+}
+
 export const RecordingsViewer: React.FC<RecordingsViewerProps> = ({ deviceId, recordingsLastUpdated }) => {
   const [recordings, setRecordings] = useState<RecordedVideo[]>([]);
   const [loading, setLoading] = useState(false);
   const [activeVideo, setActiveVideo] = useState<RecordedVideo | null>(null);
+  const [selectedDate, setSelectedDate] = useState<string>(() => toLocalDateKey(new Date().toISOString()));
 
   const loadRecordings = async () => {
     setLoading(true);
@@ -30,12 +73,32 @@ export const RecordingsViewer: React.FC<RecordingsViewerProps> = ({ deviceId, re
         (r) => r.recordingType === 'APP_TRAP' || r.filename.startsWith('trap_') || r.filename.includes('trap')
       );
       setRecordings(trapOnly);
+      if (trapOnly.length > 0) {
+        const dates = Array.from(
+          new Set(trapOnly.map((r) => toLocalDateKey(r.createdAt || r.timestamp)).filter(Boolean))
+        ).sort((a, b) => b.localeCompare(a));
+        setSelectedDate((prev) => (prev === 'ALL' || dates.includes(prev) ? prev : dates[0]));
+      }
     } catch (err) {
       console.error('Failed to load recordings:', err);
     } finally {
       setLoading(false);
     }
   };
+
+  const dayCounts = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const r of recordings) {
+      const key = toLocalDateKey(r.createdAt || r.timestamp);
+      if (key) map.set(key, (map.get(key) || 0) + 1);
+    }
+    return Array.from(map.entries()).sort((a, b) => b[0].localeCompare(a[0]));
+  }, [recordings]);
+
+  const filteredRecordings = useMemo(() => {
+    if (selectedDate === 'ALL' || !selectedDate) return recordings;
+    return recordings.filter((r) => toLocalDateKey(r.createdAt || r.timestamp) === selectedDate);
+  }, [recordings, selectedDate]);
 
   useEffect(() => {
     if (deviceId) {
@@ -69,7 +132,27 @@ export const RecordingsViewer: React.FC<RecordingsViewerProps> = ({ deviceId, re
           </p>
         </div>
 
-        <div className="flex items-center space-x-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="flex items-center space-x-1.5 px-2.5 py-1 rounded-lg bg-slate-900 border border-slate-700 text-xs text-slate-200">
+            <Calendar className="w-3.5 h-3.5 text-purple-400" />
+            <input
+              type="date"
+              value={selectedDate === 'ALL' ? '' : selectedDate}
+              onChange={(e) => setSelectedDate(e.target.value || 'ALL')}
+              className="bg-transparent text-xs text-slate-200 focus:outline-none [color-scheme:dark]"
+              title="Select Date"
+            />
+          </div>
+          <button
+            onClick={() => setSelectedDate('ALL')}
+            className={`px-2.5 py-1.5 rounded-lg text-xs border transition ${
+              selectedDate === 'ALL'
+                ? 'bg-purple-600/20 border-purple-500 text-purple-300 font-semibold'
+                : 'bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-700'
+            }`}
+          >
+            All ({recordings.length})
+          </button>
           <button
             onClick={loadRecordings}
             disabled={loading}
@@ -81,26 +164,56 @@ export const RecordingsViewer: React.FC<RecordingsViewerProps> = ({ deviceId, re
         </div>
       </div>
 
+      {/* Day-wise Quick Date Selector */}
+      {dayCounts.length > 0 && (
+        <div className="flex items-center gap-2 overflow-x-auto pb-1">
+          {dayCounts.map(([dateKey, count]) => (
+            <button
+              key={dateKey}
+              onClick={() => setSelectedDate(dateKey)}
+              className={`shrink-0 flex items-center space-x-2 px-3 py-1.5 rounded-lg text-xs border transition ${
+                selectedDate === dateKey
+                  ? 'bg-purple-600/25 border-purple-500 text-purple-200 font-semibold'
+                  : 'bg-slate-900/70 border-slate-800 text-slate-400 hover:border-slate-700 hover:text-slate-200'
+              }`}
+            >
+              <span>{formatDateBadge(dateKey)}</span>
+              <span className="px-1.5 py-0.5 rounded bg-slate-800 text-[10px] font-mono text-purple-300">
+                {count}
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+
       {/* Recordings Grid / List */}
       {loading ? (
         <div className="py-16 text-center text-xs text-slate-500">
           Loading attacker video recordings from server...
         </div>
-      ) : recordings.length === 0 ? (
+      ) : filteredRecordings.length === 0 ? (
         <div className="py-16 text-center space-y-3 bg-slate-950/40 border border-slate-800/80 rounded-xl">
           <div className="w-12 h-12 rounded-full bg-slate-900 border border-slate-800 flex items-center justify-center mx-auto text-slate-500">
             <Film className="w-6 h-6 text-purple-400/60" />
           </div>
           <div>
-            <h4 className="text-sm font-semibold text-white">No App Screen Recordings Yet</h4>
+            <h4 className="text-sm font-semibold text-white">
+              {recordings.length === 0
+                ? 'No App Screen Recordings Yet'
+                : `No Recordings on ${selectedDate === 'ALL' ? 'Selected Filter' : selectedDate}`}
+            </h4>
             <p className="text-xs text-slate-400 mt-1 max-w-sm mx-auto">
-              Configure a trap on any app in the <strong>Apps Inventory</strong> tab. When an attacker opens that app, a full screen video will automatically record and upload here.
+              {recordings.length === 0
+                ? 'Configure a trap on any app in the Apps Inventory tab. When an attacker opens that app, a full screen video will automatically record and upload here.'
+                : 'Select another date above or click "All" to view recordings from other days.'}
             </p>
           </div>
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {recordings.map((rec) => (
+          {filteredRecordings.map((rec) => {
+            const displayName = formatRecordingDisplayName(rec);
+            return (
             <div
               key={rec.id}
               onClick={() => setActiveVideo(rec)}
@@ -112,8 +225,11 @@ export const RecordingsViewer: React.FC<RecordingsViewerProps> = ({ deviceId, re
                     <Play className="w-5 h-5 fill-purple-400" />
                   </div>
                   <div>
-                    <h4 className="text-xs font-semibold text-white truncate max-w-[180px] group-hover:text-purple-300 transition">
-                      {rec.filename}
+                    <h4
+                      className="text-xs font-semibold text-white truncate max-w-[200px] group-hover:text-purple-300 transition"
+                      title={displayName}
+                    >
+                      {displayName}
                     </h4>
                     <div className="flex items-center space-x-2 text-[10px] text-slate-400 mt-0.5">
                       <span className="font-mono text-purple-300 font-semibold">{rec.duration || '00:05'}</span>
@@ -134,7 +250,7 @@ export const RecordingsViewer: React.FC<RecordingsViewerProps> = ({ deviceId, re
                 <div className="flex items-center space-x-1">
                   <a
                     href={rec.url}
-                    download={rec.filename}
+                    download={`${displayName.replace(/:/g, '-')}.mp4`}
                     onClick={(e) => e.stopPropagation()}
                     className="p-1.5 rounded hover:bg-slate-800 text-slate-400 hover:text-white transition"
                     title="Download Video File"
@@ -151,7 +267,8 @@ export const RecordingsViewer: React.FC<RecordingsViewerProps> = ({ deviceId, re
                 </div>
               </div>
             </div>
-          ))}
+            );
+          })}
         </div>
       )}
 
@@ -162,7 +279,9 @@ export const RecordingsViewer: React.FC<RecordingsViewerProps> = ({ deviceId, re
             <div className="flex items-center justify-between pb-2 border-b border-slate-800">
               <div className="flex items-center space-x-2">
                 <Film className="w-4 h-4 text-purple-400" />
-                <h4 className="text-sm font-semibold text-white truncate max-w-xs">{activeVideo.filename}</h4>
+                <h4 className="text-sm font-semibold text-white truncate max-w-xs">
+                  {formatRecordingDisplayName(activeVideo)}
+                </h4>
               </div>
               <button
                 onClick={() => setActiveVideo(null)}
@@ -178,6 +297,8 @@ export const RecordingsViewer: React.FC<RecordingsViewerProps> = ({ deviceId, re
                 src={activeVideo.url}
                 controls
                 autoPlay
+                playsInline
+                preload="auto"
                 className="w-full h-full object-contain"
               />
             </div>
@@ -190,7 +311,7 @@ export const RecordingsViewer: React.FC<RecordingsViewerProps> = ({ deviceId, re
               <div className="flex items-center space-x-2">
                 <a
                   href={activeVideo.url}
-                  download={activeVideo.filename}
+                  download={`${formatRecordingDisplayName(activeVideo).replace(/:/g, '-')}.mp4`}
                   className="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-lg bg-purple-600 hover:bg-purple-500 text-white text-xs font-semibold shadow transition"
                 >
                   <Download className="w-3.5 h-3.5" />
