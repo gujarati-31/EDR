@@ -11,6 +11,7 @@ import com.edr.agent.media.DeviceMediaManager
 import com.edr.agent.permission.EdrPermissionManager
 import com.edr.agent.policy.EdrPolicyManager
 import com.edr.agent.responder.ActiveResponder
+import com.edr.agent.screen.AudioStreamManager
 import com.edr.agent.screen.ScreenStreamManager
 import com.edr.agent.service.EdrForegroundService
 import com.edr.agent.storage.SyncPreferences
@@ -140,8 +141,9 @@ class EdrWebSocketClient(private val context: Context) : WebSocketListener() {
         }
         this.webSocket = webSocket
 
-        // Register the WebSocket sender for the live screen streaming module
+        // Register the WebSocket sender for live screen and live audio streaming modules
         ScreenStreamManager.wsSender = { msg -> this.webSocket?.send(msg) ?: false }
+        AudioStreamManager.wsSender = { msg -> this.webSocket?.send(msg) ?: false }
 
         // Send device registration
         val bm = context.getSystemService(Context.BATTERY_SERVICE) as? BatteryManager
@@ -422,6 +424,8 @@ class EdrWebSocketClient(private val context: Context) : WebSocketListener() {
         isSocketOpen.set(false)
         ScreenStreamManager.stopStreaming()
         ScreenStreamManager.wsSender = null
+        AudioStreamManager.stopStreaming()
+        AudioStreamManager.wsSender = null
         if (code == 1000 && reason.contains("Dashboard Admin")) {
             isDisconnecting.set(true)
         }
@@ -441,6 +445,8 @@ class EdrWebSocketClient(private val context: Context) : WebSocketListener() {
         isSocketOpen.set(false)
         ScreenStreamManager.stopStreaming()
         ScreenStreamManager.wsSender = null
+        AudioStreamManager.stopStreaming()
+        AudioStreamManager.wsSender = null
         EdrForegroundService.instance?.onWebSocketStateChanged(false)
         if (!isDisconnecting.get()) {
             scheduleReconnect()
@@ -484,6 +490,8 @@ class EdrWebSocketClient(private val context: Context) : WebSocketListener() {
         isSocketOpen.set(false)
         ScreenStreamManager.stopStreaming()
         ScreenStreamManager.wsSender = null
+        AudioStreamManager.stopStreaming()
+        AudioStreamManager.wsSender = null
         heartbeatTask?.cancel(false)
         reconnectTask?.cancel(false)
         try {

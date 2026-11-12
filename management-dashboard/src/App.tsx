@@ -89,6 +89,19 @@ export const App: React.FC = () => {
     frameSizeBytes?: number;
   } | null>(null);
   const [streamStatus, setStreamStatus] = useState<{ active: boolean; error?: string; targetFps?: number } | null>(null);
+  const [audioChunk, setAudioChunk] = useState<{
+    audioBase64: string;
+    sampleRate: number;
+    channels?: number;
+    seq?: number;
+    level?: number;
+    timestamp?: string;
+  } | null>(null);
+  const [audioStreamStatus, setAudioStreamStatus] = useState<{
+    active: boolean;
+    sampleRate?: number;
+    error?: string;
+  } | null>(null);
 
   // Load Devices
   const loadDevices = useCallback(async () => {
@@ -237,6 +250,16 @@ export const App: React.FC = () => {
       case 'SCREEN_STREAM_STATUS':
         if (selectedDevice && (data.deviceId === selectedDevice.deviceId || data.deviceId === selectedDevice.id)) {
           setStreamStatus(data);
+        }
+        break;
+      case 'AUDIO_CHUNK':
+        if (selectedDevice && (data.deviceId === selectedDevice.deviceId || data.deviceId === selectedDevice.id)) {
+          setAudioChunk(data);
+        }
+        break;
+      case 'AUDIO_STREAM_STATUS':
+        if (selectedDevice && (data.deviceId === selectedDevice.deviceId || data.deviceId === selectedDevice.id)) {
+          setAudioStreamStatus(data);
         }
         break;
       case 'RECORDING_SAVED':
@@ -821,6 +844,8 @@ export const App: React.FC = () => {
                   isOnline={selectedDevice.status === 'ONLINE'}
                   screenFrame={screenFrame}
                   streamStatus={streamStatus}
+                  audioChunk={audioChunk}
+                  audioStreamStatus={audioStreamStatus}
                 />
                 <ActionButtons
                   deviceId={selectedDevice.deviceId}

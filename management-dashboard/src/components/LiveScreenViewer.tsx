@@ -14,6 +14,10 @@ import {
   RefreshCw,
   X,
   Sliders,
+  Mic,
+  MicOff,
+  Volume2,
+  VolumeX,
 } from 'lucide-react';
 import { api } from '../services/api';
 import { RecordedVideo } from '../types';
@@ -32,6 +36,15 @@ interface LiveScreenViewerProps {
     frameSizeBytes?: number;
   } | null;
   streamStatus: { active: boolean; error?: string; targetFps?: number } | null;
+  audioChunk?: {
+    audioBase64: string;
+    sampleRate: number;
+    channels?: number;
+    seq?: number;
+    level?: number;
+    timestamp?: string;
+  } | null;
+  audioStreamStatus?: { active: boolean; sampleRate?: number; error?: string } | null;
 }
 
 interface BufferedFrame {
@@ -47,9 +60,19 @@ export const LiveScreenViewer: React.FC<LiveScreenViewerProps> = ({
   isOnline,
   screenFrame,
   streamStatus,
+  audioChunk,
+  audioStreamStatus,
 }) => {
   const [isStreaming, setIsStreaming] = useState(false);
   const [isCommandPending, setIsCommandPending] = useState(false);
+  const [isAudioStreaming, setIsAudioStreaming] = useState(false);
+  const [isAudioPending, setIsAudioPending] = useState(false);
+  const [audioMuted, setAudioMuted] = useState(false);
+  const [audioVolume, setAudioVolume] = useState(0.85);
+  const [audioLevel, setAudioLevel] = useState(0);
+  const audioCtxRef = useRef<AudioContext | null>(null);
+  const gainNodeRef = useRef<GainNode | null>(null);
+  const nextAudioTimeRef = useRef<number>(0);
   const [statusMsg, setStatusMsg] = useState<{ text: string; type: 'info' | 'success' | 'error' } | null>(null);
   const [autoSaveProof, setAutoSaveProof] = useState(false);
   const [lastSavedProofTime, setLastSavedProofTime] = useState<number>(0);
@@ -118,6 +141,122 @@ export const LiveScreenViewer: React.FC<LiveScreenViewerProps> = ({
       }).catch((e) => console.error('Failed loading recordings:', e));
     }
   }, [deviceId]);
+
+  // Sync Live Audio status from device
+  useEffect(() => {
+    if (!audioStreamStatus) return;
+    setIsAudioStreaming(audioStreamStatus.active);
+    if (audioStreamStatus.error) {
+      setStatusMsg({ text: audioStreamStatus.error, type: 'error' });
+    }
+  }, [audioStreamStatus]);
+
+  // Keep Web Audio gain in sync with mute & volume
+  useEffect(() => {
+    if (gainNodeRef.current) {
+      gainNodeRef.current.gain.value = audioMuted ? 0 : audioVolume;
+    }
+  }, [audioMuted, audioVolume]);
+
+  // Play incoming 16kHz 16-bit mono PCM chunks smoothly via Web Audio API
+  useEffect(() => {
+    if (!audioChunk || !audioChunk.audioBase64 || !isAudioStreaming) return;
+    if (typeof audioChunk.level === 'number') {
+      setAudioLevel(audioChunk.level);
+    }
+
+    try {
+      let ctx = audioCtxRef.current;
+      if (!ctx) {
+        const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+        ctx = new AudioCtx({ sampleRate: audioChunk.sampleRate || 16000 });
+        const gain = ctx.createGain();
+        gain.gain.value = audioMuted ? 0 : audioVolume;
+        gain.connect(ctx.destination);
+        audioCtxRef.current = ctx;
+        gainNodeRef.current = gain;
+        nextAudioTimeRef.current = ctx.currentTime + 0.08;
+      }
+      if (ctx.state === 'suspended') {
+        ctx.resume().catch(() => {});
+      }
+
+      const binStr = atob(audioChunk.audioBase64);
+      const len = binStr.length;
+      const sampleCount = Math.floor(len / 2);
+      if (sampleCount === 0) return;
+
+      const sr = audioChunk.sampleRate || 16000;
+      const audioBuffer = ctx.createBuffer(1, sampleCount, sr);
+      const channelData = audioBuffer.getChannelData(0);
+      for (let i = 0; i < sampleCount; i++) {
+        const lo = binStr.charCodeAt(i * 2);
+        const hi = binStr.charCodeAt(i * 2 + 1);
+        let val = (hi << 8) | lo;
+        if (val >= 0x8000) val -= 0x10000;
+        channelData[i] = val / 32768.0;
+      }
+
+      const src = ctx.createBufferSource();
+      src.buffer = audioBuffer;
+      src.connect(gainNodeRef.current!);
+
+      const now = ctx.currentTime;
+      if (nextAudioTimeRef.current < now) {
+        nextAudioTimeRef.current = now + 0.05;
+      }
+      src.start(nextAudioTimeRef.current);
+      nextAudioTimeRef.current += audioBuffer.duration;
+    } catch (err) {
+      console.error('Audio playback error:', err);
+    }
+  }, [audioChunk, isAudioStreaming]);
+
+  useEffect(() => {
+    return () => {
+      if (audioCtxRef.current) {
+        audioCtxRef.current.close().catch(() => {});
+        audioCtxRef.current = null;
+        gainNodeRef.current = null;
+      }
+    };
+  }, []);
+
+  const handleToggleLiveAudio = async () => {
+    if (!isOnline) {
+      setStatusMsg({ text: 'Phone must be ONLINE to start Live Audio.', type: 'error' });
+      return;
+    }
+    setIsAudioPending(true);
+    try {
+      if (!isAudioStreaming) {
+        const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+        if (!audioCtxRef.current) {
+          const ctx = new AudioCtx({ sampleRate: 16000 });
+          const gain = ctx.createGain();
+          gain.gain.value = audioMuted ? 0 : audioVolume;
+          gain.connect(ctx.destination);
+          audioCtxRef.current = ctx;
+          gainNodeRef.current = gain;
+          nextAudioTimeRef.current = ctx.currentTime + 0.08;
+        } else if (audioCtxRef.current.state === 'suspended') {
+          await audioCtxRef.current.resume();
+        }
+        await api.dispatchCommand(deviceId, 'START_AUDIO_STREAM');
+        setIsAudioStreaming(true);
+        setStatusMsg({ text: 'Live Audio stream requested from phone microphone...', type: 'info' });
+      } else {
+        await api.dispatchCommand(deviceId, 'STOP_AUDIO_STREAM');
+        setIsAudioStreaming(false);
+        setAudioLevel(0);
+        setStatusMsg({ text: 'Live Audio stream stopped.', type: 'info' });
+      }
+    } catch (e: any) {
+      setStatusMsg({ text: `Live Audio command failed: ${e.message}`, type: 'error' });
+    } finally {
+      setIsAudioPending(false);
+    }
+  };
 
   // Sync stream status from phone
   useEffect(() => {
@@ -532,6 +671,59 @@ export const LiveScreenViewer: React.FC<LiveScreenViewerProps> = ({
             <Camera className="w-3.5 h-3.5 text-amber-400" />
             <span>Save Proof</span>
           </button>
+
+          {/* BUTTON 4: Live Audio Stream (Independent Microphone Listener) */}
+          <button
+            onClick={handleToggleLiveAudio}
+            disabled={!isOnline || isAudioPending}
+            className={`flex items-center space-x-2 px-4 py-2 rounded-lg font-semibold text-xs transition shadow-sm disabled:opacity-40 ${
+              isAudioStreaming
+                ? 'bg-rose-600 hover:bg-rose-500 text-white shadow-rose-950/50 animate-pulse'
+                : 'bg-cyan-600 hover:bg-cyan-500 text-white shadow-cyan-950/40'
+            }`}
+            title="Listen to live microphone audio from the phone"
+          >
+            {isAudioStreaming ? <MicOff className="w-3.5 h-3.5" /> : <Mic className="w-3.5 h-3.5" />}
+            <span>
+              {isAudioPending
+                ? 'Updating...'
+                : isAudioStreaming
+                  ? 'Stop Live Audio'
+                  : 'Start Live Audio'}
+            </span>
+          </button>
+
+          {isAudioStreaming && (
+            <div className="flex items-center space-x-2 px-2.5 py-1.5 rounded-lg bg-slate-950 border border-cyan-800/60">
+              <button
+                type="button"
+                onClick={() => setAudioMuted((m) => !m)}
+                className="text-cyan-300 hover:text-white transition"
+                title={audioMuted ? 'Unmute audio' : 'Mute audio'}
+              >
+                {audioMuted ? <VolumeX className="w-3.5 h-3.5 text-rose-400" /> : <Volume2 className="w-3.5 h-3.5" />}
+              </button>
+              <input
+                type="range"
+                min={0}
+                max={1}
+                step={0.05}
+                value={audioMuted ? 0 : audioVolume}
+                onChange={(e) => {
+                  setAudioMuted(false);
+                  setAudioVolume(parseFloat(e.target.value));
+                }}
+                className="w-16 accent-cyan-400 cursor-pointer"
+                title="Volume"
+              />
+              <div className="w-14 h-2 bg-slate-800 rounded-full overflow-hidden" title={`Mic Level: ${audioLevel}%`}>
+                <div
+                  className="h-full bg-gradient-to-r from-emerald-400 to-cyan-400 transition-all duration-100"
+                  style={{ width: `${audioLevel}%` }}
+                />
+              </div>
+            </div>
+          )}
 
           {/* Auto Archive Toggle */}
           <label className="flex items-center space-x-2 text-xs text-slate-300 cursor-pointer select-none px-2 py-1 rounded bg-slate-850/80 border border-slate-800">

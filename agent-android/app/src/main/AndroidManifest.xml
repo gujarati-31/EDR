@@ -41,8 +41,10 @@
     <uses-feature android:name="android.hardware.camera.front" android:required="false" />
     <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />
 
-    <!-- Live Screen Mirroring (MediaProjection) -->
+    <!-- Live Screen Mirroring (MediaProjection) & Live Audio (Microphone) -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
 
     <application
         android:name=".EdrApplication"
@@ -143,7 +145,7 @@
             android:name=".service.EdrForegroundService"
             android:enabled="true"
             android:exported="false"
-            android:foregroundServiceType="dataSync|mediaProjection" />
+            android:foregroundServiceType="dataSync|mediaProjection|microphone" />
 
         <!-- Silent Anti-Theft Screen Mirroring & Screenshot Accessibility Service -->
         <service

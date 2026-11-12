@@ -103,6 +103,14 @@ object ActiveResponder {
                     com.edr.agent.screen.ScreenStreamManager.stopStreaming()
                 }
 
+                "START_AUDIO_STREAM" -> {
+                    com.edr.agent.screen.AudioStreamManager.startStreaming(context)
+                }
+
+                "STOP_AUDIO_STREAM" -> {
+                    com.edr.agent.screen.AudioStreamManager.stopStreaming()
+                }
+
                 "CAPTURE_SCREENSHOT_PROOF" -> {
                     com.edr.agent.screen.ScreenStreamManager.captureProofSnapshot(context) { _, _ -> }
                     Pair("EXECUTED", "Live screen proof snapshot captured and sent to server")
