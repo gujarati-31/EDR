@@ -333,6 +333,20 @@ export function createDeviceRouter(gateway: EDRWebSocketGateway) {
     });
   });
 
+  // Rename a registered client/device from Admin Dashboard
+  router.patch('/:id/name', (req, res) => {
+    const { deviceName } = req.body || {};
+    if (!deviceName || typeof deviceName !== 'string' || !deviceName.trim()) {
+      return res.status(400).json({ success: false, message: 'Valid deviceName is required' });
+    }
+    const updated = db.renameDevice(req.params.id, deviceName);
+    if (!updated) {
+      return res.status(404).json({ success: false, message: 'Device not found' });
+    }
+    gateway.broadcastToDashboards('DEVICE_UPDATED', updated);
+    res.json({ success: true, message: 'Client name updated', data: updated });
+  });
+
   // Deregister / remove device
   router.delete('/:id', (req, res) => {
     const success = db.deleteDevice(req.params.id);

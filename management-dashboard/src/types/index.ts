@@ -16,6 +16,7 @@ export interface Device {
   id: string;
   deviceId: string;
   deviceName: string;
+  isCustomName?: boolean;
   osVersion: string;
   ipAddress?: string;
   status: DeviceStatus;

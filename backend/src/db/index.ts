@@ -86,7 +86,12 @@ class Database {
     const now = new Date().toISOString();
 
     if (device) {
+      const preservedCustomName = device.isCustomName ? device.deviceName : undefined;
       Object.assign(device, deviceData, { lastHeartbeat: now });
+      if (preservedCustomName) {
+        device.deviceName = preservedCustomName;
+        device.isCustomName = true;
+      }
     } else {
       device = {
         id: crypto.randomUUID(),
@@ -123,6 +128,15 @@ class Database {
       }
     }
 
+    this.save();
+    return device;
+  }
+
+  renameDevice(id: string, deviceName: string): Device | undefined {
+    const device = this.getDeviceById(id);
+    if (!device) return undefined;
+    device.deviceName = deviceName.trim();
+    device.isCustomName = true;
     this.save();
     return device;
   }

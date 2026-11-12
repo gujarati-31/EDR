@@ -16,6 +16,7 @@ export interface Device {
   id: string; // UUID
   deviceId: string; // Hardware/Android ID
   deviceName: string;
+  isCustomName?: boolean;
   osVersion: string;
   ipAddress?: string;
   status: DeviceStatus;

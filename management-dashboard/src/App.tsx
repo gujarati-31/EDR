@@ -33,6 +33,8 @@ import {
   FolderOpen,
   Download,
   Activity,
+  Pencil,
+  Check,
   UploadCloud,
   Users,
 } from 'lucide-react';
@@ -290,6 +292,31 @@ export const App: React.FC = () => {
     }
   }, [loadDevices]);
 
+  const [isRenamingHero, setIsRenamingHero] = useState(false);
+  const [heroDraftName, setHeroDraftName] = useState('');
+  const [savingHeroRename, setSavingHeroRename] = useState(false);
+
+  const handleRenameDevice = useCallback(async (device: Device, newName: string) => {
+    try {
+      const updated = await api.renameDevice(device.deviceId, newName);
+      setDevices((prev) => prev.map((d) => (d.deviceId === device.deviceId ? { ...d, ...updated } : d)));
+      setSelectedDevice((prev) =>
+        prev && prev.deviceId === device.deviceId ? { ...prev, ...updated } : prev
+      );
+      setConnectionNotice({
+        type: 'success',
+        message: `Client renamed to "${updated.deviceName}".`,
+      });
+      setTimeout(() => setConnectionNotice(null), 4000);
+    } catch (err: any) {
+      setConnectionNotice({
+        type: 'error',
+        message: `Rename failed: ${err.message || 'Server error'}`,
+      });
+      setTimeout(() => setConnectionNotice(null), 5000);
+    }
+  }, []);
+
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans overflow-x-hidden">
       <Header
@@ -320,6 +347,7 @@ export const App: React.FC = () => {
               }}
               onRefresh={loadDevices}
               onCheckOnline={handleCheckDeviceOnline}
+              onRenameDevice={handleRenameDevice}
               checkingDeviceId={checkingDeviceId}
               onCloseSidebar={() => setIsClientSidebarOpen(false)}
             />
@@ -388,7 +416,65 @@ export const App: React.FC = () => {
 
                 <div>
                   <div className="flex items-center flex-wrap gap-2.5">
-                    <h2 className="text-lg font-extrabold text-white tracking-wide">{selectedDevice.deviceName}</h2>
+                    {isRenamingHero ? (
+                      <div className="flex items-center gap-1.5">
+                        <input
+                          type="text"
+                          value={heroDraftName}
+                          onChange={(e) => setHeroDraftName(e.target.value)}
+                          onKeyDown={async (e) => {
+                            if (e.key === 'Enter' && heroDraftName.trim()) {
+                              setSavingHeroRename(true);
+                              await handleRenameDevice(selectedDevice, heroDraftName.trim());
+                              setSavingHeroRename(false);
+                              setIsRenamingHero(false);
+                            } else if (e.key === 'Escape') {
+                              setIsRenamingHero(false);
+                            }
+                          }}
+                          autoFocus
+                          disabled={savingHeroRename}
+                          className="px-2.5 py-1 rounded-lg bg-slate-950 border border-cyan-500 text-sm font-bold text-white outline-none"
+                        />
+                        <button
+                          type="button"
+                          disabled={savingHeroRename || !heroDraftName.trim()}
+                          onClick={async () => {
+                            setSavingHeroRename(true);
+                            await handleRenameDevice(selectedDevice, heroDraftName.trim());
+                            setSavingHeroRename(false);
+                            setIsRenamingHero(false);
+                          }}
+                          className="p-1.5 rounded-lg bg-emerald-950 text-emerald-300 border border-emerald-600/50 hover:bg-emerald-900"
+                          title="Save name"
+                        >
+                          <Check className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setIsRenamingHero(false)}
+                          className="p-1.5 rounded-lg bg-slate-900 text-slate-400 border border-slate-700 hover:text-white"
+                          title="Cancel"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-1.5">
+                        <h2 className="text-lg font-extrabold text-white tracking-wide">{selectedDevice.deviceName}</h2>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setHeroDraftName(selectedDevice.deviceName);
+                            setIsRenamingHero(true);
+                          }}
+                          className="p-1 rounded-lg text-slate-400 hover:text-cyan-300 hover:bg-slate-800/80 transition"
+                          title="Change client name"
+                        >
+                          <Pencil className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    )}
                     <span className="text-[11px] px-2.5 py-0.5 rounded-lg bg-slate-950/80 text-cyan-300 font-mono border border-cyan-800/40">
                       ID: {selectedDevice.deviceId}
                     </span>
@@ -907,24 +993,104 @@ export const App: React.FC = () => {
             )}
           </div>
         ) : (
-          <div className="cyber-card rounded-2xl p-8 sm:p-16 text-center text-slate-400 border border-slate-800 space-y-4">
-            <Shield className="w-10 h-10 text-cyan-400/40 mx-auto animate-pulse" />
-            <div>
-              <h3 className="text-base font-mono font-bold text-white mb-1 uppercase tracking-wider">
-                No Target Endpoint Selected
-              </h3>
-              <p className="text-xs font-mono text-slate-500 max-w-md mx-auto">
-                Open the client sidebar to select an enrolled phone for live remote control, policies, and forensic telemetry.
-              </p>
+          <div className="cyber-card rounded-2xl p-5 sm:p-8 border border-slate-800 space-y-5">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-slate-800/80">
+              <div className="flex items-center gap-3">
+                <Shield className="w-7 h-7 text-cyan-400 flex-shrink-0" />
+                <div>
+                  <h3 className="text-sm sm:text-base font-mono font-bold text-white uppercase tracking-wider">
+                    Registered Clients ({devices.length})
+                  </h3>
+                  <p className="text-[11px] font-mono text-slate-400">
+                    <span className="text-emerald-400 font-bold">{onlineCount} Online</span>
+                    {' • '}
+                    <span className="text-rose-400 font-bold">{devices.length - onlineCount} Off</span>
+                    {' • Click any client to manage or rename'}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsClientSidebarOpen(true)}
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-mono font-bold bg-cyan-600 hover:bg-cyan-500 text-white shadow-[0_0_15px_rgba(6,182,212,0.3)] transition active:scale-95 self-start sm:self-auto"
+              >
+                <Users className="w-4 h-4" />
+                <span>SIDEBAR ({devices.length})</span>
+              </button>
             </div>
-            <button
-              type="button"
-              onClick={() => setIsClientSidebarOpen(true)}
-              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-mono font-bold bg-cyan-600 hover:bg-cyan-500 text-white shadow-[0_0_15px_rgba(6,182,212,0.3)] transition active:scale-95"
-            >
-              <Users className="w-4 h-4" />
-              <span>SHOW CLIENTS ({devices.length})</span>
-            </button>
+
+            {devices.length === 0 ? (
+              <div className="py-12 text-center text-xs font-mono text-slate-500">
+                No client phones registered yet. Install the EDR Agent APK on a phone to enroll it.
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {[...devices]
+                  .sort((a, b) => (a.status === 'ONLINE' && b.status !== 'ONLINE' ? -1 : a.status !== 'ONLINE' && b.status === 'ONLINE' ? 1 : a.deviceName.localeCompare(b.deviceName)))
+                  .map((device) => {
+                    const isOnline = device.status === 'ONLINE';
+                    return (
+                      <div
+                        key={device.id || device.deviceId}
+                        onClick={() => setSelectedDevice(device)}
+                        className="p-4 rounded-xl bg-slate-900/70 border border-slate-800 hover:border-cyan-500/60 cursor-pointer transition space-y-3"
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex items-center gap-2.5 min-w-0">
+                            <div className={`p-2 rounded-xl border ${isOnline ? 'bg-emerald-950/50 border-emerald-500/40 text-emerald-400' : 'bg-slate-950 border-slate-800 text-slate-500'}`}>
+                              <Smartphone className="w-4 h-4" />
+                            </div>
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-1.5">
+                                <h4 className="text-sm font-bold text-white truncate">{device.deviceName}</h4>
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    const next = window.prompt('Enter new client name:', device.deviceName);
+                                    if (next && next.trim() && next.trim() !== device.deviceName) {
+                                      handleRenameDevice(device, next.trim());
+                                    }
+                                  }}
+                                  className="p-1 rounded text-slate-400 hover:text-cyan-300 hover:bg-slate-800 transition"
+                                  title="Change client name"
+                                >
+                                  <Pencil className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                              <p className="text-[10px] font-mono text-slate-400 truncate">
+                                {device.osVersion} • {device.deviceId.substring(0, 10)}...
+                              </p>
+                            </div>
+                          </div>
+                          <span className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold ${isOnline ? 'bg-emerald-950/80 text-emerald-300 border border-emerald-500/40' : 'bg-rose-950/60 text-rose-300 border border-rose-800/70'}`}>
+                            {isOnline ? 'ONLINE' : 'OFF'}
+                          </span>
+                        </div>
+
+                        <div className="flex items-center justify-between pt-2 border-t border-slate-800/80 text-[11px] font-mono text-slate-400">
+                          <span className="flex items-center gap-1">
+                            <Battery className={`w-3.5 h-3.5 ${(device.batteryLevel ?? 100) > 30 ? 'text-emerald-400' : 'text-amber-400'}`} />
+                            {device.batteryLevel ?? 100}%
+                          </span>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleCheckDeviceOnline(device);
+                            }}
+                            disabled={checkingDeviceId === device.deviceId}
+                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[10px] font-bold bg-slate-950 hover:bg-cyan-950/80 text-cyan-300 border border-cyan-500/40 transition disabled:opacity-50"
+                          >
+                            {checkingDeviceId === device.deviceId ? <Loader2 className="w-3 h-3 animate-spin" /> : <Activity className="w-3 h-3" />}
+                            <span>CHECK</span>
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+              </div>
+            )}
           </div>
         )}
       </main>

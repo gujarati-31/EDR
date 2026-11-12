@@ -10,6 +10,8 @@ import {
   X,
   RefreshCw,
   Search,
+  Pencil,
+  Check,
 } from 'lucide-react';
 import { Device } from '../types';
 
@@ -19,6 +21,7 @@ interface DeviceListProps {
   onSelectDevice: (device: Device) => void;
   onRefresh: () => void;
   onCheckOnline?: (device: Device) => void;
+  onRenameDevice?: (device: Device, newName: string) => Promise<void> | void;
   checkingDeviceId?: string | null;
   onCloseSidebar?: () => void;
 }
@@ -29,10 +32,14 @@ export const DeviceList: React.FC<DeviceListProps> = ({
   onSelectDevice,
   onRefresh,
   onCheckOnline,
+  onRenameDevice,
   checkingDeviceId,
   onCloseSidebar,
 }) => {
   const [search, setSearch] = useState('');
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [draftName, setDraftName] = useState('');
+  const [savingRename, setSavingRename] = useState(false);
 
   const filteredDevices = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -51,6 +58,22 @@ export const DeviceList: React.FC<DeviceListProps> = ({
   }, [devices, search]);
 
   const onlineCount = devices.filter((d) => d.status === 'ONLINE').length;
+  const offlineCount = devices.length - onlineCount;
+
+  const commitRename = async (device: Device) => {
+    const trimmed = draftName.trim();
+    if (!trimmed || !onRenameDevice || trimmed === device.deviceName) {
+      setEditingId(null);
+      return;
+    }
+    setSavingRename(true);
+    try {
+      await onRenameDevice(device, trimmed);
+      setEditingId(null);
+    } finally {
+      setSavingRename(false);
+    }
+  };
 
   return (
     <aside className="flex flex-col h-full bg-slate-950 border-r border-cyan-900/40 shadow-[12px_0_40px_rgba(0,0,0,0.75)]">
@@ -62,7 +85,10 @@ export const DeviceList: React.FC<DeviceListProps> = ({
             <span>Client Phones ({devices.length})</span>
           </h3>
           <p className="text-[10px] font-mono text-slate-400 mt-0.5">
-            <span className="text-emerald-400 font-bold">{onlineCount} online</span> • Tap a phone to switch
+            <span className="text-emerald-400 font-bold">{onlineCount} online</span>
+            {' • '}
+            <span className="text-rose-400 font-bold">{offlineCount} off</span>
+            {' • Tap to open'}
           </p>
         </div>
 
@@ -151,19 +177,67 @@ export const DeviceList: React.FC<DeviceListProps> = ({
                       />
                     </div>
 
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-1.5">
-                        <h4 className="text-xs font-bold text-white truncate">{device.deviceName}</h4>
-                        {device.isDeviceOwner && (
-                          <span
-                            className="inline-flex items-center gap-0.5 px-1.5 py-0.2 rounded text-[9px] font-mono font-bold bg-cyan-950/70 text-cyan-300 border border-cyan-800/60 flex-shrink-0"
-                            title="Device Owner / DPC Active"
+                    <div className="min-w-0 flex-1">
+                      {editingId === device.deviceId ? (
+                        <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                          <input
+                            type="text"
+                            value={draftName}
+                            onChange={(e) => setDraftName(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') commitRename(device);
+                              if (e.key === 'Escape') setEditingId(null);
+                            }}
+                            autoFocus
+                            disabled={savingRename}
+                            className="w-full px-2 py-0.5 rounded bg-slate-950 border border-cyan-500 text-xs font-bold text-white outline-none"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => commitRename(device)}
+                            disabled={savingRename}
+                            className="p-1 rounded bg-emerald-950 text-emerald-300 border border-emerald-600/50 hover:bg-emerald-900"
+                            title="Save name"
                           >
-                            <ShieldCheck className="w-2.5 h-2.5 text-cyan-400" />
-                            DPC
-                          </span>
-                        )}
-                      </div>
+                            <Check className="w-3 h-3" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setEditingId(null)}
+                            className="p-1 rounded bg-slate-900 text-slate-400 border border-slate-700 hover:text-white"
+                            title="Cancel"
+                          >
+                            <X className="w-3 h-3" />
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-1.5">
+                          <h4 className="text-xs font-bold text-white truncate">{device.deviceName}</h4>
+                          {onRenameDevice && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setEditingId(device.deviceId);
+                                setDraftName(device.deviceName);
+                              }}
+                              className="p-0.5 rounded text-slate-500 hover:text-cyan-300 hover:bg-slate-800 transition flex-shrink-0"
+                              title="Change client name"
+                            >
+                              <Pencil className="w-3 h-3" />
+                            </button>
+                          )}
+                          {device.isDeviceOwner && (
+                            <span
+                              className="inline-flex items-center gap-0.5 px-1.5 py-0.2 rounded text-[9px] font-mono font-bold bg-cyan-950/70 text-cyan-300 border border-cyan-800/60 flex-shrink-0"
+                              title="Device Owner / DPC Active"
+                            >
+                              <ShieldCheck className="w-2.5 h-2.5 text-cyan-400" />
+                              DPC
+                            </span>
+                          )}
+                        </div>
+                      )}
                       <div className="text-[10px] text-slate-400 font-mono truncate">
                         {device.osVersion} • {device.deviceId.substring(0, 8)}...
                       </div>

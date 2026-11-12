@@ -22,6 +22,19 @@ export const api = {
     return json.success;
   },
 
+  async renameDevice(id: string, deviceName: string): Promise<Device> {
+    const res = await fetch(`${API_BASE}/devices/${id}/name`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ deviceName }),
+    });
+    const json = await res.json();
+    if (!res.ok || !json.success) {
+      throw new Error(json.message || 'Failed to rename client');
+    }
+    return json.data;
+  },
+
   async disconnectDevice(id: string): Promise<{ success: boolean; message: string }> {
     const res = await fetch(`${API_BASE}/devices/${id}/disconnect`, { method: 'POST' });
     const json = await res.json();
