@@ -268,6 +268,23 @@ export const api = {
     return json.success;
   },
 
+  async updateRecordingDuration(id: string, duration: string, deviceId?: string): Promise<boolean> {
+    try {
+      const url = deviceId
+        ? `${API_BASE}/devices/${deviceId}/recordings/${id}/duration`
+        : `${API_BASE}/vault/recordings/${id}/duration`;
+      const res = await fetch(url, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ duration }),
+      });
+      const json = await res.json();
+      return Boolean(json.success);
+    } catch {
+      return false;
+    }
+  },
+
   // On-Demand Device Media Explorer (Zero Server Storage)
   async getLiveDeviceMediaList(
     deviceId: string,

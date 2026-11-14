@@ -7,6 +7,7 @@ import { promisify } from 'util';
 import { db } from '../db/index.js';
 import { EDRWebSocketGateway } from '../gateway/wsServer.js';
 import { encryptBuffer, encryptFileInPlace, readAndDecryptFile } from '../utils/crypto.js';
+import { extractMp4DurationFromBuffer, extractMp4DurationFromFile } from '../utils/media.js';
 
 const execAsync = promisify(exec);
 
@@ -632,6 +633,21 @@ export function createDeviceRouter(gateway: EDRWebSocketGateway) {
       : undefined;
     const resolvedAppName = (appName && String(appName).trim()) || parsedAppFromFile || undefined;
 
+    // Auto-detect exact MP4 duration from buffer before encryption if client gave fallback or missing
+    let resolvedDuration = duration && duration !== '00:00' && duration !== '00:30' ? String(duration) : undefined;
+    try {
+      const rawBuf = fs.readFileSync(req.file.path);
+      const parsedDur = extractMp4DurationFromBuffer(rawBuf);
+      if (parsedDur) {
+        resolvedDuration = parsedDur;
+      }
+    } catch (e: any) {
+      console.warn('[Media] Could not parse MP4 duration:', e.message);
+    }
+    if (!resolvedDuration) {
+      resolvedDuration = duration || '00:00';
+    }
+
     // Encrypt video file in-place on disk with AES-256-GCM
     try {
       encryptFileInPlace(req.file.path);
@@ -646,7 +662,7 @@ export function createDeviceRouter(gateway: EDRWebSocketGateway) {
       recordingType: resolvedType,
       appName: resolvedAppName,
       packageName: packageName ? String(packageName) : undefined,
-      duration: duration || '00:00',
+      duration: resolvedDuration,
       sizeBytes: req.file.size,
       timestamp: new Date().toISOString(),
     });
@@ -657,13 +673,13 @@ export function createDeviceRouter(gateway: EDRWebSocketGateway) {
         eventType: 'SECURITY_ALERT',
         severity: 'INFO',
         message: isTrap
-          ? `App Trap Screen Video Recording Saved: ${req.file.filename} (Duration: ${duration || 'N/A'})`
-          : `Live Screen Video Recording Saved: ${req.file.filename} (Duration: ${duration || 'N/A'})`,
+          ? `App Trap Screen Video Recording Saved: ${req.file.filename} (Duration: ${resolvedDuration})`
+          : `Live Screen Video Recording Saved: ${req.file.filename} (Duration: ${resolvedDuration})`,
         payload: {
           recordingId: videoRecord.id,
           recordingType: resolvedType,
           url: videoRecord.url,
-          duration,
+          duration: resolvedDuration,
         },
         eventTimestamp: new Date().toISOString(),
       },
@@ -678,12 +694,34 @@ export function createDeviceRouter(gateway: EDRWebSocketGateway) {
     const { deviceId } = req.params;
     const device = db.getDeviceById(deviceId);
     const targetId = device ? device.deviceId : deviceId;
-    const recordings = db.getRecordings(targetId).map((r) => ({
-      ...r,
-      url: `/api/devices/${targetId}/recordings/${r.id}/stream`,
-      recordingType: r.recordingType || (r.filename.startsWith('trap_') ? 'APP_TRAP' : 'LIVE_SCREEN'),
-    }));
+    const recordings = db.getRecordings(targetId).map((r) => {
+      // Auto-heal recordings with invalid duration by parsing decrypted MP4 file
+      if (!r.duration || r.duration === '00:00' || r.duration === '00:30') {
+        const filePath = path.join(RECORDINGS_DIR, r.filename);
+        const realDur = extractMp4DurationFromFile(filePath);
+        if (realDur) {
+          r.duration = realDur;
+          db.updateRecordingDuration(r.id, realDur);
+        }
+      }
+      return {
+        ...r,
+        url: `/api/devices/${targetId}/recordings/${r.id}/stream`,
+        recordingType: r.recordingType || (r.filename.startsWith('trap_') ? 'APP_TRAP' : 'LIVE_SCREEN'),
+      };
+    });
     res.json({ success: true, count: recordings.length, data: recordings });
+  });
+
+  // Client updates accurate duration if detected via HTML5 player metadata
+  router.patch('/:deviceId/recordings/:id/duration', (req, res) => {
+    const { id } = req.params;
+    const { duration } = req.body;
+    if (!duration || typeof duration !== 'string') {
+      return res.status(400).json({ success: false, message: 'Invalid duration' });
+    }
+    const updated = db.updateRecordingDuration(id, duration);
+    res.json({ success: updated });
   });
 
   // Direct Video Stream: AES-256-GCM Decrypted on-the-fly

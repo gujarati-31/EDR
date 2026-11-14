@@ -61,6 +61,7 @@ export const RenderDataVault: React.FC<RenderDataVaultProps> = ({ onSelectDevice
 
   // Modals
   const [activeVideo, setActiveVideo] = useState<VaultRecording | null>(null);
+  const [playerExactDuration, setPlayerExactDuration] = useState<string | null>(null);
   const [activePhoto, setActivePhoto] = useState<VaultPhoto | null>(null);
   const [dbTable, setDbTable] = useState<'devices' | 'commands' | 'logs' | 'installedApps'>('devices');
 
@@ -381,9 +382,9 @@ export const RenderDataVault: React.FC<RenderDataVaultProps> = ({ onSelectDevice
                           <Film className="w-3 h-3" />
                           {rec.recordingType === 'APP_TRAP' ? 'App Trap' : 'Live Screen'}
                         </span>
-                        <span className="text-xs text-slate-400 flex items-center gap-1">
-                          <Clock className="w-3 h-3" />
-                          {rec.duration || '00:30'}
+                        <span className="text-xs text-slate-400 flex items-center gap-1 font-mono">
+                          <Clock className="w-3 h-3 text-purple-400" />
+                          {rec.duration || '--:--'}
                         </span>
                       </div>
 
@@ -793,7 +794,10 @@ export const RenderDataVault: React.FC<RenderDataVaultProps> = ({ onSelectDevice
                 </p>
               </div>
               <button
-                onClick={() => setActiveVideo(null)}
+                onClick={() => {
+                  setActiveVideo(null);
+                  setPlayerExactDuration(null);
+                }}
                 className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800"
               >
                 <X className="w-5 h-5" />
@@ -806,12 +810,30 @@ export const RenderDataVault: React.FC<RenderDataVaultProps> = ({ onSelectDevice
                 controls
                 autoPlay
                 className="w-full h-full object-contain"
+                onLoadedMetadata={(e) => {
+                  const d = Math.round(e.currentTarget.duration);
+                  if (!isNaN(d) && d > 0) {
+                    const mins = Math.floor(d / 60);
+                    const secs = d % 60;
+                    const formatted = `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+                    setPlayerExactDuration(formatted);
+                    // Update current cards list immediately
+                    setRecordings((prev) =>
+                      prev.map((r) => (r.id === activeVideo.id ? { ...r, duration: formatted } : r))
+                    );
+                    // Persist accurate duration to backend
+                    api.updateRecordingDuration(activeVideo.id, formatted, activeVideo.deviceId);
+                  }
+                }}
               />
             </div>
 
             <div className="p-4 border-t border-slate-800 flex items-center justify-between bg-slate-900/60">
               <span className="text-xs text-slate-400 font-mono">
-                Size: {formatBytes(activeVideo.sizeBytes)} • Duration: {activeVideo.duration || '00:30'}
+                Size: {formatBytes(activeVideo.sizeBytes)} • Duration:{' '}
+                <strong className="text-purple-300 font-semibold">
+                  {playerExactDuration || activeVideo.duration || '--:--'}
+                </strong>
               </span>
               <a
                 href={activeVideo.url}

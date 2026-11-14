@@ -986,7 +986,7 @@ export const LiveScreenViewer: React.FC<LiveScreenViewerProps> = ({
                           {rec.filename}
                         </p>
                         <div className="flex items-center space-x-2 text-[10px] text-slate-400 mt-0.5">
-                          <span>{rec.duration || '00:15'}</span>
+                          <span className="font-mono text-purple-300 font-semibold">{rec.duration || '--:--'}</span>
                           <span>•</span>
                           <span>{rec.sizeBytes ? `${Math.round(rec.sizeBytes / 1024)} KB` : 'WebM Video'}</span>
                           <span>•</span>
@@ -1092,7 +1092,7 @@ export const LiveScreenViewer: React.FC<LiveScreenViewerProps> = ({
             {/* Modal Actions */}
             <div className="flex items-center justify-between pt-2">
               <div className="text-xs text-slate-400">
-                Duration: <strong className="text-slate-200">{activeVideoModal.duration || '00:15'}</strong>
+                Duration: <strong className="text-slate-200">{activeVideoModal.duration || '--:--'}</strong>
               </div>
               <div className="flex items-center space-x-2">
                 <a

@@ -2,6 +2,7 @@ import { Router } from 'express';
 import fs from 'fs';
 import path from 'path';
 import { db } from '../db/index.js';
+import { extractMp4DurationFromFile } from '../utils/media.js';
 
 function getFolderSizeBytes(dirPath: string): number {
   if (!fs.existsSync(dirPath)) return 0;
@@ -89,6 +90,15 @@ export function createVaultRouter(): Router {
       const deviceMap = new Map(devices.map((d) => [d.deviceId, d]));
       const recordings = db.getRecordings().map((r) => {
         const dev = deviceMap.get(r.deviceId);
+        // Auto-heal recordings with invalid duration by parsing decrypted MP4 file on disk
+        if (!r.duration || r.duration === '00:00' || r.duration === '00:30') {
+          const filePath = path.join(RECORDINGS_DIR, r.filename);
+          const realDur = extractMp4DurationFromFile(filePath);
+          if (realDur) {
+            r.duration = realDur;
+            db.updateRecordingDuration(r.id, realDur);
+          }
+        }
         return {
           ...r,
           deviceName: dev?.deviceName || r.deviceId,
@@ -100,6 +110,17 @@ export function createVaultRouter(): Router {
     } catch (err: any) {
       res.status(500).json({ success: false, message: err.message });
     }
+  });
+
+  // Client updates accurate duration if detected via HTML5 player metadata
+  router.patch('/recordings/:id/duration', (req, res) => {
+    const { id } = req.params;
+    const { duration } = req.body;
+    if (!duration || typeof duration !== 'string') {
+      return res.status(400).json({ success: false, message: 'Invalid duration' });
+    }
+    const updated = db.updateRecordingDuration(id, duration);
+    res.json({ success: updated });
   });
 
   // All photos across all devices

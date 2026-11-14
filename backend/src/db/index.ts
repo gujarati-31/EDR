@@ -406,6 +406,17 @@ class Database {
     return false;
   }
 
+  updateRecordingDuration(id: string, duration: string): boolean {
+    if (!this.data.recordings) return false;
+    const rec = this.data.recordings.find((r) => r.id === id);
+    if (rec && rec.duration !== duration) {
+      rec.duration = duration;
+      this.save();
+      return true;
+    }
+    return false;
+  }
+
   // OTA Agent Releases
   saveRelease(release: Omit<AppRelease, 'id' | 'uploadedAt'>): AppRelease {
     const record: AppRelease = {

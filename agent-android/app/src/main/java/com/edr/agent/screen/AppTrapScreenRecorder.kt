@@ -338,11 +338,11 @@ object AppTrapScreenRecorder {
 
         val pkg = currentPackageName ?: "unknown"
         val label = currentAppLabel ?: pkg
-        val durationMs = System.currentTimeMillis() - recordingStartTime
+        val durationMs = (System.currentTimeMillis() - recordingStartTime).coerceAtLeast(1000L)
         val durationSec = (durationMs / 1000).toInt()
-        val durationFormatted = String.format("%02d:%02d", durationSec / 60, durationSec % 60)
+        var durationFormatted = String.format("%02d:%02d", durationSec / 60, durationSec % 60)
 
-        Log.i(TAG, "Stopping screen recording for $label ($pkg). Total duration: $durationFormatted")
+        Log.i(TAG, "Stopping screen recording for $label ($pkg). Elapsed timer duration: $durationFormatted")
         EdrLocalStorage.appendEdrLog(context, "TRAP_REC", "App closed. Finalizing video for $label ($durationFormatted)")
 
         synchronized(encoderLock) {
@@ -372,7 +372,21 @@ object AppTrapScreenRecorder {
 
         val video = outputFile
         if (video != null && video.exists() && video.length() > 500) {
-            Log.i(TAG, "Video finalized cleanly: ${video.name} (${video.length()} bytes)")
+            // Read exact duration directly from the finalized MP4 container
+            try {
+                val retriever = android.media.MediaMetadataRetriever()
+                retriever.setDataSource(video.absolutePath)
+                val durMs = retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull()
+                retriever.release()
+                if (durMs != null && durMs > 0) {
+                    val sec = (durMs / 1000).toInt()
+                    durationFormatted = String.format("%02d:%02d", sec / 60, sec % 60)
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "MediaMetadataRetriever duration extraction warning: ${e.message}")
+            }
+
+            Log.i(TAG, "Video finalized cleanly: ${video.name} (${video.length()} bytes, duration: $durationFormatted)")
             // NOTE: MediaScannerConnection.scanFile is intentionally OMITTED so recordings
             // never appear in the phone's public Gallery.
 
@@ -566,9 +580,24 @@ object AppTrapScreenRecorder {
                         }
 
                         try {
+                            // Extract exact duration from unlocked MP4 file header
+                            var offlineDuration = "00:00"
+                            try {
+                                val retriever = android.media.MediaMetadataRetriever()
+                                retriever.setDataSource(tempOut.absolutePath)
+                                val durMs = retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull()
+                                retriever.release()
+                                if (durMs != null && durMs > 0) {
+                                    val sec = (durMs / 1000).toInt()
+                                    offlineDuration = String.format("%02d:%02d", sec / 60, sec % 60)
+                                }
+                            } catch (retEx: Exception) {
+                                Log.w(TAG, "Offline video duration read fallback: ${retEx.message}")
+                            }
+
                             val body = MultipartBody.Builder()
                                 .setType(MultipartBody.FORM)
-                                .addFormDataPart("duration", "00:30")
+                                .addFormDataPart("duration", offlineDuration)
                                 .addFormDataPart("recordingType", "APP_TRAP")
                                 .addFormDataPart("appName", appLabel)
                                 .addFormDataPart("packageName", "unknown")

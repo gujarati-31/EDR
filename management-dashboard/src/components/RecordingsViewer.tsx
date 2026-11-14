@@ -62,6 +62,7 @@ export const RecordingsViewer: React.FC<RecordingsViewerProps> = ({ deviceId, re
   const [recordings, setRecordings] = useState<RecordedVideo[]>([]);
   const [loading, setLoading] = useState(false);
   const [activeVideo, setActiveVideo] = useState<RecordedVideo | null>(null);
+  const [playerDuration, setPlayerDuration] = useState<string | null>(null);
   const [selectedDate, setSelectedDate] = useState<string>(() => toLocalDateKey(new Date().toISOString()));
 
   const loadRecordings = async () => {
@@ -232,7 +233,7 @@ export const RecordingsViewer: React.FC<RecordingsViewerProps> = ({ deviceId, re
                       {displayName}
                     </h4>
                     <div className="flex items-center space-x-2 text-[10px] text-slate-400 mt-0.5">
-                      <span className="font-mono text-purple-300 font-semibold">{rec.duration || '00:05'}</span>
+                      <span className="font-mono text-purple-300 font-semibold">{rec.duration || '--:--'}</span>
                       <span>•</span>
                       <span>{rec.sizeBytes ? `${Math.round(rec.sizeBytes / 1024)} KB` : 'Video'}</span>
                     </div>
@@ -300,13 +301,29 @@ export const RecordingsViewer: React.FC<RecordingsViewerProps> = ({ deviceId, re
                 playsInline
                 preload="auto"
                 className="w-full h-full object-contain"
+                onLoadedMetadata={(e) => {
+                  const d = Math.round(e.currentTarget.duration);
+                  if (!isNaN(d) && d > 0) {
+                    const mins = Math.floor(d / 60);
+                    const secs = d % 60;
+                    const formatted = `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+                    setPlayerDuration(formatted);
+                    setRecordings((prev) =>
+                      prev.map((r) => (r.id === activeVideo.id ? { ...r, duration: formatted } : r))
+                    );
+                    api.updateRecordingDuration(activeVideo.id, formatted, deviceId);
+                  }
+                }}
               />
             </div>
 
             {/* Modal Actions */}
             <div className="flex items-center justify-between pt-2">
               <div className="text-xs text-slate-400">
-                Duration: <strong className="text-slate-200">{activeVideo.duration || '00:05'}</strong>
+                Duration:{' '}
+                <strong className="text-purple-300 font-semibold font-mono">
+                  {playerDuration || activeVideo.duration || '--:--'}
+                </strong>
               </div>
               <div className="flex items-center space-x-2">
                 <a
@@ -318,7 +335,10 @@ export const RecordingsViewer: React.FC<RecordingsViewerProps> = ({ deviceId, re
                   <span>Download File</span>
                 </a>
                 <button
-                  onClick={() => setActiveVideo(null)}
+                  onClick={() => {
+                    setActiveVideo(null);
+                    setPlayerDuration(null);
+                  }}
                   className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs transition"
                 >
                   Close
