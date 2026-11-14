@@ -164,3 +164,52 @@ export interface InstalledApp {
   installedAt?: string;
 }
 
+export interface VaultStats {
+  totalDevices: number;
+  onlineDevices: number;
+  totalRecordings: number;
+  totalPhotos: number;
+  totalLogs: number;
+  totalInstalledApps: number;
+  totalAppUsages: number;
+  totalCommands: number;
+  recordingsDiskBytes: number;
+  photosDiskBytes: number;
+  dbSizeBytes: number;
+  totalDiskBytes: number;
+}
+
+export interface VaultEncryptionInfo {
+  status: string;
+  algorithm: string;
+  tagLength: string;
+  nonceLength: string;
+  magicHeader: string;
+  keyDerivation: string;
+  description: string;
+}
+
+export interface VaultOverviewData {
+  success: boolean;
+  stats: VaultStats;
+  encryption: VaultEncryptionInfo;
+  storagePaths: {
+    recordingsDir: string;
+    photosDir: string;
+    databaseFile: string;
+  };
+}
+
+export interface VaultRecording extends RecordedVideo {
+  deviceName?: string;
+  osVersion?: string;
+  isOnline?: boolean;
+}
+
+export interface VaultPhoto extends IntruderPhoto {
+  deviceName?: string;
+  osVersion?: string;
+  isOnline?: boolean;
+}
+
+

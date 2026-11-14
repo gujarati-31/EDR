@@ -1,5 +1,5 @@
 import React from 'react';
-import { Shield, ShieldAlert, WifiOff, UploadCloud, PanelLeft, Users, Smartphone } from 'lucide-react';
+import { Shield, ShieldAlert, WifiOff, UploadCloud, PanelLeft, Users, Smartphone, Database } from 'lucide-react';
 
 interface HeaderProps {
   wsConnected: boolean;
@@ -10,6 +10,8 @@ interface HeaderProps {
   onToggleSidebar: () => void;
   selectedDeviceName?: string;
   onOpenOtaModal?: () => void;
+  mainView?: 'devices' | 'vault';
+  onToggleMainView?: (view: 'devices' | 'vault') => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -21,6 +23,8 @@ export const Header: React.FC<HeaderProps> = ({
   onToggleSidebar,
   selectedDeviceName,
   onOpenOtaModal,
+  mainView = 'devices',
+  onToggleMainView,
 }) => {
   return (
     <header className="bg-slate-950/95 backdrop-blur-md border-b border-cyan-900/30 px-3 sm:px-6 py-2.5 sm:py-3.5 sticky top-0 z-40 shadow-[0_4px_30px_rgba(0,0,0,0.5)]">
@@ -90,6 +94,36 @@ export const Header: React.FC<HeaderProps> = ({
             )}
           </div>
         </div>
+
+        {/* Main View Switcher: Device Control vs Render Vault */}
+        {onToggleMainView && (
+          <div className="inline-flex p-1 rounded-xl bg-slate-900/90 border border-slate-800 text-xs font-semibold shadow-inner self-start md:self-auto">
+            <button
+              type="button"
+              onClick={() => onToggleMainView('devices')}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition-all ${
+                mainView === 'devices'
+                  ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 shadow-[0_0_10px_rgba(6,182,212,0.2)]'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <Smartphone className="w-3.5 h-3.5 text-cyan-400" />
+              <span>Device Live Control</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => onToggleMainView('vault')}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition-all ${
+                mainView === 'vault'
+                  ? 'bg-purple-500/20 text-purple-300 border border-purple-500/40 shadow-[0_0_10px_rgba(168,85,247,0.2)]'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <Database className="w-3.5 h-3.5 text-purple-400" />
+              <span>Render Data Vault</span>
+            </button>
+          </div>
+        )}
 
         {/* Status Indicators */}
         <div className="flex items-center flex-wrap gap-1.5 sm:gap-2.5">

@@ -13,6 +13,7 @@ import { LiveScreenEvidenceViewer } from './components/LiveScreenEvidenceViewer'
 import { DeviceMediaExplorer } from './components/DeviceMediaExplorer';
 import { DevicePermissionsViewer } from './components/DevicePermissionsViewer';
 import { AgentUpdateModal } from './components/AgentUpdateModal';
+import { RenderDataVault } from './components/RenderDataVault';
 import {
   Cast,
   Wifi,
@@ -37,6 +38,7 @@ import {
   Check,
   UploadCloud,
   Users,
+  Database,
 } from 'lucide-react';
 import { Device, DevicePolicy, LogEntry } from './types';
 import { api } from './services/api';
@@ -50,6 +52,9 @@ export const App: React.FC = () => {
   const [criticalCount, setCriticalCount] = useState(0);
   const [isRefreshingLogs, setIsRefreshingLogs] = useState(false);
   
+  // Main View Mode: Device Live Control vs Central Render Data Vault
+  const [mainView, setMainView] = useState<'devices' | 'vault'>('devices');
+
   // Streamlined Main Cyber Navigation Tabs
   const [activeTab, setActiveTab] = useState<'livescreen' | 'policy' | 'evidence' | 'media' | 'apps' | 'logs'>('livescreen');
   // Sub-tabs for grouped views
@@ -351,6 +356,8 @@ export const App: React.FC = () => {
         onToggleSidebar={() => setIsClientSidebarOpen((prev) => !prev)}
         selectedDeviceName={selectedDevice?.deviceName}
         onOpenOtaModal={() => setIsOtaModalOpen(true)}
+        mainView={mainView}
+        onToggleMainView={setMainView}
       />
 
       {/* Collapsible Slide-Out Clients Sidebar Drawer (hidden whenever a client is active unless toggled) */}
@@ -421,7 +428,17 @@ export const App: React.FC = () => {
           </div>
         )}
 
-        {selectedDevice ? (
+        {mainView === 'vault' ? (
+          <RenderDataVault
+            onSelectDevice={(devId) => {
+              const target = devices.find((d) => d.deviceId === devId);
+              if (target) {
+                setSelectedDevice(target);
+                setMainView('devices');
+              }
+            }}
+          />
+        ) : selectedDevice ? (
           <div className="space-y-4 sm:space-y-5">
             {/* Cyber Device Command Hero Bar */}
             <div className="cyber-card rounded-2xl p-3.5 sm:p-5 border border-cyan-900/40 shadow-[0_4px_25px_rgba(0,0,0,0.6)] flex flex-col lg:flex-row lg:items-center justify-between gap-4">
@@ -1034,14 +1051,25 @@ export const App: React.FC = () => {
                   </p>
                 </div>
               </div>
-              <button
-                type="button"
-                onClick={() => setIsClientSidebarOpen(true)}
-                className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-mono font-bold bg-cyan-600 hover:bg-cyan-500 text-white shadow-[0_0_15px_rgba(6,182,212,0.3)] transition active:scale-95 self-start sm:self-auto"
-              >
-                <Users className="w-4 h-4" />
-                <span>SIDEBAR ({devices.length})</span>
-              </button>
+              <div className="flex items-center gap-2 self-start sm:self-auto">
+                <button
+                  type="button"
+                  onClick={() => setMainView('vault')}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-mono font-bold bg-purple-950/80 hover:bg-purple-900 border border-purple-500/40 text-purple-200 transition shadow-[0_0_15px_rgba(168,85,247,0.2)] active:scale-95"
+                  title="Browse all stored videos, photos, and database records across all devices"
+                >
+                  <Database className="w-4 h-4 text-purple-400" />
+                  <span>RENDER VAULT</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsClientSidebarOpen(true)}
+                  className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-mono font-bold bg-cyan-600 hover:bg-cyan-500 text-white shadow-[0_0_15px_rgba(6,182,212,0.3)] transition active:scale-95"
+                >
+                  <Users className="w-4 h-4" />
+                  <span>SIDEBAR ({devices.length})</span>
+                </button>
+              </div>
             </div>
 
             {devices.length === 0 ? (

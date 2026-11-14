@@ -353,8 +353,9 @@ class Database {
     return newPhoto;
   }
 
-  getIntruderPhotos(deviceId: string): IntruderPhoto[] {
+  getIntruderPhotos(deviceId?: string): IntruderPhoto[] {
     if (!this.data.photos) return [];
+    if (!deviceId || deviceId === 'ALL') return this.data.photos;
     return this.data.photos.filter((p) => p.deviceId === deviceId);
   }
 
@@ -384,9 +385,14 @@ class Database {
     return newRec;
   }
 
-  getRecordings(deviceId: string): RecordedVideo[] {
+  getRecordings(deviceId?: string): RecordedVideo[] {
     if (!this.data.recordings) return [];
+    if (!deviceId || deviceId === 'ALL') return this.data.recordings;
     return this.data.recordings.filter((r) => r.deviceId === deviceId);
+  }
+
+  getRawData(): DatabaseSchema {
+    return this.data;
   }
 
   deleteRecording(id: string): boolean {

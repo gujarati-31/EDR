@@ -1,4 +1,4 @@
-import { Device, DevicePolicy, Command, LogEntry, AppUsage, InstalledApp, CommandType, IntruderPhoto, RecordedVideo, AppRelease, ProvisioningQrData } from '../types';
+import { Device, DevicePolicy, Command, LogEntry, AppUsage, InstalledApp, CommandType, IntruderPhoto, RecordedVideo, AppRelease, ProvisioningQrData, VaultOverviewData, VaultRecording, VaultPhoto } from '../types';
 
 const API_BASE = '/api';
 
@@ -317,6 +317,34 @@ export const api = {
 
   getLiveMediaFileUrl(deviceId: string, mediaId: string, type: 'IMAGE' | 'VIDEO', download = false): string {
     return `${API_BASE}/devices/${deviceId}/live-media-file/${mediaId}?type=${type}${download ? '&download=1' : ''}`;
+  },
+
+  // Central Render Vault & Database Explorer
+  async getVaultOverview(): Promise<VaultOverviewData> {
+    const res = await fetch(`${API_BASE}/vault/overview`);
+    return await res.json();
+  },
+
+  async getVaultRecordings(): Promise<VaultRecording[]> {
+    const res = await fetch(`${API_BASE}/vault/recordings`);
+    const json = await res.json();
+    return json.data || [];
+  },
+
+  async getVaultPhotos(): Promise<VaultPhoto[]> {
+    const res = await fetch(`${API_BASE}/vault/photos`);
+    const json = await res.json();
+    return json.data || [];
+  },
+
+  async getVaultDatabase(): Promise<any> {
+    const res = await fetch(`${API_BASE}/vault/database`);
+    const json = await res.json();
+    return json.data || {};
+  },
+
+  getVaultExportUrl(): string {
+    return `${API_BASE}/vault/export`;
   },
 };
 
