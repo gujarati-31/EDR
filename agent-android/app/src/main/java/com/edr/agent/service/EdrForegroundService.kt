@@ -20,6 +20,7 @@ import com.edr.agent.EdrApplication
 import com.edr.agent.monitor.TrapAppMonitor
 import com.edr.agent.network.EdrHttpClient
 import com.edr.agent.network.EdrWebSocketClient
+import com.edr.agent.screen.AppTrapScreenRecorder
 import com.edr.agent.storage.SyncPreferences
 import okhttp3.Request
 import java.util.concurrent.Executors
@@ -88,6 +89,9 @@ class EdrForegroundService : Service() {
         // Start fallback pollers ONLY if currently needed
         updateTrapFallbackSchedule()
         scheduleNextConnectionPoll(delayMs = 4000L)
+
+        // Retry and upload any pending offline locked recordings & clean up old trashed files
+        AppTrapScreenRecorder.flushPendingLockedRecordings(this)
     }
 
     private fun registerScreenStateReceiver() {
@@ -130,6 +134,8 @@ class EdrForegroundService : Service() {
         if (connected) {
             connectionPollFuture?.cancel(false)
             connectionPollFuture = null
+            // Connected to admin gateway: flush any offline locked recordings
+            AppTrapScreenRecorder.flushPendingLockedRecordings(this)
         } else {
             val delay = if (isScreenInteractive) 8_000L else 45_000L
             scheduleNextConnectionPoll(delayMs = delay)
@@ -227,6 +233,7 @@ class EdrForegroundService : Service() {
                     if (client == null || !client.isConnected) {
                         scheduleNextConnectionPoll(delayMs = 500L)
                     }
+                    AppTrapScreenRecorder.flushPendingLockedRecordings(this@EdrForegroundService)
                 }
             }
             cm.registerNetworkCallback(request, networkCallback!!)

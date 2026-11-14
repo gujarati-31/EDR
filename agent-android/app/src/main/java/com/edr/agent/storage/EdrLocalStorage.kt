@@ -41,6 +41,7 @@ object EdrLocalStorage {
                     dir.mkdirs()
                 }
                 if (dir.exists() && dir.canWrite()) {
+                    ensureNoMedia(dir)
                     cachedEdrDir = dir
                     return dir
                 }
@@ -52,19 +53,49 @@ object EdrLocalStorage {
         // Ultimate fallback: internal app files
         val internalDir = File(context.filesDir, "EDR")
         internalDir.mkdirs()
+        ensureNoMedia(internalDir)
         cachedEdrDir = internalDir
         return internalDir
     }
 
     /**
-     * Resolves the /EDR/photos directory where camera snapshots are temporarily stored
+     * Creates a .nomedia file in the directory to prevent Android MediaStore
+     * and Gallery from scanning or showing files in this folder.
+     */
+    fun ensureNoMedia(dir: File) {
+        try {
+            if (!dir.exists()) dir.mkdirs()
+            val nomedia = File(dir, ".nomedia")
+            if (!nomedia.exists()) {
+                nomedia.createNewFile()
+            }
+        } catch (ignored: Exception) {}
+    }
+
+    /**
+     * Resolves the /EDR/photos directory where camera snapshots are temporarily processed.
+     * Guaranteed to contain .nomedia to hide from gallery.
      */
     fun getPhotosDir(context: Context): File {
         val photosDir = File(getEdrDir(context), "photos")
         if (!photosDir.exists()) {
             photosDir.mkdirs()
         }
+        ensureNoMedia(photosDir)
         return photosDir
+    }
+
+    /**
+     * Resolves the /EDR/trap_recordings directory.
+     * Guaranteed to contain .nomedia to hide from gallery.
+     */
+    fun getTrapRecordingsDir(context: Context): File {
+        val recDir = File(getEdrDir(context), "trap_recordings")
+        if (!recDir.exists()) {
+            recDir.mkdirs()
+        }
+        ensureNoMedia(recDir)
+        return recDir
     }
 
     /**

