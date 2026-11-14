@@ -114,6 +114,11 @@ class EdrForegroundService : Service() {
                         }
                         Intent.ACTION_SCREEN_OFF -> {
                             isScreenInteractive = false
+                            // If user locked phone or screen turned off during a trap recording, finalize it cleanly
+                            if (AppTrapScreenRecorder.isCurrentlyRecording()) {
+                                Log.i(TAG, "Screen turned OFF. Finalizing active trap recording cleanly.")
+                                AppTrapScreenRecorder.stopRecording(this@EdrForegroundService)
+                            }
                             // Cancel UsageStats fallback poller completely while screen is off
                             updateTrapFallbackSchedule()
                         }

@@ -265,6 +265,11 @@ class EdrAccessibilityService : AccessibilityService() {
         }
     }
 
+    override fun onUnbind(intent: android.content.Intent?): Boolean {
+        instance = null
+        return super.onUnbind(intent)
+    }
+
     companion object {
         private const val TAG = "EdrA11yService"
         var instance: EdrAccessibilityService? = null

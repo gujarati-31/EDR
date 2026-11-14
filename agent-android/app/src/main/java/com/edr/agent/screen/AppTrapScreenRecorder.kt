@@ -61,6 +61,7 @@ object AppTrapScreenRecorder {
 
     // Decoupled CFR frame buffer: capture thread updates latestYuv; encoder thread emits at exact 12 FPS
     private val isTakingScreenshot = AtomicBoolean(false)
+    private var lastScreenshotAttemptTime = 0L
     private val latestYuvLock = Any()
     private var latestYuv: ByteArray? = null
     private var tempYuv: ByteArray? = null
@@ -164,7 +165,15 @@ object AppTrapScreenRecorder {
                     }
 
                     val a11y = EdrAccessibilityService.instance
+                    val now = System.currentTimeMillis()
+                    // Watchdog: If previous screenshot attempt hung for > 1500ms without callback, unlock it
+                    if (isTakingScreenshot.get() && (now - lastScreenshotAttemptTime > 1500L)) {
+                        Log.w(TAG, "Screenshot capture watchdog timeout (>1.5s), resetting lock.")
+                        isTakingScreenshot.set(false)
+                    }
+
                     if (a11y != null && isTakingScreenshot.compareAndSet(false, true)) {
+                        lastScreenshotAttemptTime = now
                         a11y.takeSilentScreenshot(WIDTH, HEIGHT) { bitmap ->
                             try {
                                 if (isRecording.get() && bitmap != null) {
@@ -338,6 +347,15 @@ object AppTrapScreenRecorder {
 
         synchronized(encoderLock) {
             try {
+                // If muxer hasn't started yet because MediaCodec hasn't output the format change,
+                // push the seed frame to force the encoder to generate SPS/PPS keyframe
+                if (!isMuxerStarted && mediaCodec != null) {
+                    val seed = latestYuv
+                    if (seed != null) {
+                        encodeYuvFrame(seed)
+                    }
+                }
+
                 // Signal End of Stream at exact CFR PTS
                 val inputIndex = mediaCodec?.dequeueInputBuffer(10000L) ?: -1
                 if (inputIndex >= 0) {
@@ -353,7 +371,7 @@ object AppTrapScreenRecorder {
         }
 
         val video = outputFile
-        if (video != null && video.exists() && video.length() > 1000) {
+        if (video != null && video.exists() && video.length() > 500) {
             Log.i(TAG, "Video finalized cleanly: ${video.name} (${video.length()} bytes)")
             // NOTE: MediaScannerConnection.scanFile is intentionally OMITTED so recordings
             // never appear in the phone's public Gallery.
@@ -377,6 +395,10 @@ object AppTrapScreenRecorder {
             if (isMuxerStarted) {
                 mediaMuxer?.stop()
             }
+        } catch (e: Exception) {
+            Log.w(TAG, "MediaMuxer stop warning: ${e.message}")
+        }
+        try {
             mediaMuxer?.release()
         } catch (ignored: Exception) {}
         mediaMuxer = null
