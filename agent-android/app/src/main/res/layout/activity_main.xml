@@ -126,7 +126,7 @@
             android:layout_marginTop="20dp"
             android:layout_marginBottom="8dp"
             android:text="REQUIRED PROTECTIONS (TAP TO TURN ON)"
-            android:textColor="#38BDF8"
+            android:textColor="#22C55E"
             android:textSize="11sp"
             android:textStyle="bold" />
 
@@ -169,7 +169,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="24dp"
-            android:backgroundTint="#2563EB"
+            android:backgroundTint="#16A34A"
             android:text="Refresh Protection Status"
             android:textColor="#FFFFFF"
             android:textSize="13sp" />

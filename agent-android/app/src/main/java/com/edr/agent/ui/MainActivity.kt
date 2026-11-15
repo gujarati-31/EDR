@@ -69,6 +69,8 @@ class MainActivity : AppCompatActivity() {
             refreshPermissionsUI()
         }
 
+        findViewById<TextView>(R.id.tvVersion).text = "v3.16.0 • Green Edition (Updated via Admin OTA)"
+
         // Request battery optimization exemption for background EDR operation
         requestBatteryExemption()
 
@@ -239,7 +241,7 @@ class MainActivity : AppCompatActivity() {
             text = "TURN ON"
             textSize = 11f
             setTypeface(null, Typeface.BOLD)
-            setBackgroundColor(Color.parseColor("#2563EB"))
+            setBackgroundColor(Color.parseColor("#16A34A"))
             setTextColor(Color.WHITE)
             setPadding(28, 12, 28, 12)
             setOnClickListener {
