@@ -36,29 +36,21 @@ class MainActivity : AppCompatActivity() {
 
     private var isAwaitingDeviceAdminResult = false
 
-    private lateinit var tvProtectionScore: TextView
-    private lateinit var tvProtectionSubtext: TextView
-    private lateinit var cardAllGranted: LinearLayout
     private lateinit var tvPendingHeader: TextView
     private lateinit var containerPendingPermissions: LinearLayout
     private lateinit var sectionGranted: LinearLayout
     private lateinit var containerGrantedPermissions: LinearLayout
     private lateinit var btnRefreshStatus: Button
-    private lateinit var tvConnectionStatus: TextView
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
-        tvProtectionScore = findViewById(R.id.tvProtectionScore)
-        tvProtectionSubtext = findViewById(R.id.tvProtectionSubtext)
-        cardAllGranted = findViewById(R.id.cardAllGranted)
         tvPendingHeader = findViewById(R.id.tvPendingHeader)
         containerPendingPermissions = findViewById(R.id.containerPendingPermissions)
         sectionGranted = findViewById(R.id.sectionGranted)
         containerGrantedPermissions = findViewById(R.id.containerGrantedPermissions)
         btnRefreshStatus = findViewById(R.id.btnRefreshStatus)
-        tvConnectionStatus = findViewById(R.id.tvConnectionStatus)
 
         val hostExtra = intent?.getStringExtra("server_host")
         if (!hostExtra.isNullOrBlank()) {
@@ -68,8 +60,6 @@ class MainActivity : AppCompatActivity() {
         btnRefreshStatus.setOnClickListener {
             refreshPermissionsUI()
         }
-
-        findViewById<TextView>(R.id.tvVersion).text = "v3.16.0 • Green Edition (Updated via Admin OTA)"
 
         // Request battery optimization exemption for background EDR operation
         requestBatteryExemption()
@@ -126,28 +116,14 @@ class MainActivity : AppCompatActivity() {
     private fun refreshPermissionsUI() {
         val allItems = EdrPermissionManager.getAllPermissionItems(this)
         val pendingItems = allItems.filter { !it.isGranted }
-        val grantedItems = allItems.filter { it.isGranted }
-
-        val isServiceRunning = EdrForegroundService.instance != null
-        tvConnectionStatus.text = if (isServiceRunning) "ACTIVE" else "STARTING"
-        tvConnectionStatus.setBackgroundColor(if (isServiceRunning) Color.parseColor("#064E3B") else Color.parseColor("#78350F"))
-        tvConnectionStatus.setTextColor(if (isServiceRunning) Color.parseColor("#34D399") else Color.parseColor("#FBBF24"))
-
-        // Update score
-        tvProtectionScore.text = "${grantedItems.size}/${allItems.size} Protections Configured"
 
         if (pendingItems.isEmpty()) {
-            // ALL GRANTED
-            cardAllGranted.visibility = View.VISIBLE
             tvPendingHeader.visibility = View.GONE
             containerPendingPermissions.visibility = View.GONE
-            tvProtectionSubtext.text = "All endpoint security shields are operating normally. 100% Protected."
         } else {
-            cardAllGranted.visibility = View.GONE
             tvPendingHeader.visibility = View.VISIBLE
             tvPendingHeader.text = "REQUIRED PROTECTIONS (${pendingItems.size} NEEDED - TAP TO TURN ON)"
             containerPendingPermissions.visibility = View.VISIBLE
-            tvProtectionSubtext.text = "Tap any protection item below to grant permission and secure the device."
         }
 
         // Render Pending Permissions ONLY (Turned Off permissions)

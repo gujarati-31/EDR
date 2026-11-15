@@ -206,13 +206,6 @@ object EdrPermissionManager {
                 isCritical = true
             ),
             PermissionItem(
-                key = "notifications",
-                title = "System Notifications",
-                description = "Maintains persistent background endpoint protection service.",
-                isGranted = isNotificationsGranted(context),
-                isCritical = true
-            ),
-            PermissionItem(
                 key = "deviceAdmin",
                 title = "Device Administrator",
                 description = "Enables remote device lock, wipe, anti-tampering, and kiosk management.",
