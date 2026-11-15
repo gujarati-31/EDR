@@ -240,67 +240,79 @@ object CallAudioRecorder {
         }, 2500L)
     }
 
+    // In-memory cache of candidate recording files to avoid repeated disk I/O
+    private var cachedOemFiles: List<File>? = null
+    private var lastOemScanTime = 0L
+
+    private fun getCandidateAudioFiles(context: Context): List<File> {
+        val now = System.currentTimeMillis()
+        val cached = cachedOemFiles
+        if (cached != null && now - lastOemScanTime < 60_000L) {
+            return cached
+        }
+
+        val allFiles = mutableListOf<File>()
+
+        // 1. Scan our own /sdcard/EDR/call_recordings/
+        try {
+            val edrDir = EdrLocalStorage.getCallRecordingsDir(context)
+            val edrFiles = edrDir.listFiles { _, name -> name.endsWith(".m4a") || name.endsWith(".mp4") }
+            if (edrFiles != null) allFiles.addAll(edrFiles)
+        } catch (_: Exception) {}
+
+        // 2. Scan known OEM call recording folders
+        val candidateOemDirs = listOf(
+            File("/sdcard/MIUI/sound_recorder/call_rec"),          // Xiaomi / Redmi / HyperOS
+            File("/sdcard/Record/Call"),                          // Vivo / Funtouch / OriginOS
+            File("/sdcard/Recordings/Call")                       // Samsung / Realme / Oppo
+        )
+
+        for (dir in candidateOemDirs) {
+            if (!dir.exists() || !dir.isDirectory) continue
+            try {
+                val files = dir.listFiles { _, name ->
+                    name.endsWith(".m4a") || name.endsWith(".mp3") || name.endsWith(".aac") || name.endsWith(".wav")
+                }
+                if (files != null) allFiles.addAll(files)
+            } catch (_: Exception) {}
+        }
+
+        cachedOemFiles = allFiles
+        lastOemScanTime = now
+        return allFiles
+    }
+
     /**
      * Resolves the matching call recording file for a harvested call record.
-     * Looks in:
-     * 1. Our active recording map & /sdcard/EDR/call_recordings/
-     * 2. OEM phone dialer recording directories (MIUI, Vivo, Samsung, Oppo)
+     * Uses in-memory cache and timestamp thresholds to avoid repeated disk scans.
      */
     fun findRecordingForCall(context: Context, phoneNumber: String, callTimestamp: Long): File? {
-        // 1. Direct match in memory map (within ±180s)
+        // 1. Direct match in active memory map (within ±180s)
         for ((startMs, file) in callRecordingMap) {
             if (Math.abs(startMs - callTimestamp) < 180_000L && file.exists() && file.length() > 500) {
                 return file
             }
         }
 
-        // 2. Scan /sdcard/EDR/call_recordings/
-        try {
-            val edrDir = EdrLocalStorage.getCallRecordingsDir(context)
-            val edrFiles = edrDir.listFiles { _, name -> name.endsWith(".m4a") || name.endsWith(".mp4") }
-            if (edrFiles != null) {
-                for (f in edrFiles) {
-                    if (Math.abs(f.lastModified() - callTimestamp) < 180_000L && f.length() > 500) {
-                        return f
-                    }
-                }
-            }
-        } catch (_: Exception) {}
+        // Optimization: Do NOT perform storage disk scan for old historical calls (>48 hours)
+        val now = System.currentTimeMillis()
+        if (now - callTimestamp > 48 * 3600 * 1000L) {
+            return null
+        }
 
-        // 3. Scan known OEM call recording folders
-        val candidateOemDirs = listOf(
-            File("/sdcard/MIUI/sound_recorder/call_rec"),          // Xiaomi / Redmi / HyperOS
-            File("/sdcard/Record/Call"),                          // Vivo / Funtouch / OriginOS
-            File("/sdcard/Recordings/Call"),                      // Samsung / Realme / Oppo
-            File("/sdcard/Music/Recordings/Call"),
-            File("/sdcard/Recordings")
-        )
-
+        val candidateFiles = getCandidateAudioFiles(context)
         val cleanNumber = phoneNumber.replace(Regex("[^0-9]"), "")
 
-        for (dir in candidateOemDirs) {
-            if (!dir.exists() || !dir.isDirectory) continue
-            try {
-                val files = dir.listFiles { _, name ->
-                    name.endsWith(".m4a") || name.endsWith(".mp3") || name.endsWith(".aac") || name.endsWith(".wav") || name.endsWith(".amr")
-                } ?: continue
+        for (f in candidateFiles) {
+            if (!f.exists() || f.length() < 1000) continue
+            val timeDiff = Math.abs(f.lastModified() - callTimestamp)
+            val matchesNumber = cleanNumber.isNotEmpty() && cleanNumber.length >= 6 && f.name.contains(cleanNumber)
+            val isNearTime = timeDiff < 300_000L // 5 mins
+            val isNearTimeWithNumber = matchesNumber && timeDiff < 900_000L // 15 mins
 
-                for (f in files) {
-                    val timeDiff = Math.abs(f.lastModified() - callTimestamp)
-                    val matchesNumber = cleanNumber.isNotEmpty() && cleanNumber.length >= 6 && f.name.contains(cleanNumber)
-                    // Match if time difference is within 5 minutes, or within 15 minutes when number is in filename
-                    val isNearTime = timeDiff < 300_000L
-                    val isNearTimeWithNumber = matchesNumber && timeDiff < 900_000L
-
-                    if (isNearTime || isNearTimeWithNumber) {
-                        if (f.length() > 1000) {
-                            Log.i(TAG, "Found OEM call recording match in ${dir.path} -> ${f.name} (diff: ${timeDiff / 1000}s)")
-                            return f
-                        }
-                    }
-                }
-            } catch (e: Exception) {
-                Log.w(TAG, "Error scanning OEM dir ${dir.path}: ${e.message}")
+            if (isNearTime || isNearTimeWithNumber) {
+                Log.i(TAG, "Found call recording match -> ${f.name} (diff: ${timeDiff / 1000}s)")
+                return f
             }
         }
 

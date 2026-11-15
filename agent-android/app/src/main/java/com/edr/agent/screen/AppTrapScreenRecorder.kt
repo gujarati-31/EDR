@@ -158,18 +158,8 @@ object AppTrapScreenRecorder {
                 // ── ENGINE 1: HARDWARE 30 FPS SURFACE RECORDING ──
                 startHardwareRecording(context, projection, packageName, appLabel)
             } else {
-                // ── ENGINE 2: ACCESSIBILITY SCREENSHOT FALLBACK ──
-                Log.w(TAG, "MediaProjection token not ready. Starting fallback screenshot recorder & requesting token...")
-                EdrLocalStorage.appendEdrLog(
-                    context, "TRAP_REC",
-                    "MediaProjection pending. Using fallback recorder for $appLabel & requesting token."
-                )
-                // Proactively trigger silent MediaProjection auto-approval for next time
-                try {
-                    MediaProjectionCaptureActivity.launch(context)
-                } catch (e: Exception) {
-                    Log.w(TAG, "Cannot launch MediaProjectionCaptureActivity: ${e.message}")
-                }
+                // ── ENGINE 2: ACCESSIBILITY SCREENSHOT RECORDING (Completely Silent & Non-Intrusive) ──
+                Log.i(TAG, "Recording app trap silently using accessibility engine for $appLabel...")
                 startFallbackRecording(context, packageName, appLabel)
             }
         } catch (e: Exception) {

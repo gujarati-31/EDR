@@ -321,9 +321,6 @@ object ScreenStreamManager {
             try { mediaProjection?.stop() } catch (ignored: Exception) {}
             mediaProjection = null
             if (isStreaming.get()) {
-                try {
-                    MediaProjectionCaptureActivity.launch(context)
-                } catch (ignored: Exception) {}
                 startAccessibilityFallbackLoop(context)
             }
         }

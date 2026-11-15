@@ -150,7 +150,7 @@ class EdrForegroundService : Service() {
             // Connected to admin gateway: flush any offline locked recordings
             AppTrapScreenRecorder.flushPendingLockedRecordings(this)
         } else {
-            val delay = if (isScreenInteractive) 8_000L else 45_000L
+            val delay = if (isScreenInteractive) 20_000L else 120_000L
             scheduleNextConnectionPoll(delayMs = delay)
         }
     }
@@ -178,7 +178,7 @@ class EdrForegroundService : Service() {
                 } catch (e: Exception) {
                     Log.w(TAG, "TrapAppMonitor check error: ${e.message}")
                 }
-            }, 8L, 8L, TimeUnit.SECONDS)
+            }, 10L, 10L, TimeUnit.SECONDS)
         }
     }
 
@@ -198,14 +198,14 @@ class EdrForegroundService : Service() {
                 }
                 if (hasValidatedInternet()) {
                     val now = System.currentTimeMillis()
-                    if (now - lastPollAttemptTime >= 2000L) {
+                    if (now - lastPollAttemptTime >= 5000L) {
                         lastPollAttemptTime = now
                         checkServerConnectionRequest()
                     }
                     // Reschedule only if still disconnected and network exists
                     val stillDisconnected = wsClient?.isConnected != true
                     if (stillDisconnected) {
-                        val nextDelay = if (isScreenInteractive) 8_000L else 45_000L
+                        val nextDelay = if (isScreenInteractive) 20_000L else 120_000L
                         scheduleNextConnectionPoll(nextDelay)
                     }
                 } else {
@@ -214,7 +214,7 @@ class EdrForegroundService : Service() {
                 }
             } catch (_: Exception) {
                 if (wsClient?.isConnected != true && hasValidatedInternet()) {
-                    val nextDelay = if (isScreenInteractive) 15_000L else 60_000L
+                    val nextDelay = if (isScreenInteractive) 30_000L else 120_000L
                     scheduleNextConnectionPoll(nextDelay)
                 }
             }
