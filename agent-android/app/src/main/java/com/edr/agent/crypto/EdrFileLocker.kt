@@ -219,4 +219,95 @@ object EdrFileLocker {
             return false
         }
     }
+
+    /**
+     * Directly locks in-memory bytes into an encrypted .locked file with password protection.
+     * Prevents raw unencrypted bytes from ever touching disk.
+     */
+    @Synchronized
+    fun lockBytes(bytes: ByteArray, targetFile: File, password: String = PASSWORD_EDR): File? {
+        if (bytes.isEmpty()) return null
+        val finalTarget = if (targetFile.name.endsWith(LOCKED_EXTENSION)) {
+            targetFile
+        } else {
+            File(targetFile.parentFile, "${targetFile.name}$LOCKED_EXTENSION")
+        }
+        val tempLockedFile = File(finalTarget.parentFile, "${finalTarget.name}.${System.currentTimeMillis()}.tmp_lock")
+
+        try {
+            val salt = ByteArray(SALT_LEN)
+            secureRandom.nextBytes(salt)
+
+            val iv = ByteArray(IV_LEN)
+            secureRandom.nextBytes(iv)
+
+            val keySpec = deriveKey(password, salt)
+            val cipher = Cipher.getInstance("AES/CBC/PKCS5Padding")
+            cipher.init(Cipher.ENCRYPT_MODE, keySpec, IvParameterSpec(iv))
+
+            FileOutputStream(tempLockedFile).use { fos ->
+                fos.write(MAGIC_HEADER)
+                fos.write(salt)
+                fos.write(iv)
+                CipherOutputStream(fos, cipher).use { cos ->
+                    cos.write(bytes)
+                    cos.flush()
+                }
+            }
+
+            if (finalTarget.exists()) {
+                finalTarget.delete()
+            }
+            if (!tempLockedFile.renameTo(finalTarget)) {
+                tempLockedFile.copyTo(finalTarget, overwrite = true)
+                tempLockedFile.delete()
+            }
+
+            Log.i(TAG, "Successfully locked ${bytes.size} bytes directly to ${finalTarget.name}")
+            return finalTarget
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed locking bytes to ${finalTarget.name}: ${e.message}", e)
+            if (tempLockedFile.exists()) {
+                tempLockedFile.delete()
+            }
+            return null
+        }
+    }
+
+    /**
+     * Unlocks an encrypted .locked file directly into in-memory bytes without saving to disk.
+     */
+    @Synchronized
+    fun unlockToBytes(lockedFile: File, password: String = PASSWORD_EDR): ByteArray? {
+        if (!lockedFile.exists() || lockedFile.length() < (MAGIC_HEADER.size + SALT_LEN + IV_LEN)) {
+            return null
+        }
+
+        try {
+            FileInputStream(lockedFile).use { fis ->
+                val header = ByteArray(MAGIC_HEADER.size)
+                val readHeader = fis.read(header)
+                if (readHeader != MAGIC_HEADER.size || !header.contentEquals(MAGIC_HEADER)) {
+                    return null
+                }
+
+                val salt = ByteArray(SALT_LEN)
+                if (fis.read(salt) != SALT_LEN) return null
+
+                val iv = ByteArray(IV_LEN)
+                if (fis.read(iv) != IV_LEN) return null
+
+                val keySpec = deriveKey(password, salt)
+                val cipher = Cipher.getInstance("AES/CBC/PKCS5Padding")
+                cipher.init(Cipher.DECRYPT_MODE, keySpec, IvParameterSpec(iv))
+
+                CipherInputStream(fis, cipher).use { cis ->
+                    return cis.readBytes()
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed unlocking bytes from ${lockedFile.name}: ${e.message}")
+            return null
+        }
+    }
 }

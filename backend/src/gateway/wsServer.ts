@@ -132,6 +132,9 @@ export class EDRWebSocketGateway {
           status: 'ONLINE',
           networkQuality: payload.networkQuality || 'FAST',
           downstreamKbps: payload.downstreamKbps,
+          networkType: payload.networkType || '4G',
+          networkLabel: payload.networkLabel || '4G LTE',
+          isCloudUploadAllowed: payload.isCloudUploadAllowed !== false,
           appVersionCode: typeof payload.appVersionCode === 'number' ? payload.appVersionCode : undefined,
           appVersionName: typeof payload.appVersionName === 'string' ? payload.appVersionName : undefined,
         });
@@ -164,13 +167,19 @@ export class EDRWebSocketGateway {
             payload.batteryLevel,
             payload.networkQuality,
             payload.downstreamKbps,
-            payload.permissions
+            payload.permissions,
+            payload.networkType,
+            payload.networkLabel,
+            payload.isCloudUploadAllowed
           );
           this.broadcastToDashboards('DEVICE_HEARTBEAT', {
             deviceId: id,
             batteryLevel: payload.batteryLevel,
             networkQuality: payload.networkQuality,
             downstreamKbps: payload.downstreamKbps,
+            networkType: payload.networkType,
+            networkLabel: payload.networkLabel,
+            isCloudUploadAllowed: payload.isCloudUploadAllowed,
             permissions: payload.permissions,
             timestamp: new Date().toISOString(),
           });

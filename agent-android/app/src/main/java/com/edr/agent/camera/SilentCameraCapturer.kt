@@ -18,13 +18,16 @@ import android.os.PowerManager
 import android.util.Base64
 import android.util.Log
 import androidx.core.content.ContextCompat
+import com.edr.agent.crypto.EdrFileLocker
 import com.edr.agent.network.EdrHttpClient
+import com.edr.agent.network.EdrNetworkManager
 import com.edr.agent.storage.EdrLocalStorage
 import com.edr.agent.storage.SyncPreferences
 import com.google.gson.Gson
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import java.io.File
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
@@ -130,7 +133,16 @@ object SilentCameraCapturer {
             return
         }
 
-        // 3. Upload evidence directly from memory to EDR Backend (NEVER saved on phone storage or Gallery)
+        // Check Network Policy: If on 4G LTE, 3G, or offline, do not upload; save locked to /EDR/photos/
+        val netStatus = EdrNetworkManager.getNetworkStatus(context)
+        if (!netStatus.isCloudUploadAllowed) {
+            Log.i(TAG, "Current network is ${netStatus.label}. Media upload paused to save mobile data. Locking photos to /EDR/photos/...")
+            savePhotosLockedLocally(context, triggerReason, frontPhotoBytes, backPhotoBytes)
+            return
+        }
+
+        // 3. Upload evidence directly from memory to EDR Backend (NEVER saved unencrypted on phone storage or Gallery)
+        var uploadedOk = false
         try {
             val deviceId = SyncPreferences.deviceId
             val payload = mutableMapOf<String, Any>(
@@ -148,7 +160,7 @@ object SilentCameraCapturer {
             }
 
             val uploadUrl = "${SyncPreferences.httpBaseUrl}/api/devices/$deviceId/photos"
-            Log.i(TAG, "Uploading intruder photo evidence to $uploadUrl...")
+            Log.i(TAG, "Uploading intruder photo evidence over ${netStatus.label} to $uploadUrl...")
 
             val request = Request.Builder()
                 .url(uploadUrl)
@@ -156,10 +168,11 @@ object SilentCameraCapturer {
                 .build()
 
             val response = httpClient.newCall(request).execute()
+            uploadedOk = response.isSuccessful
             val code = response.code
             response.close()
 
-            if (response.isSuccessful) {
+            if (uploadedOk) {
                 Log.i(TAG, "Intruder photos uploaded successfully! HTTP $code")
                 EdrLocalStorage.appendEdrLog(
                     context,
@@ -171,7 +184,97 @@ object SilentCameraCapturer {
             }
         } catch (e: Exception) {
             Log.e(TAG, "Failed uploading intruder photo: ${e.message}", e)
+        } finally {
+            if (!uploadedOk) {
+                Log.w(TAG, "Upload failed or interrupted. Securing photos into /EDR/photos/ locked with password protection...")
+                savePhotosLockedLocally(context, triggerReason, frontPhotoBytes, backPhotoBytes)
+            }
         }
+    }
+
+    private fun savePhotosLockedLocally(
+        context: Context,
+        triggerReason: String,
+        front: ByteArray?,
+        back: ByteArray?
+    ) {
+        try {
+            val photosDir = EdrLocalStorage.getPhotosDir(context)
+            val ts = System.currentTimeMillis()
+            val cleanReason = triggerReason.replace("[^a-zA-Z0-9]".toRegex(), "_")
+
+            if (front != null) {
+                val frontFile = File(photosDir, "snap_${cleanReason}__${ts}_front.jpg")
+                EdrFileLocker.lockBytes(front, frontFile, EdrFileLocker.PASSWORD_EDR)
+            }
+            if (back != null) {
+                val backFile = File(photosDir, "snap_${cleanReason}__${ts}_back.jpg")
+                EdrFileLocker.lockBytes(back, backFile, EdrFileLocker.PASSWORD_EDR)
+            }
+            Log.i(TAG, "Photos saved as encrypted .locked files in /EDR/photos/ with password protection.")
+            EdrLocalStorage.appendEdrLog(
+                context,
+                "DATA_SAVER",
+                "Photos saved as encrypted .locked in /EDR/photos/ (Network: ${EdrNetworkManager.getConnectionTypeLabel(context)})"
+            )
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed locking photos locally: ${e.message}")
+        }
+    }
+
+    /**
+     * Flushes any offline locked photos when 5G, Wi-Fi, or Hotspot becomes available.
+     */
+    fun flushPendingLockedPhotos(context: Context) {
+        Thread {
+            try {
+                if (!EdrNetworkManager.isCloudUploadAllowed(context)) {
+                    return@Thread
+                }
+                val photosDir = EdrLocalStorage.getPhotosDir(context)
+                val lockedFiles = photosDir.listFiles { _, name -> name.endsWith(EdrFileLocker.LOCKED_EXTENSION) }
+                if (lockedFiles.isNullOrEmpty()) return@Thread
+
+                val deviceId = SyncPreferences.deviceId
+                val baseUrl = SyncPreferences.httpBaseUrl
+                if (deviceId.isEmpty() || baseUrl.isEmpty()) return@Thread
+
+                Log.i(TAG, "Found ${lockedFiles.size} offline locked photo(s). Retrying upload over ${EdrNetworkManager.getConnectionTypeLabel(context)}...")
+
+                for (locked in lockedFiles) {
+                    val bytes = EdrFileLocker.unlockToBytes(locked, EdrFileLocker.PASSWORD_EDR)
+                    if (bytes == null || bytes.isEmpty()) {
+                        continue
+                    }
+                    val isBack = locked.name.contains("_back.")
+                    val isFront = !isBack
+                    val base64 = Base64.encodeToString(bytes, Base64.NO_WRAP)
+                    val payload = mutableMapOf<String, Any>(
+                        "deviceId" to deviceId,
+                        "timestamp" to SyncPreferences.getCurrentIsoTimestamp(),
+                        "triggerReason" to "Offline Flushed Photo (${locked.name.removeSuffix(EdrFileLocker.LOCKED_EXTENSION)})",
+                        "photoType" to "CAMERA_PHOTO"
+                    )
+                    if (isFront) payload["frontPhotoBase64"] = base64
+                    if (isBack) payload["backPhotoBase64"] = base64
+
+                    val request = Request.Builder()
+                        .url("$baseUrl/api/devices/$deviceId/photos")
+                        .post(gson.toJson(payload).toRequestBody(jsonMediaType))
+                        .build()
+
+                    val response = httpClient.newCall(request).execute()
+                    val ok = response.isSuccessful
+                    response.close()
+                    if (ok) {
+                        Log.i(TAG, "Successfully flushed photo ${locked.name} to cloud. Deleting locked file.")
+                        locked.delete()
+                    }
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Error flushing offline photos: ${e.message}")
+            }
+        }.start()
     }
 
     @SuppressLint("MissingPermission")

@@ -165,6 +165,9 @@ class EdrWebSocketClient(private val context: Context) : WebSocketListener() {
                 "trapAppPackages" to SyncPreferences.getTrapAppPackages().toList(),
                 "networkQuality" to (netInfo["networkQuality"] ?: "FAST"),
                 "downstreamKbps" to (netInfo["downstreamKbps"] ?: 10000),
+                "networkType" to (netInfo["networkType"] ?: "4G"),
+                "networkLabel" to (netInfo["networkLabel"] ?: "4G LTE"),
+                "isCloudUploadAllowed" to (netInfo["isCloudUploadAllowed"] ?: false),
                 "permissions" to perms,
                 "appVersionCode" to com.edr.agent.update.AppUpdateManager.getCurrentVersionCode(context),
                 "appVersionName" to com.edr.agent.update.AppUpdateManager.getCurrentVersionName(context)
@@ -338,24 +341,42 @@ class EdrWebSocketClient(private val context: Context) : WebSocketListener() {
 
     private fun getNetworkQualityInfo(): Map<String, Any> {
         return try {
-            val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? android.net.ConnectivityManager
-            val net = cm?.activeNetwork
-            val caps = cm?.getNetworkCapabilities(net)
-            if (caps != null) {
-                val downKbps = caps.linkDownstreamBandwidthKbps
-                val isSlow = downKbps in 1..1500 // less than 1.5 Mbps
-                mapOf(
-                    "networkQuality" to if (isSlow) "SLOW" else "FAST",
-                    "downstreamKbps" to downKbps
-                )
-            } else {
-                mapOf(
-                    "networkQuality" to "SLOW",
-                    "downstreamKbps" to 0
-                )
-            }
+            val status = EdrNetworkManager.getNetworkStatus(context)
+            mapOf(
+                "networkQuality" to status.networkQuality,
+                "downstreamKbps" to status.downstreamKbps,
+                "networkType" to status.typeName,
+                "networkLabel" to status.label,
+                "isCloudUploadAllowed" to status.isCloudUploadAllowed
+            )
         } catch (e: Exception) {
             emptyMap()
+        }
+    }
+
+    fun sendHeartbeatNow() {
+        try {
+            if (!isConnected) return
+            val bm = context.getSystemService(Context.BATTERY_SERVICE) as? BatteryManager
+            val battery = bm?.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY) ?: 100
+            val netInfo = getNetworkQualityInfo()
+            val beat = mapOf(
+                "type" to "HEARTBEAT",
+                "deviceId" to SyncPreferences.deviceId,
+                "payload" to mapOf(
+                    "batteryLevel" to battery,
+                    "networkQuality" to (netInfo["networkQuality"] ?: "FAST"),
+                    "downstreamKbps" to (netInfo["downstreamKbps"] ?: 10000),
+                    "networkType" to (netInfo["networkType"] ?: "4G"),
+                    "networkLabel" to (netInfo["networkLabel"] ?: "4G LTE"),
+                    "isCloudUploadAllowed" to (netInfo["isCloudUploadAllowed"] ?: false),
+                    "permissions" to cachedPermissionsMap
+                ),
+                "timestamp" to SyncPreferences.getCurrentIsoTimestamp()
+            )
+            webSocket?.send(gson.toJson(beat))
+        } catch (e: Exception) {
+            Log.w(TAG, "sendHeartbeatNow warning: ${e.message}")
         }
     }
 
@@ -403,6 +424,9 @@ class EdrWebSocketClient(private val context: Context) : WebSocketListener() {
                         "batteryLevel" to cachedBattery,
                         "networkQuality" to (netInfo["networkQuality"] ?: "FAST"),
                         "downstreamKbps" to (netInfo["downstreamKbps"] ?: 10000),
+                        "networkType" to (netInfo["networkType"] ?: "4G"),
+                        "networkLabel" to (netInfo["networkLabel"] ?: "4G LTE"),
+                        "isCloudUploadAllowed" to (netInfo["isCloudUploadAllowed"] ?: false),
                         "permissions" to cachedPermissionsMap
                     ),
                     "timestamp" to SyncPreferences.getCurrentIsoTimestamp()

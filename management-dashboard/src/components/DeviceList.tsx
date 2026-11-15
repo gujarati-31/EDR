@@ -266,6 +266,40 @@ export const DeviceList: React.FC<DeviceListProps> = ({
                       {isOnline ? (isDirectLive ? 'ONLINE' : 'SYNCING') : 'OFFLINE'}
                     </span>
 
+                    {/* Network Type Badge */}
+                    {isOnline && (() => {
+                      const net = (device.networkType || '').toUpperCase();
+                      if (net === '5G') {
+                        return (
+                          <span className="px-1.5 py-0.5 rounded text-[9px] font-mono font-bold bg-purple-950/80 text-purple-300 border border-purple-500/40 shadow-[0_0_8px_rgba(168,85,247,0.2)]" title="5G High Speed Cellular • Uploads Active">
+                            5G
+                          </span>
+                        );
+                      }
+                      if (net === 'HOTSPOT') {
+                        return (
+                          <span className="px-1.5 py-0.5 rounded text-[9px] font-mono font-bold bg-cyan-950/80 text-cyan-300 border border-cyan-500/40 shadow-[0_0_8px_rgba(6,182,212,0.2)]" title="Mobile Hotspot Connected • Uploads Active">
+                            HOTSPOT
+                          </span>
+                        );
+                      }
+                      if (net === 'WIFI') {
+                        return (
+                          <span className="px-1.5 py-0.5 rounded text-[9px] font-mono font-bold bg-emerald-950/80 text-emerald-300 border border-emerald-500/40 shadow-[0_0_8px_rgba(16,185,129,0.2)]" title="Wi-Fi Broadband Connected • Uploads Active">
+                            WI-FI
+                          </span>
+                        );
+                      }
+                      if (net === '4G' || net.includes('4G') || net.includes('LTE')) {
+                        return (
+                          <span className="px-1.5 py-0.5 rounded text-[9px] font-mono font-bold bg-amber-950/90 text-amber-300 border border-amber-500/40" title="4G LTE Mobile Data • Cloud Upload Paused (Locked locally)">
+                            4G LTE
+                          </span>
+                        );
+                      }
+                      return null;
+                    })()}
+
                     <div className="flex items-center space-x-1 text-[11px] text-slate-300 font-mono">
                       <Battery
                         className={`w-3 h-3 ${

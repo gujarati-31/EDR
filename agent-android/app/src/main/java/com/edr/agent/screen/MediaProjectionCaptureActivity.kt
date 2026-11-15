@@ -52,6 +52,7 @@ class MediaProjectionCaptureActivity : Activity() {
                 EdrForegroundService.instance?.promoteToMediaProjection()
                 ScreenStreamManager.onMediaProjectionGranted(applicationContext, resultCode, data)
                 moveTaskToBack(true)
+                finish()
                 return
             } else {
                 Log.w(TAG, "MediaProjection permission was denied or cancelled: resultCode=$resultCode")

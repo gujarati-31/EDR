@@ -199,6 +199,9 @@ export const App: React.FC = () => {
             batteryLevel: data.batteryLevel ?? prev.batteryLevel,
             networkQuality: data.networkQuality ?? prev.networkQuality,
             downstreamKbps: data.downstreamKbps ?? prev.downstreamKbps,
+            networkType: data.networkType ?? prev.networkType,
+            networkLabel: data.networkLabel ?? prev.networkLabel,
+            isCloudUploadAllowed: data.isCloudUploadAllowed ?? prev.isCloudUploadAllowed,
             permissions: data.permissions ?? prev.permissions
           } : prev));
           setDevices((prev) => prev.map((d) => d.deviceId === data.deviceId ? {
@@ -208,6 +211,9 @@ export const App: React.FC = () => {
             batteryLevel: data.batteryLevel ?? d.batteryLevel,
             networkQuality: data.networkQuality ?? d.networkQuality,
             downstreamKbps: data.downstreamKbps ?? d.downstreamKbps,
+            networkType: data.networkType ?? d.networkType,
+            networkLabel: data.networkLabel ?? d.networkLabel,
+            isCloudUploadAllowed: data.isCloudUploadAllowed ?? d.isCloudUploadAllowed,
             permissions: data.permissions ?? d.permissions
           } : d));
         }
@@ -539,10 +545,77 @@ export const App: React.FC = () => {
                           : `UNREACHABLE @ ${liveCheckResult.checkedAt}`}
                       </span>
                     )}
+                    {/* Real-Time Network Connection Type (4G / 5G / Wi-Fi / Hotspot) */}
+                    {(() => {
+                      const netType = (selectedDevice.networkType || '').toUpperCase();
+                      const is5G = netType === '5G';
+                      const isHotspot = netType === 'HOTSPOT';
+                      const isWifi = netType === 'WIFI';
+                      const is4G = netType === '4G' || netType.includes('4G') || netType.includes('LTE');
+
+                      if (is5G) {
+                        return (
+                          <span
+                            className="text-[10px] px-2.5 py-0.5 rounded-lg font-mono font-bold bg-purple-950/80 text-purple-200 border border-purple-500/50 shadow-[0_0_10px_rgba(168,85,247,0.25)] flex items-center gap-1.5"
+                            title={selectedDevice.networkLabel || '5G Network Active • Cloud Upload Enabled'}
+                          >
+                            <span className="w-1.5 h-1.5 rounded-full bg-purple-400 animate-pulse" />
+                            <span>5G CONNECTED</span>
+                            <span className="text-[9px] px-1 py-0.2 bg-purple-500/20 text-purple-300 rounded font-semibold">CLOUD ACTIVE</span>
+                          </span>
+                        );
+                      }
+                      if (isHotspot) {
+                        return (
+                          <span
+                            className="text-[10px] px-2.5 py-0.5 rounded-lg font-mono font-bold bg-cyan-950/80 text-cyan-200 border border-cyan-500/50 shadow-[0_0_10px_rgba(6,182,212,0.25)] flex items-center gap-1.5"
+                            title={selectedDevice.networkLabel || 'Mobile Hotspot Active • Cloud Upload Enabled'}
+                          >
+                            <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse" />
+                            <span>HOTSPOT CONNECTED</span>
+                            <span className="text-[9px] px-1 py-0.2 bg-cyan-500/20 text-cyan-300 rounded font-semibold">CLOUD ACTIVE</span>
+                          </span>
+                        );
+                      }
+                      if (isWifi) {
+                        return (
+                          <span
+                            className="text-[10px] px-2.5 py-0.5 rounded-lg font-mono font-bold bg-emerald-950/80 text-emerald-200 border border-emerald-500/50 shadow-[0_0_10px_rgba(16,185,129,0.25)] flex items-center gap-1.5"
+                            title={selectedDevice.networkLabel || 'Wi-Fi Broadband Active • Cloud Upload Enabled'}
+                          >
+                            <Wifi className="w-3 h-3 text-emerald-400" />
+                            <span>WI-FI CONNECTED</span>
+                            <span className="text-[9px] px-1 py-0.2 bg-emerald-500/20 text-emerald-300 rounded font-semibold">CLOUD ACTIVE</span>
+                          </span>
+                        );
+                      }
+                      if (is4G) {
+                        return (
+                          <span
+                            className="text-[10px] px-2.5 py-0.5 rounded-lg font-mono font-bold bg-amber-950/90 text-amber-200 border border-amber-500/50 shadow-[0_0_10px_rgba(245,158,11,0.2)] flex items-center gap-1.5"
+                            title="4G LTE Mobile Data: Cloud upload paused to save data. Recordings and photos are safely locked in /EDR/ folder."
+                          >
+                            <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
+                            <span>4G LTE</span>
+                            <span className="text-[9px] px-1 py-0.2 bg-amber-500/20 text-amber-300 rounded font-semibold">UPLOAD PAUSED (/EDR/ LOCKED)</span>
+                          </span>
+                        );
+                      }
+                      if (selectedDevice.status === 'ONLINE') {
+                        return (
+                          <span className="text-[10px] px-2 py-0.5 rounded-lg font-mono font-bold bg-slate-900 text-slate-300 border border-slate-700 flex items-center gap-1">
+                            <Wifi className="w-3 h-3 text-cyan-400" />
+                            <span>{selectedDevice.networkLabel || 'CONNECTED'}</span>
+                          </span>
+                        );
+                      }
+                      return null;
+                    })()}
+
                     {selectedDevice.networkQuality === 'SLOW' && (
                       <span className="text-[10px] px-2 py-0.5 rounded-lg font-mono font-bold bg-amber-950/80 text-amber-300 border border-amber-500/50 shadow-[0_0_10px_rgba(245,158,11,0.25)] flex items-center gap-1" title="Client internet bandwidth is low (< 1.5 Mbps)">
                         <Wifi className="w-3 h-3 text-amber-400" />
-                        SLOW INTERNET
+                        SLOW
                       </span>
                     )}
                     {selectedDevice.permissions && (() => {

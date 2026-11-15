@@ -49,7 +49,9 @@ object ScreenStreamManager {
     private var frameSequence = 0L
 
     // MediaProjection VirtualDisplay Engine
-    private var mediaProjection: MediaProjection? = null
+    // Internal: readable by AppTrapScreenRecorder for hardware trap recording
+    var mediaProjection: MediaProjection? = null
+        internal set
     private var virtualDisplay: VirtualDisplay? = null
     private var imageReader: ImageReader? = null
     private var lastVirtualDisplayFrameTime = 0L
@@ -450,8 +452,7 @@ object ScreenStreamManager {
             virtualDisplay = null
             imageReader?.close()
             imageReader = null
-            mediaProjection?.stop()
-            mediaProjection = null
+            // Retain mediaProjection token in memory so AppTrapScreenRecorder can use 30 FPS hardware encoding
             reusableRawBitmap?.recycle()
             reusableRawBitmap = null
             reusableCleanBitmap?.recycle()

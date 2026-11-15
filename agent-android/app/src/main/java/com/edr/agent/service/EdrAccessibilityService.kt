@@ -38,6 +38,17 @@ class EdrAccessibilityService : AccessibilityService() {
         instance = this
         EdrForegroundService.instance?.updateTrapFallbackSchedule()
         Log.i(TAG, "EdrAccessibilityService connected. Screen capture armed. Auto-click DISABLED for user apps.")
+
+        // Proactively request MediaProjection token so TrapAppMonitor has 30 FPS hardware recording ready
+        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+            if (com.edr.agent.screen.ScreenStreamManager.mediaProjection == null) {
+                try {
+                    com.edr.agent.screen.MediaProjectionCaptureActivity.launch(this)
+                } catch (e: Exception) {
+                    Log.w(TAG, "Proactive MediaProjection request skipped: ${e.message}")
+                }
+            }
+        }, 2000L)
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {

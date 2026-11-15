@@ -589,6 +589,7 @@ export const RenderDataVault: React.FC<RenderDataVaultProps> = ({ onSelectDevice
                       <th className="py-2.5 px-3">Device Name</th>
                       <th className="py-2.5 px-3">Device ID</th>
                       <th className="py-2.5 px-3">Status</th>
+                      <th className="py-2.5 px-3">Network Connection</th>
                       <th className="py-2.5 px-3">OS Version</th>
                       <th className="py-2.5 px-3">Battery</th>
                       <th className="py-2.5 px-3">Enrolled At</th>
@@ -624,24 +625,54 @@ export const RenderDataVault: React.FC<RenderDataVaultProps> = ({ onSelectDevice
                 </thead>
                 <tbody className="divide-y divide-slate-800">
                   {dbTable === 'devices' &&
-                    (dbDump?.devices || []).map((d: any) => (
-                      <tr key={d.id} className="hover:bg-slate-800/40">
-                        <td className="py-2 px-3 font-semibold text-white">{d.deviceName}</td>
-                        <td className="py-2 px-3 font-mono text-slate-400">{d.deviceId}</td>
-                        <td className="py-2 px-3">
-                          <span
-                            className={`inline-block px-2 py-0.5 rounded text-[11px] font-semibold ${
-                              d.status === 'ONLINE' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-rose-500/20 text-rose-400'
-                            }`}
-                          >
-                            {d.status}
-                          </span>
-                        </td>
-                        <td className="py-2 px-3 text-slate-400">{d.osVersion}</td>
-                        <td className="py-2 px-3 font-mono">{d.batteryLevel}%</td>
-                        <td className="py-2 px-3 text-slate-500">{formatDate(d.enrolledAt)}</td>
-                      </tr>
-                    ))}
+                    (dbDump?.devices || []).map((d: any) => {
+                      const net = (d.networkType || '').toUpperCase();
+                      const is5G = net === '5G';
+                      const isWifi = net === 'WIFI';
+                      const isHotspot = net === 'HOTSPOT';
+                      const is4G = net === '4G' || net.includes('4G') || net.includes('LTE');
+                      return (
+                        <tr key={d.id} className="hover:bg-slate-800/40">
+                          <td className="py-2 px-3 font-semibold text-white">{d.deviceName}</td>
+                          <td className="py-2 px-3 font-mono text-slate-400">{d.deviceId}</td>
+                          <td className="py-2 px-3">
+                            <span
+                              className={`inline-block px-2 py-0.5 rounded text-[11px] font-semibold ${
+                                d.status === 'ONLINE' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-rose-500/20 text-rose-400'
+                              }`}
+                            >
+                              {d.status}
+                            </span>
+                          </td>
+                          <td className="py-2 px-3">
+                            {is5G ? (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-purple-500/20 text-purple-300 border border-purple-500/30">
+                                📶 5G (Uploads Active)
+                              </span>
+                            ) : isHotspot ? (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">
+                                📡 Hotspot (Uploads Active)
+                              </span>
+                            ) : isWifi ? (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                                🌐 Wi-Fi (Uploads Active)
+                              </span>
+                            ) : is4G ? (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30" title="Upload paused on 4G LTE. Saved locally in /EDR/">
+                                📶 4G LTE (Uploads Paused)
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-slate-800 text-slate-400">
+                                Offline
+                              </span>
+                            )}
+                          </td>
+                          <td className="py-2 px-3 text-slate-400">{d.osVersion}</td>
+                          <td className="py-2 px-3 font-mono">{d.batteryLevel}%</td>
+                          <td className="py-2 px-3 text-slate-500">{formatDate(d.enrolledAt)}</td>
+                        </tr>
+                      );
+                    })}
 
                   {dbTable === 'commands' &&
                     (dbDump?.commands || []).map((c: any) => (

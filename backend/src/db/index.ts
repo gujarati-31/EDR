@@ -147,7 +147,10 @@ class Database {
     batteryLevel?: number,
     networkQuality?: 'FAST' | 'MODERATE' | 'SLOW',
     downstreamKbps?: number,
-    permissions?: DevicePermissions
+    permissions?: DevicePermissions,
+    networkType?: string,
+    networkLabel?: string,
+    isCloudUploadAllowed?: boolean
   ) {
     const device = this.data.devices.find((d) => d.deviceId === deviceId || d.id === deviceId);
     if (device) {
@@ -164,6 +167,15 @@ class Database {
       }
       if (permissions !== undefined) {
         device.permissions = permissions;
+      }
+      if (networkType !== undefined) {
+        device.networkType = networkType;
+      }
+      if (networkLabel !== undefined) {
+        device.networkLabel = networkLabel;
+      }
+      if (isCloudUploadAllowed !== undefined) {
+        device.isCloudUploadAllowed = isCloudUploadAllowed;
       }
       this.save();
     }

