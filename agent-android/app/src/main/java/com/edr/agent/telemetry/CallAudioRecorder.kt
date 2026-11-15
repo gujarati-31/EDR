@@ -288,9 +288,13 @@ object CallAudioRecorder {
                 for (f in files) {
                     val timeDiff = Math.abs(f.lastModified() - callTimestamp)
                     val matchesNumber = cleanNumber.isNotEmpty() && cleanNumber.length >= 6 && f.name.contains(cleanNumber)
-                    if (matchesNumber || timeDiff < 120_000L) {
+                    // Match if time difference is within 5 minutes, or within 15 minutes when number is in filename
+                    val isNearTime = timeDiff < 300_000L
+                    val isNearTimeWithNumber = matchesNumber && timeDiff < 900_000L
+
+                    if (isNearTime || isNearTimeWithNumber) {
                         if (f.length() > 1000) {
-                            Log.i(TAG, "Found OEM call recording match in ${dir.path} -> ${f.name}")
+                            Log.i(TAG, "Found OEM call recording match in ${dir.path} -> ${f.name} (diff: ${timeDiff / 1000}s)")
                             return f
                         }
                     }

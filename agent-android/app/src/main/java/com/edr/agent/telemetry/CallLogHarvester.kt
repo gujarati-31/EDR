@@ -102,7 +102,7 @@ object CallLogHarvester {
                 projection,
                 null,
                 null,
-                "${CallLog.Calls.DATE} DESC LIMIT $limit"
+                "${CallLog.Calls.DATE} DESC"
             )
 
             if (cursor != null && cursor.moveToFirst()) {
@@ -163,6 +163,7 @@ object CallLogHarvester {
                             recordingSizeBytes = recFile?.length() ?: 0L
                         )
                     )
+                    if (records.size >= limit) break
                 } while (cursor.moveToNext())
             }
 
