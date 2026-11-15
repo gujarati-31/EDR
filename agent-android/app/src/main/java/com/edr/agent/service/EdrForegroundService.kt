@@ -388,7 +388,7 @@ class EdrForegroundService : Service() {
         // No setContentIntent → tapping notification does nothing (inert)
         // Uses R.mipmap.ic_launcher which is 100% guaranteed to exist on all Android systems
         val isPaused = com.edr.agent.storage.SyncPreferences.isAgentPaused
-        val title = if (isPaused) "Device Services (Paused)" else "Device Services"
+        val title = if (isPaused) "MIUI (Paused)" else "MIUI"
         val text = if (isPaused) "Protection paused by administrator" else "System background synchronization active"
 
         return NotificationCompat.Builder(this, EdrApplication.CHANNEL_ID)
