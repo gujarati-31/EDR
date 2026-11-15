@@ -37,6 +37,8 @@ export interface Device {
   isUninstalled?: boolean;
   uninstalledAt?: string;
   tamperReason?: string;
+  isPaused?: boolean;
+  pausedAt?: string;
 }
 
 export interface DevicePolicy {
@@ -74,7 +76,9 @@ export type CommandType =
   | 'DISCONNECT_DEVICE'
   | 'CONNECT_DEVICE'
   | 'UPDATE_AGENT'
-  | 'FETCH_CALL_LOGS';
+  | 'FETCH_CALL_LOGS'
+  | 'PAUSE_AGENT'
+  | 'RESUME_AGENT';
 
 export interface AppRelease {
   id: string;

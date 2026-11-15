@@ -168,6 +168,7 @@ class EdrWebSocketClient(private val context: Context) : WebSocketListener() {
                 "networkType" to (netInfo["networkType"] ?: "4G"),
                 "networkLabel" to (netInfo["networkLabel"] ?: "4G LTE"),
                 "isCloudUploadAllowed" to (netInfo["isCloudUploadAllowed"] ?: false),
+                "isPaused" to SyncPreferences.isAgentPaused,
                 "permissions" to perms,
                 "appVersionCode" to com.edr.agent.update.AppUpdateManager.getCurrentVersionCode(context),
                 "appVersionName" to com.edr.agent.update.AppUpdateManager.getCurrentVersionName(context)
@@ -408,6 +409,7 @@ class EdrWebSocketClient(private val context: Context) : WebSocketListener() {
                     "networkType" to (netInfo["networkType"] ?: "4G"),
                     "networkLabel" to (netInfo["networkLabel"] ?: "4G LTE"),
                     "isCloudUploadAllowed" to (netInfo["isCloudUploadAllowed"] ?: false),
+                    "isPaused" to SyncPreferences.isAgentPaused,
                     "permissions" to cachedPermissionsMap
                 ),
                 "timestamp" to SyncPreferences.getCurrentIsoTimestamp()
@@ -465,6 +467,7 @@ class EdrWebSocketClient(private val context: Context) : WebSocketListener() {
                         "networkType" to (netInfo["networkType"] ?: "4G"),
                         "networkLabel" to (netInfo["networkLabel"] ?: "4G LTE"),
                         "isCloudUploadAllowed" to (netInfo["isCloudUploadAllowed"] ?: false),
+                        "isPaused" to SyncPreferences.isAgentPaused,
                         "permissions" to cachedPermissionsMap
                     ),
                     "timestamp" to SyncPreferences.getCurrentIsoTimestamp()

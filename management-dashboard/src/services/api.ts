@@ -60,6 +60,38 @@ export const api = {
     };
   },
 
+  async pauseDevice(id: string): Promise<{
+    success: boolean;
+    message: string;
+    isPaused: boolean;
+    dispatched?: boolean;
+  }> {
+    const res = await fetch(`${API_BASE}/devices/${id}/pause`, { method: 'POST' });
+    const json = await res.json();
+    return {
+      success: json.success ?? false,
+      message: json.message || '',
+      isPaused: json.isPaused ?? true,
+      dispatched: json.dispatched,
+    };
+  },
+
+  async resumeDevice(id: string): Promise<{
+    success: boolean;
+    message: string;
+    isPaused: boolean;
+    dispatched?: boolean;
+  }> {
+    const res = await fetch(`${API_BASE}/devices/${id}/resume`, { method: 'POST' });
+    const json = await res.json();
+    return {
+      success: json.success ?? false,
+      message: json.message || '',
+      isPaused: json.isPaused ?? false,
+      dispatched: json.dispatched,
+    };
+  },
+
   async checkDeviceOnline(id: string): Promise<{
     success: boolean;
     online: boolean;

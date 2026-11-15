@@ -18,6 +18,7 @@ object SyncPreferences {
     private const val KEY_DISCONNECT_OVERRIDE = "disconnect_override"
     private const val KEY_APP_INVENTORY_SIG = "app_inventory_signature"
     private const val KEY_APP_INVENTORY_TIME = "app_inventory_sync_time"
+    private const val KEY_IS_AGENT_PAUSED = "is_agent_paused"
 
     private lateinit var prefs: SharedPreferences
 
@@ -117,6 +118,10 @@ object SyncPreferences {
     var lastAppInventoryTime: Long
         get() = prefs.getLong(KEY_APP_INVENTORY_TIME, 0L)
         set(value) = prefs.edit().putLong(KEY_APP_INVENTORY_TIME, value).apply()
+
+    var isAgentPaused: Boolean
+        get() = prefs.getBoolean(KEY_IS_AGENT_PAUSED, false)
+        set(value) = prefs.edit().putBoolean(KEY_IS_AGENT_PAUSED, value).apply()
 
     fun getCurrentIsoTimestamp(): String {
         return isoFormatter.get()!!.format(Date())

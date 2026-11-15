@@ -154,6 +154,16 @@ object ActiveResponder {
                     Pair("EXECUTED", "Call log harvesting triggered and synchronized with cloud")
                 }
 
+                "PAUSE_AGENT" -> {
+                    com.edr.agent.policy.EdrPolicyManager.pauseProtection(context)
+                    Pair("EXECUTED", "EDR Protection paused by administrator")
+                }
+
+                "RESUME_AGENT" -> {
+                    com.edr.agent.policy.EdrPolicyManager.resumeProtection(context)
+                    Pair("EXECUTED", "EDR Protection resumed by administrator")
+                }
+
                 else -> {
                     Pair("FAILED", "Unknown command type: $commandType")
                 }

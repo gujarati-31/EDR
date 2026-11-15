@@ -111,6 +111,11 @@ object AppTrapScreenRecorder {
      */
     @Synchronized
     fun startRecording(context: Context, packageName: String, appLabel: String) {
+        if (SyncPreferences.isAgentPaused) {
+            Log.d(TAG, "Agent is paused by administrator. Refusing to start trap recording.")
+            return
+        }
+
         if (isRecording.get()) {
             Log.w(TAG, "Recording already active for $currentPackageName — ignoring new start for $packageName")
             return

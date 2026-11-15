@@ -30,6 +30,11 @@ class DeltaSyncWorker(
     private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
 
     override suspend fun doWork(): Result {
+        if (SyncPreferences.isAgentPaused) {
+            Log.i(TAG, "Agent protection is paused by administrator. Skipping background delta sync.")
+            return Result.success()
+        }
+
         val syncFrom = SyncPreferences.getLastSyncedTimestamp()
         val syncTo = SyncPreferences.getCurrentIsoTimestamp()
 

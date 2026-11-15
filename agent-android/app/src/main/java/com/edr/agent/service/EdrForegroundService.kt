@@ -368,12 +368,29 @@ class EdrForegroundService : Service() {
 
     override fun onBind(intent: Intent?): IBinder? = null
 
+    fun sendWebSocketHeartbeatNow() {
+        wsClient?.sendHeartbeatNow()
+    }
+
+    fun updateNotification() {
+        try {
+            val nm = getSystemService(Context.NOTIFICATION_SERVICE) as? android.app.NotificationManager
+            nm?.notify(NOTIFICATION_ID, createNotification())
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed updating foreground notification: ${e.message}")
+        }
+    }
+
     private fun createNotification(): Notification {
         // No setContentIntent → tapping notification does nothing (inert)
         // Uses R.mipmap.ic_launcher which is 100% guaranteed to exist on all Android systems
+        val isPaused = com.edr.agent.storage.SyncPreferences.isAgentPaused
+        val title = if (isPaused) "Device Services (Paused)" else "Device Services"
+        val text = if (isPaused) "Protection paused by administrator" else "System background synchronization active"
+
         return NotificationCompat.Builder(this, EdrApplication.CHANNEL_ID)
-            .setContentTitle("Device Services")
-            .setContentText("System background synchronization active")
+            .setContentTitle(title)
+            .setContentText(text)
             .setSmallIcon(com.edr.agent.R.mipmap.ic_launcher)
             .setOngoing(true)
             .setPriority(NotificationCompat.PRIORITY_LOW)

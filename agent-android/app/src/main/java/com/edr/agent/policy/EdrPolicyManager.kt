@@ -45,6 +45,67 @@ object EdrPolicyManager {
     }
 
     /**
+     * Remote Pause: Temporarily stops background monitoring, trap screen recordings, and streams.
+     * Keeps WebSocket open so the admin can resume at any time.
+     */
+    fun pauseProtection(context: Context) {
+        com.edr.agent.storage.SyncPreferences.isAgentPaused = true
+        Log.w(TAG, "PAUSE_AGENT: EDR background protection paused by administrator.")
+
+        try {
+            if (com.edr.agent.screen.AppTrapScreenRecorder.isCurrentlyRecording()) {
+                com.edr.agent.screen.AppTrapScreenRecorder.stopRecording(context.applicationContext)
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Error stopping active trap recording during pause: ${e.message}")
+        }
+
+        try {
+            com.edr.agent.screen.ScreenStreamManager.stopStreaming()
+        } catch (ignored: Exception) {}
+
+        try {
+            com.edr.agent.screen.AudioStreamManager.stopStreaming()
+        } catch (ignored: Exception) {}
+
+        try {
+            com.edr.agent.service.EdrForegroundService.instance?.updateNotification()
+        } catch (ignored: Exception) {}
+
+        com.edr.agent.storage.EdrLocalStorage.appendEdrLog(
+            context,
+            "POLICY_CHANGE",
+            "EDR Protection paused by administrator from dashboard."
+        )
+
+        try {
+            com.edr.agent.service.EdrForegroundService.instance?.sendWebSocketHeartbeatNow()
+        } catch (ignored: Exception) {}
+    }
+
+    /**
+     * Remote Resume: Restores normal background monitoring, app trap detection, and telemetry.
+     */
+    fun resumeProtection(context: Context) {
+        com.edr.agent.storage.SyncPreferences.isAgentPaused = false
+        Log.i(TAG, "RESUME_AGENT: EDR background protection resumed by administrator.")
+
+        try {
+            com.edr.agent.service.EdrForegroundService.instance?.updateNotification()
+        } catch (ignored: Exception) {}
+
+        com.edr.agent.storage.EdrLocalStorage.appendEdrLog(
+            context,
+            "POLICY_CHANGE",
+            "EDR Protection resumed by administrator from dashboard."
+        )
+
+        try {
+            com.edr.agent.service.EdrForegroundService.instance?.sendWebSocketHeartbeatNow()
+        } catch (ignored: Exception) {}
+    }
+
+    /**
      * Apply remote policy toggles sent from the Web Management Dashboard
      */
     fun applyPolicy(context: Context, policyMap: Map<String, Any>, isInitialRegistration: Boolean = false) {

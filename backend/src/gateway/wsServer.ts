@@ -135,6 +135,7 @@ export class EDRWebSocketGateway {
           networkType: payload.networkType || '4G',
           networkLabel: payload.networkLabel || '4G LTE',
           isCloudUploadAllowed: payload.isCloudUploadAllowed !== false,
+          isPaused: payload.isPaused ?? false,
           appVersionCode: typeof payload.appVersionCode === 'number' ? payload.appVersionCode : undefined,
           appVersionName: typeof payload.appVersionName === 'string' ? payload.appVersionName : undefined,
         });
@@ -170,7 +171,8 @@ export class EDRWebSocketGateway {
             payload.permissions,
             payload.networkType,
             payload.networkLabel,
-            payload.isCloudUploadAllowed
+            payload.isCloudUploadAllowed,
+            payload.isPaused
           );
           this.broadcastToDashboards('DEVICE_HEARTBEAT', {
             deviceId: id,
@@ -180,6 +182,7 @@ export class EDRWebSocketGateway {
             networkType: payload.networkType,
             networkLabel: payload.networkLabel,
             isCloudUploadAllowed: payload.isCloudUploadAllowed,
+            isPaused: payload.isPaused,
             permissions: payload.permissions,
             timestamp: new Date().toISOString(),
           });

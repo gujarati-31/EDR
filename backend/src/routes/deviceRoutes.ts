@@ -313,6 +313,102 @@ export function createDeviceRouter(gateway: EDRWebSocketGateway) {
     });
   });
 
+  // Admin pause background agent monitoring
+  router.post('/:id/pause', (req, res) => {
+    const device = db.getDeviceById(req.params.id);
+    if (!device) {
+      return res.status(404).json({ success: false, message: 'Device not found' });
+    }
+
+    // Set paused state in DB
+    const updatedDevice = db.setDevicePaused(device.deviceId, true);
+
+    // Dispatch PAUSE_AGENT command to the phone
+    const command = db.addCommand({
+      deviceId: device.deviceId,
+      commandType: 'PAUSE_AGENT',
+      parameters: {},
+    });
+    const dispatched = gateway.sendCommand(device.deviceId, command);
+
+    // Record audit log
+    db.addLogs([{
+      deviceId: device.deviceId,
+      eventType: 'SECURITY_ALERT',
+      severity: 'WARNING',
+      message: `⏸️ EDR background agent protection paused by administrator from dashboard`,
+      eventTimestamp: new Date().toISOString(),
+      payload: { action: 'PAUSE_AGENT', dispatched },
+    }]);
+
+    // Broadcast updated state to all connected dashboards
+    gateway.broadcastToDashboards('DEVICE_STATUS_CHANGED', {
+      deviceId: device.deviceId,
+      status: device.status,
+      isPaused: true,
+    });
+    if (updatedDevice) {
+      gateway.broadcastToDashboards('DEVICE_UPDATED', updatedDevice);
+    }
+
+    res.json({
+      success: true,
+      isPaused: true,
+      dispatched,
+      message: dispatched
+        ? `EDR Protection on ${device.deviceName} paused.`
+        : `EDR Protection marked paused. Command queued for device reconnect.`,
+    });
+  });
+
+  // Admin resume background agent monitoring
+  router.post('/:id/resume', (req, res) => {
+    const device = db.getDeviceById(req.params.id);
+    if (!device) {
+      return res.status(404).json({ success: false, message: 'Device not found' });
+    }
+
+    // Clear paused state in DB
+    const updatedDevice = db.setDevicePaused(device.deviceId, false);
+
+    // Dispatch RESUME_AGENT command to the phone
+    const command = db.addCommand({
+      deviceId: device.deviceId,
+      commandType: 'RESUME_AGENT',
+      parameters: {},
+    });
+    const dispatched = gateway.sendCommand(device.deviceId, command);
+
+    // Record audit log
+    db.addLogs([{
+      deviceId: device.deviceId,
+      eventType: 'SECURITY_ALERT',
+      severity: 'INFO',
+      message: `▶️ EDR background agent protection resumed by administrator from dashboard`,
+      eventTimestamp: new Date().toISOString(),
+      payload: { action: 'RESUME_AGENT', dispatched },
+    }]);
+
+    // Broadcast updated state to all connected dashboards
+    gateway.broadcastToDashboards('DEVICE_STATUS_CHANGED', {
+      deviceId: device.deviceId,
+      status: device.status,
+      isPaused: false,
+    });
+    if (updatedDevice) {
+      gateway.broadcastToDashboards('DEVICE_UPDATED', updatedDevice);
+    }
+
+    res.json({
+      success: true,
+      isPaused: false,
+      dispatched,
+      message: dispatched
+        ? `EDR Protection on ${device.deviceName} resumed.`
+        : `EDR Protection marked active. Command queued for device reconnect.`,
+    });
+  });
+
   // Register device via HTTP (Agent bootstrap)
   router.post('/register', (req, res) => {
     const { deviceId, deviceName, osVersion, batteryLevel, isDeviceOwner } = req.body;

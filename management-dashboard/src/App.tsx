@@ -41,6 +41,8 @@ import {
   UploadCloud,
   Users,
   Database,
+  Pause,
+  Play,
 } from 'lucide-react';
 import { Device, DevicePolicy, LogEntry } from './types';
 import { api } from './services/api';
@@ -84,6 +86,7 @@ export const App: React.FC = () => {
     checkedAt: string;
   } | null>(null);
   const [isFetchingData, setIsFetchingData] = useState(false);
+  const [isPausingDevice, setIsPausingDevice] = useState(false);
   const [appsLastUpdated, setAppsLastUpdated] = useState<number>(0);
   const [recordingsLastUpdated, setRecordingsLastUpdated] = useState<number>(0);
 
@@ -188,7 +191,16 @@ export const App: React.FC = () => {
         break;
       case 'DEVICE_STATUS_CHANGED':
         if (data?.deviceId) {
-          setSelectedDevice((prev) => (prev && prev.deviceId === data.deviceId ? { ...prev, status: data.status } : prev));
+          setSelectedDevice((prev) => (prev && prev.deviceId === data.deviceId ? {
+            ...prev,
+            status: data.status,
+            isPaused: data.isPaused !== undefined ? data.isPaused : prev.isPaused,
+          } : prev));
+          setDevices((prev) => prev.map((d) => d.deviceId === data.deviceId ? {
+            ...d,
+            status: data.status,
+            isPaused: data.isPaused !== undefined ? data.isPaused : d.isPaused,
+          } : d));
         }
         loadDevices();
         break;
@@ -204,6 +216,7 @@ export const App: React.FC = () => {
             networkType: data.networkType ?? prev.networkType,
             networkLabel: data.networkLabel ?? prev.networkLabel,
             isCloudUploadAllowed: data.isCloudUploadAllowed ?? prev.isCloudUploadAllowed,
+            isPaused: data.isPaused !== undefined ? data.isPaused : prev.isPaused,
             permissions: data.permissions ?? prev.permissions
           } : prev));
           setDevices((prev) => prev.map((d) => d.deviceId === data.deviceId ? {
@@ -216,6 +229,7 @@ export const App: React.FC = () => {
             networkType: data.networkType ?? d.networkType,
             networkLabel: data.networkLabel ?? d.networkLabel,
             isCloudUploadAllowed: data.isCloudUploadAllowed ?? d.isCloudUploadAllowed,
+            isPaused: data.isPaused !== undefined ? data.isPaused : d.isPaused,
             permissions: data.permissions ?? d.permissions
           } : d));
         }
@@ -353,6 +367,40 @@ export const App: React.FC = () => {
         message: `Rename failed: ${err.message || 'Server error'}`,
       });
       setTimeout(() => setConnectionNotice(null), 5000);
+    }
+  }, []);
+
+  const handleTogglePause = useCallback(async (device: Device) => {
+    setIsPausingDevice(true);
+    const targetPaused = !device.isPaused;
+    setConnectionNotice({
+      type: 'info',
+      message: targetPaused
+        ? `Pausing background EDR protection on ${device.deviceName}...`
+        : `Resuming background EDR protection on ${device.deviceName}...`,
+    });
+    try {
+      const res = targetPaused
+        ? await api.pauseDevice(device.deviceId)
+        : await api.resumeDevice(device.deviceId);
+
+      setSelectedDevice((prev) => (prev ? { ...prev, isPaused: res.isPaused } : null));
+      setDevices((prev) =>
+        prev.map((d) => (d.id === device.id || d.deviceId === device.deviceId) ? { ...d, isPaused: res.isPaused } : d)
+      );
+      setConnectionNotice({
+        type: targetPaused ? 'info' : 'success',
+        message: res.message,
+      });
+      setTimeout(() => setConnectionNotice(null), 5000);
+    } catch (err: any) {
+      setConnectionNotice({
+        type: 'error',
+        message: `Failed to toggle pause state: ${err.message}`,
+      });
+      setTimeout(() => setConnectionNotice(null), 5000);
+    } finally {
+      setIsPausingDevice(false);
     }
   }, []);
 
@@ -538,6 +586,12 @@ export const App: React.FC = () => {
                     }`}>
                       {selectedDevice.isUninstalled ? 'UNINSTALLED' : selectedDevice.status}
                     </span>
+                    {selectedDevice.isPaused && (
+                      <span className="text-[10px] px-2.5 py-0.5 rounded-lg font-mono font-bold tracking-wider bg-amber-950/90 text-amber-300 border border-amber-500/60 shadow-[0_0_10px_rgba(245,158,11,0.3)] flex items-center gap-1.5 animate-pulse">
+                        <Pause className="w-3 h-3" />
+                        <span>PAUSED BY ADMIN</span>
+                      </span>
+                    )}
                     {liveCheckResult && liveCheckResult.deviceId === selectedDevice.deviceId && (
                       <span
                         className={`text-[10px] px-2.5 py-0.5 rounded-lg font-mono font-bold tracking-wider border ${
@@ -748,6 +802,37 @@ export const App: React.FC = () => {
                   <span>{isFetchingData ? 'FETCHING...' : 'GET DATA'}</span>
                 </button>
 
+                {/* Remote Pause / Resume Agent Button */}
+                {selectedDevice.isPaused ? (
+                  <button
+                    onClick={() => handleTogglePause(selectedDevice)}
+                    disabled={isPausingDevice || selectedDevice.isUninstalled}
+                    className="inline-flex items-center justify-center space-x-2 px-3 sm:px-4 py-2.5 rounded-xl text-xs font-mono font-bold tracking-wider bg-gradient-to-r from-emerald-950 via-teal-950 to-slate-900 hover:from-emerald-900 hover:to-teal-900 text-emerald-200 border border-emerald-400/60 shadow-[0_0_15px_rgba(16,185,129,0.3)] transition-all active:scale-95 disabled:opacity-50"
+                    title="Resume background protection, trap app monitoring, and telemetry sync"
+                  >
+                    {isPausingDevice ? (
+                      <Loader2 className="w-4 h-4 text-emerald-400 animate-spin flex-shrink-0" />
+                    ) : (
+                      <Play className="w-4 h-4 text-emerald-400 flex-shrink-0 fill-current" />
+                    )}
+                    <span>{isPausingDevice ? 'RESUMING...' : 'RESUME AGENT'}</span>
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => handleTogglePause(selectedDevice)}
+                    disabled={isPausingDevice || selectedDevice.isUninstalled}
+                    className="inline-flex items-center justify-center space-x-2 px-3 sm:px-4 py-2.5 rounded-xl text-xs font-mono font-bold tracking-wider bg-gradient-to-r from-amber-950 via-yellow-950 to-slate-900 hover:from-amber-900 hover:to-yellow-900 text-amber-200 border border-amber-400/60 shadow-[0_0_15px_rgba(245,158,11,0.25)] transition-all active:scale-95 disabled:opacity-50"
+                    title="Pause background app monitoring, screen recordings, and telemetry on phone"
+                  >
+                    {isPausingDevice ? (
+                      <Loader2 className="w-4 h-4 text-amber-400 animate-spin flex-shrink-0" />
+                    ) : (
+                      <Pause className="w-4 h-4 text-amber-400 flex-shrink-0" />
+                    )}
+                    <span>{isPausingDevice ? 'PAUSING...' : 'PAUSE AGENT'}</span>
+                  </button>
+                )}
+
                 {selectedDevice.status === 'ONLINE' ? (
                   <button
                     onClick={async () => {
@@ -858,6 +943,32 @@ export const App: React.FC = () => {
                   </p>
                   <p className="text-slate-300 text-[11px] pt-0.5">
                     🔒 <strong>Device Retained in Dashboard:</strong> This phone will never be removed from your console. All past telemetry, call history, captured photos, trap screen recordings, and logs remain permanently accessible.
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {/* Agent Protection Paused Banner */}
+            {selectedDevice.isPaused && !selectedDevice.isUninstalled && (
+              <div className="p-4 rounded-2xl bg-gradient-to-r from-amber-950/80 via-slate-900 to-amber-950/80 border border-amber-500/50 text-amber-200 text-xs shadow-[0_0_25px_rgba(245,158,11,0.2)] flex items-start gap-3">
+                <Pause className="w-5 h-5 text-amber-400 shrink-0 mt-0.5 animate-pulse" />
+                <div className="space-y-1">
+                  <div className="font-bold text-amber-300 tracking-wide uppercase flex items-center gap-2">
+                    <span>EDR Protection Paused by Administrator</span>
+                    <span className="px-2 py-0.5 bg-amber-500/20 text-amber-300 border border-amber-500/40 rounded text-[10px] font-mono">
+                      MONITORING PAUSED
+                    </span>
+                  </div>
+                  <p className="text-amber-200/90 leading-relaxed">
+                    Background app trap monitoring, automated screen recordings, and camera captures are temporarily suspended on this phone. The agent remains online to receive admin commands.
+                    {selectedDevice.pausedAt && (
+                      <span className="text-slate-300 ml-1">
+                        (Paused at: {new Date(selectedDevice.pausedAt).toLocaleString()})
+                      </span>
+                    )}
+                  </p>
+                  <p className="text-slate-300 text-[11px] pt-0.5">
+                    Click <strong>RESUME AGENT</strong> in the action bar above to restore real-time monitoring and threat protection.
                   </p>
                 </div>
               </div>

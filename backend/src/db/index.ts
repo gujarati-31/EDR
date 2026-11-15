@@ -180,7 +180,8 @@ class Database {
     permissions?: DevicePermissions,
     networkType?: string,
     networkLabel?: string,
-    isCloudUploadAllowed?: boolean
+    isCloudUploadAllowed?: boolean,
+    isPaused?: boolean
   ) {
     const device = this.data.devices.find((d) => d.deviceId === deviceId || d.id === deviceId);
     if (device) {
@@ -207,8 +208,25 @@ class Database {
       if (isCloudUploadAllowed !== undefined) {
         device.isCloudUploadAllowed = isCloudUploadAllowed;
       }
+      if (isPaused !== undefined) {
+        device.isPaused = isPaused;
+      }
       this.save();
     }
+  }
+
+  setDevicePaused(deviceId: string, isPaused: boolean): Device | undefined {
+    const device = this.data.devices.find((d) => d.deviceId === deviceId || d.id === deviceId);
+    if (device) {
+      device.isPaused = isPaused;
+      if (isPaused) {
+        device.pausedAt = new Date().toISOString();
+      } else {
+        delete device.pausedAt;
+      }
+      this.save();
+    }
+    return device;
   }
 
   updateLastSyncedTimestamp(deviceId: string, timestamp: string) {

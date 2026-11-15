@@ -12,6 +12,7 @@ import {
   Search,
   Pencil,
   Check,
+  Pause,
 } from 'lucide-react';
 import { Device } from '../types';
 
@@ -278,6 +279,17 @@ export const DeviceList: React.FC<DeviceListProps> = ({
                     >
                       {device.isUninstalled ? 'UNINSTALLED' : isOnline ? (isDirectLive ? 'ONLINE' : 'SYNCING') : 'OFFLINE'}
                     </span>
+
+                    {/* Agent Paused Badge */}
+                    {device.isPaused && (
+                      <span
+                        className="px-1.5 py-0.5 rounded text-[9px] font-mono font-bold bg-amber-950/90 text-amber-300 border border-amber-500/50 shadow-[0_0_8px_rgba(245,158,11,0.25)] flex items-center gap-1"
+                        title="EDR Agent protection paused by administrator"
+                      >
+                        <Pause className="w-2.5 h-2.5" />
+                        <span>PAUSED</span>
+                      </span>
+                    )}
 
                     {/* Network Type Badge */}
                     {isOnline && (() => {
