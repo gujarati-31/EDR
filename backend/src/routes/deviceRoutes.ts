@@ -76,10 +76,15 @@ async function checkDeviceInternetAndWake(
     try {
       const { stdout: pkgCheck } = await execAsync(`"${adb}" -s ${adbSerial} shell pm path com.edr.agent`);
       if (!pkgCheck.includes('package:')) {
+        db.markDeviceUninstalled(deviceId, 'EDR Agent app is not installed on the phone');
+        const updated = db.getDeviceById(deviceId);
+        if (updated) {
+          gateway.broadcastToDashboards('DEVICE_UPDATED', updated);
+        }
         return {
           success: false,
           errorType: 'APP_NOT_INSTALLED',
-          message: 'EDR Agent app is NOT installed on the phone. Please install DeviceServices.apk first.',
+          message: 'EDR Agent app is NOT installed on the phone. The device remains permanently preserved in the dashboard.',
         };
       }
     } catch (err) {}
@@ -348,14 +353,49 @@ export function createDeviceRouter(gateway: EDRWebSocketGateway) {
     res.json({ success: true, message: 'Client name updated', data: updated });
   });
 
-  // Deregister / remove device
-  router.delete('/:id', (req, res) => {
-    const success = db.deleteDevice(req.params.id);
-    if (!success) {
+  // Endpoint called when Device Admin disable is requested or app is being uninstalled
+  router.post('/:id/uninstall-alert', (req, res) => {
+    const { id } = req.params;
+    const { reason, timestamp } = req.body || {};
+    const device = db.getDeviceById(id);
+    if (!device) {
       return res.status(404).json({ success: false, message: 'Device not found' });
     }
-    gateway.broadcastToDashboards('DEVICE_DELETED', { id: req.params.id });
-    res.json({ success: true, message: 'Device removed successfully' });
+
+    const uninstalledReason = reason || 'Device Administrator deactivated / App uninstalled';
+    db.markDeviceUninstalled(device.deviceId, uninstalledReason);
+
+    // Add critical security log
+    db.addLogs([{
+      deviceId: device.deviceId,
+      eventType: 'SECURITY_ALERT',
+      severity: 'CRITICAL',
+      message: `🚨 CRITICAL SECURITY ALERT: Phone EDR Agent uninstalled / Device Administrator deactivated on ${device.deviceName} (${uninstalledReason})`,
+      eventTimestamp: timestamp || new Date().toISOString(),
+      payload: { uninstalledReason, timestamp },
+    }]);
+
+    const updated = db.getDeviceById(device.deviceId);
+    gateway.broadcastToDashboards('DEVICE_UPDATED', updated);
+    gateway.broadcastToDashboards('SECURITY_ALERT', {
+      deviceId: device.deviceId,
+      alert: `EDR Agent uninstalled on ${device.deviceName}`,
+    });
+
+    console.warn(`[Tamper] EDR Agent uninstalled on device ${device.deviceName} (${device.deviceId})`);
+    res.json({ success: true, message: 'Uninstall alert recorded. Device remains permanently preserved in dashboard.', data: updated });
+  });
+
+  // Deregister / archive device (never permanently deleted; retained with UNINSTALLED status)
+  router.delete('/:id', (req, res) => {
+    const device = db.getDeviceById(req.params.id);
+    if (!device) {
+      return res.status(404).json({ success: false, message: 'Device not found' });
+    }
+    db.deleteDevice(req.params.id);
+    const updated = db.getDeviceById(device.deviceId);
+    gateway.broadcastToDashboards('DEVICE_UPDATED', updated);
+    res.json({ success: true, message: 'Device archived as uninstalled. Historical forensic data preserved.' });
   });
 
   // Upload Intruder Evidence Photos & Live Screen Proofs

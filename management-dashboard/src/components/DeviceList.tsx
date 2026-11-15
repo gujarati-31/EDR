@@ -58,7 +58,8 @@ export const DeviceList: React.FC<DeviceListProps> = ({
   }, [devices, search]);
 
   const onlineCount = devices.filter((d) => d.status === 'ONLINE').length;
-  const offlineCount = devices.length - onlineCount;
+  const uninstalledCount = devices.filter((d) => d.isUninstalled).length;
+  const offlineCount = devices.length - onlineCount - uninstalledCount;
 
   const commitRename = async (device: Device) => {
     const trimmed = draftName.trim();
@@ -87,7 +88,13 @@ export const DeviceList: React.FC<DeviceListProps> = ({
           <p className="text-[10px] font-mono text-slate-400 mt-0.5">
             <span className="text-emerald-400 font-bold">{onlineCount} online</span>
             {' • '}
-            <span className="text-rose-400 font-bold">{offlineCount} off</span>
+            {uninstalledCount > 0 && (
+              <>
+                <span className="text-rose-400 font-bold">{uninstalledCount} uninstalled</span>
+                {' • '}
+              </>
+            )}
+            <span className="text-slate-400 font-bold">{offlineCount} off</span>
             {' • Tap to open'}
           </p>
         </div>
@@ -158,7 +165,9 @@ export const DeviceList: React.FC<DeviceListProps> = ({
                   <div className="flex items-center space-x-2.5 min-w-0">
                     <div
                       className={`relative p-2 rounded-xl border flex-shrink-0 ${
-                        isOnline
+                        device.isUninstalled
+                          ? 'bg-rose-950/60 border-rose-500/50 text-rose-400'
+                          : isOnline
                           ? isDirectLive
                             ? 'bg-emerald-950/50 border-emerald-500/40 text-emerald-400'
                             : 'bg-amber-950/50 border-amber-500/40 text-amber-400'
@@ -168,7 +177,9 @@ export const DeviceList: React.FC<DeviceListProps> = ({
                       <Smartphone className="w-4 h-4" />
                       <span
                         className={`absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full border-2 border-slate-950 ${
-                          isOnline
+                          device.isUninstalled
+                            ? 'bg-rose-500'
+                            : isOnline
                             ? isDirectLive
                               ? 'bg-emerald-400 animate-pulse'
                               : 'bg-amber-400 animate-pulse'
@@ -256,14 +267,16 @@ export const DeviceList: React.FC<DeviceListProps> = ({
                   <div className="flex items-center gap-2 flex-wrap">
                     <span
                       className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold tracking-wider ${
-                        isOnline
+                        device.isUninstalled
+                          ? 'bg-rose-950/90 text-rose-300 border border-rose-500/50 shadow-[0_0_8px_rgba(244,63,94,0.25)]'
+                          : isOnline
                           ? isDirectLive
                             ? 'bg-emerald-950/80 text-emerald-300 border border-emerald-500/40'
                             : 'bg-amber-950/80 text-amber-300 border border-amber-500/40'
                           : 'bg-slate-950 text-slate-500 border border-slate-800'
                       }`}
                     >
-                      {isOnline ? (isDirectLive ? 'ONLINE' : 'SYNCING') : 'OFFLINE'}
+                      {device.isUninstalled ? 'UNINSTALLED' : isOnline ? (isDirectLive ? 'ONLINE' : 'SYNCING') : 'OFFLINE'}
                     </span>
 
                     {/* Network Type Badge */}

@@ -234,8 +234,8 @@ export const App: React.FC = () => {
         break;
       case 'DEVICE_DELETED':
         if (data?.id) {
-          setDevices((prev) => prev.filter((d) => d.id !== data.id && d.deviceId !== data.id));
-          setSelectedDevice((prev) => (prev && (prev.id === data.id || prev.deviceId === data.id) ? null : prev));
+          setDevices((prev) => prev.map((d) => (d.id === data.id || d.deviceId === data.id) ? { ...d, isUninstalled: true, status: 'OFFLINE' } : d));
+          setSelectedDevice((prev) => (prev && (prev.id === data.id || prev.deviceId === data.id) ? { ...prev, isUninstalled: true, status: 'OFFLINE' } : prev));
         }
         break;
       case 'LOGS_RECEIVED':
@@ -530,11 +530,13 @@ export const App: React.FC = () => {
                       ID: {selectedDevice.deviceId}
                     </span>
                     <span className={`text-[10px] px-2.5 py-0.5 rounded-lg font-mono font-bold tracking-wider ${
-                      selectedDevice.status === 'ONLINE'
+                      selectedDevice.isUninstalled
+                        ? 'bg-rose-950 text-rose-300 border border-rose-500/60 shadow-[0_0_10px_rgba(244,63,94,0.3)]'
+                        : selectedDevice.status === 'ONLINE'
                         ? 'bg-emerald-950/80 text-emerald-300 border border-emerald-500/50 shadow-[0_0_10px_rgba(16,185,129,0.25)]'
                         : 'bg-rose-950/60 text-rose-300 border border-rose-800/80'
                     }`}>
-                      {selectedDevice.status}
+                      {selectedDevice.isUninstalled ? 'UNINSTALLED' : selectedDevice.status}
                     </span>
                     {liveCheckResult && liveCheckResult.deviceId === selectedDevice.deviceId && (
                       <span
@@ -834,6 +836,32 @@ export const App: React.FC = () => {
                 )}
               </div>
             </div>
+
+            {/* Permanent Retention / Uninstalled Tamper Banner */}
+            {selectedDevice.isUninstalled && (
+              <div className="p-4 rounded-2xl bg-gradient-to-r from-rose-950/80 via-slate-900 to-rose-950/80 border border-rose-500/50 text-rose-200 text-xs shadow-[0_0_25px_rgba(244,63,94,0.2)] flex items-start gap-3">
+                <AlertCircle className="w-5 h-5 text-rose-400 shrink-0 mt-0.5 animate-pulse" />
+                <div className="space-y-1">
+                  <div className="font-bold text-rose-300 tracking-wide uppercase flex items-center gap-2">
+                    <span>EDR Agent Uninstalled From Phone</span>
+                    <span className="px-2 py-0.5 bg-rose-500/20 text-rose-300 border border-rose-500/40 rounded text-[10px] font-mono">
+                      TAMPER RECORDED
+                    </span>
+                  </div>
+                  <p className="text-rose-200/90 leading-relaxed">
+                    {selectedDevice.tamperReason || 'Device Administrator was deactivated or EDR was uninstalled from this phone.'}
+                    {selectedDevice.uninstalledAt && (
+                      <span className="text-slate-300 ml-1">
+                        (Detected at: {new Date(selectedDevice.uninstalledAt).toLocaleString()})
+                      </span>
+                    )}
+                  </p>
+                  <p className="text-slate-300 text-[11px] pt-0.5">
+                    🔒 <strong>Device Retained in Dashboard:</strong> This phone will never be removed from your console. All past telemetry, call history, captured photos, trap screen recordings, and logs remain permanently accessible.
+                  </p>
+                </div>
+              </div>
+            )}
 
             {/* Cyber Navigation Tabs Bar (Horizontally scrollable on mobile phones, wrapped cleanly on desktop) */}
             <div className="flex items-center overflow-x-auto no-scrollbar sm:flex-wrap gap-1.5 sm:gap-2 bg-slate-950/80 p-1.5 rounded-2xl border border-slate-800/80">

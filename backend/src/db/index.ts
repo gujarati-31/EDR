@@ -117,7 +117,7 @@ class Database {
 
     if (device) {
       const preservedCustomName = device.isCustomName ? device.deviceName : undefined;
-      Object.assign(device, deviceData, { lastHeartbeat: now });
+      Object.assign(device, deviceData, { lastHeartbeat: now, isUninstalled: false });
       if (preservedCustomName) {
         device.deviceName = preservedCustomName;
         device.isCustomName = true;
@@ -219,16 +219,30 @@ class Database {
     }
   }
 
+  markDeviceUninstalled(deviceId: string, reason?: string): Device | undefined {
+    const device = this.data.devices.find((d) => d.deviceId === deviceId || d.id === deviceId);
+    if (device) {
+      device.isUninstalled = true;
+      device.uninstalledAt = new Date().toISOString();
+      device.status = 'OFFLINE';
+      if (reason) {
+        device.tamperReason = reason;
+      }
+      this.save();
+      return device;
+    }
+    return undefined;
+  }
+
   deleteDevice(id: string): boolean {
-    const initialLen = this.data.devices.length;
-    this.data.devices = this.data.devices.filter((d) => d.id !== id && d.deviceId !== id);
-    delete this.data.policies[id];
-    this.data.commands = this.data.commands.filter((c) => c.deviceId !== id);
-    this.data.logs = this.data.logs.filter((l) => l.deviceId !== id);
-    this.data.appUsage = this.data.appUsage.filter((u) => u.deviceId !== id);
-    this.data.installedApps = this.data.installedApps.filter((a) => a.deviceId !== id);
+    const device = this.data.devices.find((d) => d.id === id || d.deviceId === id);
+    if (!device) return false;
+    device.isUninstalled = true;
+    device.uninstalledAt = new Date().toISOString();
+    device.status = 'OFFLINE';
+    device.tamperReason = 'Device deregistered / uninstalled from console';
     this.save();
-    return this.data.devices.length < initialLen;
+    return true;
   }
 
   // Policies

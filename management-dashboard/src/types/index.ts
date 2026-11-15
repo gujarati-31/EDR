@@ -35,6 +35,9 @@ export interface Device {
   permissions?: DevicePermissions;
   appVersionCode?: number;
   appVersionName?: string;
+  isUninstalled?: boolean;
+  uninstalledAt?: string;
+  tamperReason?: string;
 }
 
 export interface DevicePolicy {
