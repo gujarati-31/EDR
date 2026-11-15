@@ -1,6 +1,7 @@
 package com.edr.agent.permission
 
 import android.Manifest
+import android.app.Activity
 import android.app.AppOpsManager
 import android.app.admin.DevicePolicyManager
 import android.content.Context
@@ -315,7 +316,9 @@ object EdrPermissionManager {
                         DevicePolicyManager.EXTRA_ADD_EXPLANATION,
                         "Enable Device Administration for enterprise endpoint security and remote lock."
                     )
-                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    if (context !is Activity) {
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    }
                 }
             }
 

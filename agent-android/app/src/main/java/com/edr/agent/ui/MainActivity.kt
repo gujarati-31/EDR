@@ -1,5 +1,7 @@
 package com.edr.agent.ui
 
+import android.app.admin.DevicePolicyManager
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.graphics.Color
@@ -14,8 +16,11 @@ import android.view.View
 import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.TextView
+import android.widget.Toast
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import com.edr.agent.R
+import com.edr.agent.admin.EdrDeviceAdminReceiver
 import com.edr.agent.permission.EdrPermissionManager
 import com.edr.agent.permission.PermissionItem
 import com.edr.agent.scheduler.SyncScheduler
@@ -24,6 +29,12 @@ import com.edr.agent.storage.EdrLocalStorage
 import com.edr.agent.storage.SyncPreferences
 
 class MainActivity : AppCompatActivity() {
+
+    companion object {
+        private const val REQUEST_CODE_DEVICE_ADMIN = 1012
+    }
+
+    private var isAwaitingDeviceAdminResult = false
 
     private lateinit var tvProtectionScore: TextView
     private lateinit var tvProtectionSubtext: TextView
@@ -92,6 +103,16 @@ class MainActivity : AppCompatActivity() {
         super.onResume()
         ensureServiceRunning()
         refreshPermissionsUI()
+
+        if (isAwaitingDeviceAdminResult) {
+            val isGranted = EdrPermissionManager.isDeviceAdminGranted(this)
+            if (!isGranted) {
+                if (isXiaomiDevice() || Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    showXiaomiRestrictedSettingsDialog()
+                }
+            }
+            isAwaitingDeviceAdminResult = false
+        }
     }
 
     /**
@@ -188,6 +209,32 @@ class MainActivity : AppCompatActivity() {
         textContainer.addView(titleView)
         textContainer.addView(descView)
 
+        if (item.key == "deviceAdmin" && isXiaomiDevice()) {
+            val miuiHelpView = TextView(this).apply {
+                text = "⚡ Redmi/MIUI: If activation blocked, tap here for App Info (Allow restricted settings)"
+                textSize = 10f
+                setTypeface(null, Typeface.BOLD)
+                setTextColor(Color.parseColor("#F59E0B"))
+                setPadding(0, 8, 0, 0)
+                setOnClickListener {
+                    try {
+                        val appInfoIntent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                            data = Uri.parse("package:$packageName")
+                        }
+                        startActivity(appInfoIntent)
+                        Toast.makeText(
+                            this@MainActivity,
+                            "Tap (⋮) top-right -> Allow restricted settings",
+                            Toast.LENGTH_LONG
+                        ).show()
+                    } catch (e: Exception) {
+                        android.util.Log.e("MainActivity", "Failed opening app info: ${e.message}")
+                    }
+                }
+            }
+            textContainer.addView(miuiHelpView)
+        }
+
         val turnOnButton = Button(this).apply {
             text = "TURN ON"
             textSize = 11f
@@ -201,6 +248,10 @@ class MainActivity : AppCompatActivity() {
                         requestPermissions(arrayOf(android.Manifest.permission.READ_CALL_LOG), 1011)
                         return@setOnClickListener
                     }
+                }
+                if (item.key == "deviceAdmin") {
+                    launchDeviceAdminActivation()
+                    return@setOnClickListener
                 }
                 val intent = EdrPermissionManager.getLaunchIntentForPermission(this@MainActivity, item.key)
                 if (intent != null) {
@@ -262,6 +313,125 @@ class MainActivity : AppCompatActivity() {
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         refreshPermissionsUI()
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == REQUEST_CODE_DEVICE_ADMIN) {
+            val isGranted = EdrPermissionManager.isDeviceAdminGranted(this)
+            if (!isGranted && isAwaitingDeviceAdminResult) {
+                if (isXiaomiDevice() || Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    showXiaomiRestrictedSettingsDialog()
+                }
+            }
+            isAwaitingDeviceAdminResult = false
+            refreshPermissionsUI()
+        }
+    }
+
+    private fun isXiaomiDevice(): Boolean {
+        val m = Build.MANUFACTURER.lowercase()
+        val b = Build.BRAND.lowercase()
+        return m.contains("xiaomi") || m.contains("redmi") || m.contains("poco") ||
+               b.contains("xiaomi") || b.contains("redmi") || b.contains("poco")
+    }
+
+    private fun launchDeviceAdminActivation() {
+        isAwaitingDeviceAdminResult = true
+        val adminComponent = EdrDeviceAdminReceiver.getComponentName(this)
+        val intent = Intent(DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN).apply {
+            putExtra(DevicePolicyManager.EXTRA_DEVICE_ADMIN, adminComponent)
+            putExtra(
+                DevicePolicyManager.EXTRA_ADD_EXPLANATION,
+                "Activate Device Administration for enterprise endpoint security, anti-theft tracking, and remote protection."
+            )
+            // CRITICAL: Do NOT set Intent.FLAG_ACTIVITY_NEW_TASK when calling from an Activity,
+            // as it breaks startActivityForResult and causes MIUI / HyperOS to instantly dismiss or reject the window!
+        }
+
+        try {
+            startActivityForResult(intent, REQUEST_CODE_DEVICE_ADMIN)
+        } catch (e: Exception) {
+            android.util.Log.e("MainActivity", "Primary ACTION_ADD_DEVICE_ADMIN failed: ${e.message}", e)
+            fallbackDeviceAdminActivation()
+        }
+    }
+
+    private fun fallbackDeviceAdminActivation() {
+        val oemIntents = mutableListOf<Intent>()
+
+        // 1. Xiaomi / Redmi / POCO specific MIUI Device Admin Settings
+        oemIntents.add(
+            Intent().setComponent(
+                ComponentName("com.android.settings", "com.android.settings.DeviceAdminSettings")
+            )
+        )
+        oemIntents.add(
+            Intent().setComponent(
+                ComponentName("com.android.settings", "com.android.settings.Settings\$DeviceAdminSettingsActivity")
+            )
+        )
+        oemIntents.add(
+            Intent().setComponent(
+                ComponentName("com.miui.securitycenter", "com.miui.permcenter.permissions.PermissionsEditorActivity")
+            )
+        )
+
+        // 2. Standard Android Device Admin Settings
+        oemIntents.add(Intent("android.settings.DEVICE_ADMIN_SETTINGS"))
+
+        // 3. System Security Settings
+        oemIntents.add(Intent(Settings.ACTION_SECURITY_SETTINGS))
+
+        var launched = false
+        for (fIntent in oemIntents) {
+            try {
+                if (packageManager.resolveActivity(fIntent, 0) != null) {
+                    startActivityForResult(fIntent, REQUEST_CODE_DEVICE_ADMIN)
+                    launched = true
+                    break
+                }
+            } catch (e: Exception) {
+                android.util.Log.w("MainActivity", "Device admin fallback failed: ${e.message}")
+            }
+        }
+
+        if (!launched) {
+            showXiaomiRestrictedSettingsDialog()
+        }
+    }
+
+    private fun showXiaomiRestrictedSettingsDialog() {
+        try {
+            AlertDialog.Builder(this)
+                .setTitle("Redmi / Xiaomi Device Admin Setup")
+                .setMessage(
+                    "On Xiaomi / Redmi MIUI & HyperOS devices, security protections may require manual confirmation:\n\n" +
+                    "1. If prompted with a 10-second warning countdown, wait and tap 'Next' / 'OK'.\n\n" +
+                    "2. If Xiaomi displays 'Restricted setting', tap 'Open App Settings' below, click the 3 dots (⋮) in the top-right corner, and choose 'Allow restricted settings'. Then return and activate."
+                )
+                .setPositiveButton("Open App Settings") { dialog, _ ->
+                    dialog.dismiss()
+                    try {
+                        val appInfoIntent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                            data = Uri.parse("package:$packageName")
+                        }
+                        startActivity(appInfoIntent)
+                    } catch (e: Exception) {
+                        android.util.Log.e("MainActivity", "Failed opening app info: ${e.message}")
+                    }
+                }
+                .setNeutralButton("Try Activation Again") { dialog, _ ->
+                    dialog.dismiss()
+                    launchDeviceAdminActivation()
+                }
+                .setNegativeButton("Close") { dialog, _ ->
+                    dialog.dismiss()
+                }
+                .show()
+        } catch (e: Exception) {
+            android.util.Log.w("MainActivity", "Failed showing restricted settings dialog: ${e.message}")
+        }
     }
 
     private fun ensureServiceRunning() {
