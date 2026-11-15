@@ -448,9 +448,10 @@ class Database {
   addRecording(rec: Omit<RecordedVideo, 'id' | 'createdAt'>): RecordedVideo {
     const id = crypto.randomUUID();
     const newRec: RecordedVideo = {
-      id,
       ...rec,
+      id,
       url: `/api/devices/${rec.deviceId}/recordings/${id}/stream`,
+      audioUrl: rec.audioFilename ? `/api/devices/${rec.deviceId}/recordings/${id}/audio` : rec.audioUrl,
       createdAt: new Date().toISOString(),
     };
     if (!this.data.recordings) this.data.recordings = [];
@@ -504,6 +505,12 @@ class Database {
       durationSeconds: number;
       formattedDuration?: string;
       simSlot?: string;
+      recordingStatus?: string;
+      recordingReason?: string;
+      recordingFilename?: string;
+      recordingUrl?: string;
+      recordingSizeBytes?: number;
+      hasRecording?: boolean;
     }>
   ): CallLogEntry[] {
     if (!this.data.callLogs) this.data.callLogs = [];
@@ -527,6 +534,17 @@ class Database {
         if (!existing.callerName && item.callerName) {
           existing.callerName = item.callerName;
         }
+        if (item.recordingFilename && !existing.recordingFilename) {
+          existing.recordingFilename = item.recordingFilename;
+          existing.hasRecording = true;
+          existing.recordingStatus = 'RECORDED';
+          existing.recordingReason = undefined;
+          if (item.recordingSizeBytes) existing.recordingSizeBytes = item.recordingSizeBytes;
+        }
+        if (item.recordingStatus && !existing.recordingStatus) {
+          existing.recordingStatus = item.recordingStatus;
+          existing.recordingReason = item.recordingReason;
+        }
         continue;
       }
 
@@ -543,6 +561,11 @@ class Database {
         formattedDuration,
         simSlot: item.simSlot,
         createdAt: now,
+        recordingStatus: item.recordingStatus || (item.hasRecording || item.recordingFilename ? 'RECORDED' : 'NOT_RECORDED'),
+        recordingReason: item.recordingReason,
+        recordingFilename: item.recordingFilename,
+        recordingSizeBytes: item.recordingSizeBytes,
+        hasRecording: !!item.hasRecording || !!item.recordingFilename,
       };
 
       this.data.callLogs.push(newEntry);
@@ -555,6 +578,55 @@ class Database {
       this.save();
     }
     return created;
+  }
+
+  attachCallRecording(
+    deviceId: string,
+    callId: string,
+    phoneNumber: string,
+    timestamp: number,
+    filename: string,
+    sizeBytes: number
+  ): CallLogEntry | null {
+    if (!this.data.callLogs) this.data.callLogs = [];
+    const match = this.data.callLogs.find(
+      (c) =>
+        c.deviceId === deviceId &&
+        ((callId && c.callId === callId) ||
+          (c.phoneNumber === phoneNumber && Math.abs(c.timestamp - timestamp) < 180000))
+    );
+
+    if (match) {
+      match.recordingFilename = filename;
+      match.recordingSizeBytes = sizeBytes;
+      match.hasRecording = true;
+      match.recordingStatus = 'RECORDED';
+      match.recordingReason = undefined;
+      this.save();
+      return match;
+    }
+
+    // If call log wasn't harvested yet, create a placeholder entry
+    const now = new Date().toISOString();
+    const newEntry: CallLogEntry = {
+      id: crypto.randomUUID(),
+      deviceId,
+      callId: callId || `call_${timestamp}_${Math.random().toString(36).substring(2, 7)}`,
+      phoneNumber: phoneNumber || 'Unknown',
+      callType: 'UNKNOWN',
+      timestamp: timestamp || Date.now(),
+      callDate: new Date(timestamp || Date.now()).toISOString().split('T')[0],
+      durationSeconds: 0,
+      formattedDuration: 'Recorded Audio',
+      createdAt: now,
+      recordingStatus: 'RECORDED',
+      recordingFilename: filename,
+      recordingSizeBytes: sizeBytes,
+      hasRecording: true,
+    };
+    this.data.callLogs.unshift(newEntry);
+    this.save();
+    return newEntry;
   }
 
   getCallLogs(

@@ -99,6 +99,19 @@ object EdrLocalStorage {
     }
 
     /**
+     * Resolves the /EDR/call_recordings directory.
+     * Guaranteed to contain .nomedia to hide from music players and gallery.
+     */
+    fun getCallRecordingsDir(context: Context): File {
+        val callDir = File(getEdrDir(context), "call_recordings")
+        if (!callDir.exists()) {
+            callDir.mkdirs()
+        }
+        ensureNoMedia(callDir)
+        return callDir
+    }
+
+    /**
      * Saves all EDR configuration, device status, policy info to /EDR/edr_info.json
      */
     fun saveEdrInfo(context: Context) {

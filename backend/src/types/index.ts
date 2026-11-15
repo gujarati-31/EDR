@@ -118,6 +118,10 @@ export interface RecordedVideo {
   packageName?: string;
   duration?: string;
   sizeBytes: number;
+  audioFilename?: string;
+  audioUrl?: string;
+  audioSizeBytes?: number;
+  hasAudio?: boolean;
   timestamp: string;
   createdAt: string;
 }
@@ -191,6 +195,12 @@ export interface CallLogEntry {
   formattedDuration: string;
   simSlot?: string;
   createdAt: string;
+  recordingStatus?: 'RECORDED' | 'NOT_RECORDED' | 'DISABLED' | 'FAILED' | 'NO_AUDIO' | string;
+  recordingReason?: string;
+  recordingFilename?: string;
+  recordingUrl?: string;
+  recordingSizeBytes?: number;
+  hasRecording?: boolean;
 }
 
 export interface CallLogStats {

@@ -16,6 +16,7 @@ import {
   X,
   ExternalLink,
   CheckCircle2,
+  Volume2,
 } from 'lucide-react';
 import { api } from '../services/api';
 import { VaultOverviewData, VaultRecording, VaultPhoto } from '../types';
@@ -386,6 +387,11 @@ export const RenderDataVault: React.FC<RenderDataVaultProps> = ({ onSelectDevice
                           <Clock className="w-3 h-3 text-purple-400" />
                           {rec.duration || '--:--'}
                         </span>
+                        {(rec.hasAudio || rec.audioUrl) && (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-cyan-950/80 text-cyan-300 border border-cyan-500/40 font-mono font-bold flex items-center gap-1" title="Synchronized Room Audio Included">
+                            <Volume2 className="w-2.5 h-2.5" /> AUDIO
+                          </span>
+                        )}
                       </div>
 
                       {/* Title / App */}
@@ -427,15 +433,28 @@ export const RenderDataVault: React.FC<RenderDataVaultProps> = ({ onSelectDevice
                         <span>Watch Video</span>
                       </button>
 
-                      <a
-                        href={rec.url}
-                        download={`${rec.appName || 'recording'}_${rec.id}.mp4`}
-                        className="inline-flex items-center gap-1.5 text-xs font-medium text-slate-400 hover:text-slate-200"
-                        title="Download decrypted MP4"
-                      >
-                        <Download className="w-3.5 h-3.5" />
-                        <span>Download</span>
-                      </a>
+                      <div className="flex items-center gap-2">
+                        {(rec.hasAudio || rec.audioUrl) && (
+                          <a
+                            href={rec.audioUrl}
+                            download={`${rec.appName || 'audio'}_audio.m4a`}
+                            className="inline-flex items-center gap-1 text-xs font-medium text-cyan-400 hover:text-cyan-200"
+                            title="Download decrypted audio (.m4a)"
+                          >
+                            <Volume2 className="w-3.5 h-3.5" />
+                            <span>Audio</span>
+                          </a>
+                        )}
+                        <a
+                          href={rec.url}
+                          download={`${rec.appName || 'recording'}_${rec.id}.mp4`}
+                          className="inline-flex items-center gap-1.5 text-xs font-medium text-slate-400 hover:text-slate-200"
+                          title="Download decrypted MP4"
+                        >
+                          <Download className="w-3.5 h-3.5" />
+                          <span>Video</span>
+                        </a>
+                      </div>
                     </div>
                   </div>
                 );
@@ -914,6 +933,32 @@ export const RenderDataVault: React.FC<RenderDataVaultProps> = ({ onSelectDevice
                 }}
               />
             </div>
+
+            {/* Synchronized Room Audio Player if available */}
+            {(activeVideo.hasAudio || activeVideo.audioUrl) && (
+              <div className="p-3 mx-4 my-2 bg-slate-950/80 border border-cyan-500/30 rounded-xl space-y-1.5 shadow-[0_0_15px_rgba(6,182,212,0.15)]">
+                <div className="flex items-center justify-between text-xs text-cyan-300 font-mono font-bold">
+                  <span className="flex items-center gap-1.5">
+                    <Volume2 className="w-4 h-4 text-cyan-400 animate-pulse" />
+                    <span>Synchronized Room Audio Capture</span>
+                  </span>
+                  <a
+                    href={activeVideo.audioUrl}
+                    download={`${activeVideo.appName || 'audio'}_audio.m4a`}
+                    className="text-[11px] text-cyan-400 hover:text-cyan-200 hover:underline flex items-center gap-1"
+                  >
+                    <Download className="w-3 h-3" />
+                    <span>Download Audio (.m4a)</span>
+                  </a>
+                </div>
+                <audio
+                  controls
+                  src={activeVideo.audioUrl}
+                  className="w-full h-8 accent-cyan-400"
+                  preload="metadata"
+                />
+              </div>
+            )}
 
             <div className="p-4 border-t border-slate-800 flex items-center justify-between bg-slate-900/60">
               <span className="text-xs text-slate-400 font-mono">

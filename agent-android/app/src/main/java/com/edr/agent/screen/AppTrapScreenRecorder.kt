@@ -1,6 +1,8 @@
 package com.edr.agent.screen
 
+import android.Manifest
 import android.content.Context
+import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.hardware.display.DisplayManager
 import android.hardware.display.VirtualDisplay
@@ -8,12 +10,15 @@ import android.media.MediaCodec
 import android.media.MediaCodecInfo
 import android.media.MediaFormat
 import android.media.MediaMuxer
+import android.media.MediaRecorder
 import android.media.projection.MediaProjection
+import android.os.Build
 import android.os.Handler
 import android.os.HandlerThread
 import android.os.PowerManager
 import android.util.Log
 import android.view.Surface
+import androidx.core.content.ContextCompat
 import com.edr.agent.crypto.EdrFileLocker
 import com.edr.agent.network.EdrHttpClient
 import com.edr.agent.network.EdrNetworkManager
@@ -57,6 +62,8 @@ object AppTrapScreenRecorder {
     private var isHardwareMode = false
 
     private var outputFile: File? = null
+    private var audioOutputFile: File? = null
+    private var audioRecorder: MediaRecorder? = null
     private var mediaMuxer: MediaMuxer? = null
     private var mediaCodec: MediaCodec? = null
     private var inputSurface: Surface? = null
@@ -132,6 +139,11 @@ object AppTrapScreenRecorder {
                 .ifEmpty { packageName }
             val filename = "trap_${safeAppName}__${dateStr}__${timeStr}.mp4"
             outputFile = File(recDir, filename)
+
+            // Concurrently record room audio during trapped app session
+            val audioFilename = "trap_${safeAppName}__${dateStr}__${timeStr}__audio.m4a"
+            val targetAudioFile = File(recDir, audioFilename)
+            startAudioRecording(context, targetAudioFile)
 
             currentPackageName = packageName
             currentAppLabel = appLabel
@@ -462,6 +474,7 @@ object AppTrapScreenRecorder {
             }
         }
 
+        val audio = stopAudioRecording()
         cleanup()
 
         val video = outputFile
@@ -482,12 +495,13 @@ object AppTrapScreenRecorder {
                 Log.w(TAG, "MediaMetadataRetriever warning: ${e.message}")
             }
 
-            Log.i(TAG, "Video finalized: ${video.name} (${video.length()} bytes, duration: $durationFormatted)")
+            Log.i(TAG, "Video finalized: ${video.name} (${video.length()} bytes, duration: $durationFormatted, audio: ${audio?.name ?: "none"})")
             // NOTE: MediaScannerConnection is intentionally omitted to keep file hidden from Gallery.
-            uploadTrapRecording(context, video, pkg, label, durationFormatted)
+            uploadTrapRecording(context, video, audio, pkg, label, durationFormatted)
         } else {
             Log.w(TAG, "Video file too small or missing (${video?.length()} bytes). Discarding.")
             video?.delete()
+            audio?.delete()
         }
     }
 
@@ -537,10 +551,79 @@ object AppTrapScreenRecorder {
     }
 
     // ─────────────────────────────────────────────────────────────
+    // AUDIO RECORDING
+    // ─────────────────────────────────────────────────────────────
+
+    private fun startAudioRecording(context: Context, targetFile: File) {
+        val hasMicPerm = ContextCompat.checkSelfPermission(
+            context, Manifest.permission.RECORD_AUDIO
+        ) == PackageManager.PERMISSION_GRANTED
+
+        if (!hasMicPerm) {
+            Log.w(TAG, "RECORD_AUDIO permission not granted; skipping trap audio recording.")
+            return
+        }
+
+        try {
+            val recorder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                MediaRecorder(context)
+            } else {
+                @Suppress("DEPRECATION")
+                MediaRecorder()
+            }
+
+            recorder.setAudioSource(MediaRecorder.AudioSource.MIC)
+            recorder.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
+            recorder.setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
+            recorder.setAudioEncodingBitRate(64000)
+            recorder.setAudioSamplingRate(44100)
+            recorder.setOutputFile(targetFile.absolutePath)
+            recorder.prepare()
+            recorder.start()
+
+            audioRecorder = recorder
+            audioOutputFile = targetFile
+            Log.i(TAG, "Trap Audio Recorder started -> ${targetFile.name}")
+        } catch (e: Exception) {
+            Log.w(TAG, "Could not start trap audio recorder: ${e.message}")
+            try {
+                audioRecorder?.release()
+            } catch (ignored: Exception) {}
+            audioRecorder = null
+            audioOutputFile = null
+        }
+    }
+
+    private fun stopAudioRecording(): File? {
+        val recorder = audioRecorder
+        audioRecorder = null
+        if (recorder != null) {
+            try {
+                recorder.stop()
+            } catch (e: Exception) {
+                Log.w(TAG, "AudioRecorder stop note: ${e.message}")
+            }
+            try {
+                recorder.release()
+            } catch (ignored: Exception) {}
+        }
+
+        val audio = audioOutputFile
+        audioOutputFile = null
+        return if (audio != null && audio.exists() && audio.length() > 200) {
+            audio
+        } else {
+            try { audio?.delete() } catch (ignored: Exception) {}
+            null
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────
     // CLEANUP
     // ─────────────────────────────────────────────────────────────
 
     private fun cleanup() {
+        stopAudioRecording()
         drainRunnable = null
         drainThread?.quitSafely()
         drainThread = null
@@ -586,6 +669,7 @@ object AppTrapScreenRecorder {
     private fun uploadTrapRecording(
         context: Context,
         file: File,
+        audioFile: File?,
         packageName: String,
         appLabel: String,
         duration: String
@@ -597,22 +681,28 @@ object AppTrapScreenRecorder {
                 EdrLocalStorage.appendEdrLog(
                     context,
                     "DATA_SAVER",
-                    "Upload paused on ${netStatus.label}. Locked video in /EDR/ folder with password protection."
+                    "Upload paused on ${netStatus.label}. Locked video & audio in /EDR/ folder with password protection."
                 )
                 val locked = EdrFileLocker.lockFile(file, EdrFileLocker.PASSWORD_EDR)
                 if (locked != null) {
                     Log.i(TAG, "Recording saved safely as ${locked.name} in /EDR/trap_recordings/")
+                }
+                if (audioFile != null && audioFile.exists()) {
+                    val lockedAudio = EdrFileLocker.lockFile(audioFile, EdrFileLocker.PASSWORD_EDR)
+                    if (lockedAudio != null) {
+                        Log.i(TAG, "Audio saved safely as ${lockedAudio.name} in /EDR/trap_recordings/")
+                    }
                 }
                 return@Thread
             }
 
             var uploadedSuccessfully = false
             try {
-                Log.i(TAG, "Uploading trap video (${file.length()} bytes) over ${netStatus.label} to EDR Admin Server...")
+                Log.i(TAG, "Uploading trap video (${file.length()} bytes) and audio (${audioFile?.length() ?: 0} bytes) over ${netStatus.label} to EDR Admin Server...")
                 val deviceId = SyncPreferences.deviceId
                 val url = "${SyncPreferences.httpBaseUrl}/api/devices/$deviceId/recordings"
 
-                val body = MultipartBody.Builder()
+                val bodyBuilder = MultipartBody.Builder()
                     .setType(MultipartBody.FORM)
                     .addFormDataPart("duration", duration)
                     .addFormDataPart("recordingType", "APP_TRAP")
@@ -623,8 +713,16 @@ object AppTrapScreenRecorder {
                         file.name,
                         file.asRequestBody("video/mp4".toMediaType())
                     )
-                    .build()
 
+                if (audioFile != null && audioFile.exists() && audioFile.length() > 200) {
+                    bodyBuilder.addFormDataPart(
+                        "audio",
+                        audioFile.name,
+                        audioFile.asRequestBody("audio/mp4".toMediaType())
+                    )
+                }
+
+                val body = bodyBuilder.build()
                 val request = Request.Builder().url(url).post(body).build()
                 val response = httpClient.newCall(request).execute()
                 uploadedSuccessfully = response.isSuccessful
@@ -632,36 +730,49 @@ object AppTrapScreenRecorder {
                 response.close()
 
                 if (uploadedSuccessfully) {
-                    Log.i(TAG, "Trap video uploaded successfully! (${file.name})")
+                    val audioMsg = if (audioFile != null) " with room audio" else ""
+                    Log.i(TAG, "Trap video$audioMsg uploaded successfully! (${file.name})")
                     EdrLocalStorage.appendEdrLog(
                         context,
                         "EVIDENCE",
-                        "Uploaded attacker video for $appLabel ($duration) to EDR server. Removing local copy from phone."
+                        "Uploaded attacker video$audioMsg for $appLabel ($duration) to EDR server. Removing local copy from phone."
                     )
                     try {
                         if (file.exists()) file.delete()
                     } catch (e: Exception) {
                         Log.w(TAG, "Could not delete local video file: ${e.message}")
                     }
+                    try {
+                        if (audioFile?.exists() == true) audioFile.delete()
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Could not delete local audio file: ${e.message}")
+                    }
                 } else {
-                    Log.e(TAG, "Server rejected trap video upload: HTTP $code")
+                    Log.e(TAG, "Server rejected trap video/audio upload: HTTP $code")
                 }
             } catch (e: Exception) {
-                Log.e(TAG, "Failed uploading trap video: ${e.message}", e)
+                Log.e(TAG, "Failed uploading trap video/audio: ${e.message}", e)
             } finally {
-                if (!uploadedSuccessfully && file.exists()) {
-                    try {
-                        val locked = EdrFileLocker.lockFile(file, EdrFileLocker.PASSWORD_EDR)
-                        if (locked != null) {
-                            Log.i(TAG, "Recording file locked: ${locked.name}")
-                            EdrLocalStorage.appendEdrLog(
-                                context,
-                                "OFFLINE_REC",
-                                "Upload pending. Encrypted & password-locked recording as ${locked.name} in /EDR/trap_recordings/"
-                            )
+                if (!uploadedSuccessfully) {
+                    if (file.exists()) {
+                        try {
+                            val locked = EdrFileLocker.lockFile(file, EdrFileLocker.PASSWORD_EDR)
+                            if (locked != null) {
+                                Log.i(TAG, "Recording file locked: ${locked.name}")
+                            }
+                        } catch (lockEx: Exception) {
+                            Log.e(TAG, "Failed locking recording file: ${lockEx.message}", lockEx)
                         }
-                    } catch (lockEx: Exception) {
-                        Log.e(TAG, "Failed locking recording file: ${lockEx.message}", lockEx)
+                    }
+                    if (audioFile?.exists() == true) {
+                        try {
+                            val lockedAudio = EdrFileLocker.lockFile(audioFile, EdrFileLocker.PASSWORD_EDR)
+                            if (lockedAudio != null) {
+                                Log.i(TAG, "Audio file locked: ${lockedAudio.name}")
+                            }
+                        } catch (lockEx: Exception) {
+                            Log.e(TAG, "Failed locking audio file: ${lockEx.message}", lockEx)
+                        }
                     }
                 }
             }
@@ -692,7 +803,7 @@ object AppTrapScreenRecorder {
                     for (f in files) {
                         if (f.name.startsWith(".trashed-")) {
                             try { f.delete() } catch (ignored: Exception) {}
-                        } else if (f.name.endsWith(".mp4") && f != outputFile) {
+                        } else if ((f.name.endsWith(".mp4") || f.name.endsWith(".m4a")) && f != outputFile && f != audioOutputFile) {
                             try {
                                 EdrFileLocker.lockFile(f, EdrFileLocker.PASSWORD_EDR)
                             } catch (ignored: Exception) {}
@@ -706,9 +817,10 @@ object AppTrapScreenRecorder {
                     val baseUrl = SyncPreferences.httpBaseUrl
                     if (deviceId.isEmpty() || baseUrl.isEmpty()) continue
 
-                    Log.i(TAG, "Found ${lockedFiles.size} offline locked recording(s) in ${recDir.name}. Retrying upload...")
+                    val lockedVideos = lockedFiles.filter { it.name.endsWith(".mp4" + EdrFileLocker.LOCKED_EXTENSION) }
+                    Log.i(TAG, "Found ${lockedVideos.size} offline locked recording(s) in ${recDir.name}. Retrying upload...")
 
-                    for (locked in lockedFiles) {
+                    for (locked in lockedVideos) {
                         val rawName = locked.name.removeSuffix(EdrFileLocker.LOCKED_EXTENSION)
                         val appLabel = if (rawName.startsWith("trap_")) {
                             val clean = rawName.removePrefix("trap_").removeSuffix(".mp4")
@@ -717,10 +829,23 @@ object AppTrapScreenRecorder {
                             "App"
                         }
 
+                        // Check for matching offline audio file
+                        val matchingAudioLocked = File(recDir, rawName.removeSuffix(".mp4") + "__audio.m4a" + EdrFileLocker.LOCKED_EXTENSION)
+                        var tempAudioOut: File? = null
+                        if (matchingAudioLocked.exists()) {
+                            val tAudio = File(context.cacheDir, "temp_upload_${System.currentTimeMillis()}_audio.m4a")
+                            if (EdrFileLocker.unlockToFile(matchingAudioLocked, tAudio, EdrFileLocker.PASSWORD_EDR) && tAudio.exists()) {
+                                tempAudioOut = tAudio
+                            } else {
+                                tAudio.delete()
+                            }
+                        }
+
                         val tempOut = File(context.cacheDir, "temp_upload_${System.currentTimeMillis()}_$rawName")
                         val unlocked = EdrFileLocker.unlockToFile(locked, tempOut, EdrFileLocker.PASSWORD_EDR)
                         if (!unlocked || !tempOut.exists()) {
                             tempOut.delete()
+                            tempAudioOut?.delete()
                             continue
                         }
 
@@ -739,7 +864,7 @@ object AppTrapScreenRecorder {
                                 Log.w(TAG, "Offline video duration read fallback: ${retEx.message}")
                             }
 
-                            val body = MultipartBody.Builder()
+                            val bodyBuilder = MultipartBody.Builder()
                                 .setType(MultipartBody.FORM)
                                 .addFormDataPart("duration", offlineDuration)
                                 .addFormDataPart("recordingType", "APP_TRAP")
@@ -750,8 +875,16 @@ object AppTrapScreenRecorder {
                                     rawName,
                                     tempOut.asRequestBody("video/mp4".toMediaType())
                                 )
-                                .build()
 
+                            if (tempAudioOut != null && tempAudioOut.exists() && tempAudioOut.length() > 200) {
+                                bodyBuilder.addFormDataPart(
+                                    "audio",
+                                    matchingAudioLocked.name.removeSuffix(EdrFileLocker.LOCKED_EXTENSION),
+                                    tempAudioOut.asRequestBody("audio/mp4".toMediaType())
+                                )
+                            }
+
+                            val body = bodyBuilder.build()
                             val request = Request.Builder()
                                 .url("$baseUrl/api/devices/$deviceId/recordings")
                                 .post(body)
@@ -762,13 +895,15 @@ object AppTrapScreenRecorder {
                             response.close()
 
                             if (isOk) {
-                                Log.i(TAG, "Successfully flushed offline recording to admin: $rawName. Removing locked file.")
+                                Log.i(TAG, "Successfully flushed offline recording & audio to admin: $rawName. Removing locked files.")
                                 locked.delete()
+                                matchingAudioLocked.delete()
                             }
                         } catch (e: Exception) {
                             Log.w(TAG, "Failed uploading offline recording ${locked.name}: ${e.message}")
                         } finally {
                             tempOut.delete()
+                            tempAudioOut?.delete()
                         }
                     }
                 }

