@@ -217,7 +217,7 @@ class MainActivity : AppCompatActivity() {
             text = "TURN ON"
             textSize = 11f
             setTypeface(null, Typeface.BOLD)
-            setBackgroundColor(Color.parseColor("#16A34A"))
+            setBackgroundColor(Color.parseColor("#2563EB"))
             setTextColor(Color.WHITE)
             setPadding(28, 12, 28, 12)
             setOnClickListener {
