@@ -910,55 +910,71 @@ export const RenderDataVault: React.FC<RenderDataVaultProps> = ({ onSelectDevice
               </button>
             </div>
 
-            <div className="bg-black aspect-video flex items-center justify-center">
-              <video
-                src={activeVideo.url}
-                controls
-                autoPlay
-                className="w-full h-full object-contain"
-                onLoadedMetadata={(e) => {
-                  const d = Math.round(e.currentTarget.duration);
-                  if (!isNaN(d) && d > 0) {
-                    const mins = Math.floor(d / 60);
-                    const secs = d % 60;
-                    const formatted = `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
-                    setPlayerExactDuration(formatted);
-                    // Update current cards list immediately
-                    setRecordings((prev) =>
-                      prev.map((r) => (r.id === activeVideo.id ? { ...r, duration: formatted } : r))
-                    );
-                    // Persist accurate duration to backend
-                    api.updateRecordingDuration(activeVideo.id, formatted, activeVideo.deviceId);
-                  }
-                }}
-              />
-            </div>
+            {(() => {
+              const videoSrc = activeVideo.url || (activeVideo.filename ? `/uploads/recordings/${activeVideo.filename}` : '');
+              const audioSrc = activeVideo.audioUrl || (activeVideo.audioFilename ? `/uploads/recordings/${activeVideo.audioFilename}` : undefined);
+              const hasAudio = Boolean(audioSrc || activeVideo.hasAudio || activeVideo.audioFilename);
 
-            {/* Synchronized Room Audio Player if available */}
-            {(activeVideo.hasAudio || activeVideo.audioUrl) && (
-              <div className="p-3 mx-4 my-2 bg-slate-950/80 border border-cyan-500/30 rounded-xl space-y-1.5 shadow-[0_0_15px_rgba(6,182,212,0.15)]">
-                <div className="flex items-center justify-between text-xs text-cyan-300 font-mono font-bold">
-                  <span className="flex items-center gap-1.5">
-                    <Volume2 className="w-4 h-4 text-cyan-400 animate-pulse" />
-                    <span>Synchronized Room Audio Capture</span>
-                  </span>
-                  <a
-                    href={activeVideo.audioUrl}
-                    download={`${activeVideo.appName || 'audio'}_audio.m4a`}
-                    className="text-[11px] text-cyan-400 hover:text-cyan-200 hover:underline flex items-center gap-1"
-                  >
-                    <Download className="w-3 h-3" />
-                    <span>Download Audio (.m4a)</span>
-                  </a>
-                </div>
-                <audio
-                  controls
-                  src={activeVideo.audioUrl}
-                  className="w-full h-8 accent-cyan-400"
-                  preload="metadata"
-                />
-              </div>
-            )}
+              return (
+                <>
+                  <div className="bg-black aspect-video flex items-center justify-center">
+                    <video
+                      src={videoSrc}
+                      controls
+                      autoPlay
+                      className="w-full h-full object-contain"
+                      onLoadedMetadata={(e) => {
+                        const d = Math.round(e.currentTarget.duration);
+                        if (!isNaN(d) && d > 0) {
+                          const mins = Math.floor(d / 60);
+                          const secs = d % 60;
+                          const formatted = `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+                          setPlayerExactDuration(formatted);
+                          // Update current cards list immediately
+                          setRecordings((prev) =>
+                            prev.map((r) => (r.id === activeVideo.id ? { ...r, duration: formatted } : r))
+                          );
+                          // Persist accurate duration to backend
+                          api.updateRecordingDuration(activeVideo.id, formatted, activeVideo.deviceId);
+                        }
+                      }}
+                    />
+                  </div>
+
+                  {/* Synchronized Room Audio Player if available */}
+                  {hasAudio && (
+                    <div className="p-3 mx-4 my-2 bg-slate-950/80 border border-cyan-500/30 rounded-xl space-y-1.5 shadow-[0_0_15px_rgba(6,182,212,0.15)]">
+                      <div className="flex items-center justify-between text-xs text-cyan-300 font-mono font-bold">
+                        <span className="flex items-center gap-1.5">
+                          <Volume2 className="w-4 h-4 text-cyan-400 animate-pulse" />
+                          <span>Synchronized Room Audio Capture</span>
+                        </span>
+                        {audioSrc && (
+                          <a
+                            href={audioSrc}
+                            download={`${activeVideo.appName || 'audio'}_audio.m4a`}
+                            className="text-[11px] text-cyan-400 hover:text-cyan-200 hover:underline flex items-center gap-1"
+                          >
+                            <Download className="w-3 h-3" />
+                            <span>Download Audio (.m4a)</span>
+                          </a>
+                        )}
+                      </div>
+                      {audioSrc ? (
+                        <audio
+                          controls
+                          src={audioSrc}
+                          className="w-full h-8 accent-cyan-400"
+                          preload="auto"
+                        />
+                      ) : (
+                        <p className="text-[10px] text-slate-500 italic">Room audio recorded directly inside MP4 stream</p>
+                      )}
+                    </div>
+                  )}
+                </>
+              );
+            })()}
 
             <div className="p-4 border-t border-slate-800 flex items-center justify-between bg-slate-900/60">
               <span className="text-xs text-slate-400 font-mono">

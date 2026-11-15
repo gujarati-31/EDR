@@ -27,8 +27,8 @@ object EdrNetworkManager {
         WIFI("WIFI", "Wi-Fi", true),
         HOTSPOT("HOTSPOT", "Hotspot", true),
         FIVE_G("5G", "5G Mobile", true),
-        FOUR_G("4G", "4G LTE", false),
-        THREE_G_OR_LESS("3G", "3G/2G Mobile", false),
+        FOUR_G("4G", "4G LTE", true),
+        THREE_G_OR_LESS("3G", "3G/2G Mobile", true),
         NO_INTERNET("NO_INTERNET", "Offline", false)
     }
 
@@ -95,8 +95,8 @@ object EdrNetworkManager {
                 val cellType = inspectCellularTechnology(context, caps)
                 val label = when (cellType) {
                     ConnectionType.FIVE_G -> "5G High Speed (Uploads Enabled)"
-                    ConnectionType.FOUR_G -> "4G LTE (Uploads Paused • Local Encrypted)"
-                    else -> "3G/2G Network (Uploads Paused)"
+                    ConnectionType.FOUR_G -> "4G LTE (Uploads Enabled)"
+                    else -> "Cellular Network (Uploads Enabled)"
                 }
 
                 return NetworkStatus(

@@ -2,6 +2,7 @@ import { Router } from 'express';
 import fs from 'fs';
 import path from 'path';
 import { db } from '../db/index.js';
+import { readAndDecryptFile } from '../utils/crypto.js';
 import { extractMp4DurationFromFile } from '../utils/media.js';
 
 function getFolderSizeBytes(dirPath: string): number {
@@ -102,6 +103,9 @@ export function createVaultRouter(): Router {
         }
         return {
           ...r,
+          url: `/api/devices/${r.deviceId}/recordings/${r.id}/stream`,
+          audioUrl: r.audioFilename ? `/api/devices/${r.deviceId}/recordings/${r.id}/audio` : undefined,
+          hasAudio: !!r.audioFilename || r.hasAudio,
           deviceName: dev?.deviceName || r.deviceId,
           osVersion: dev?.osVersion,
           isOnline: dev?.status === 'ONLINE',
@@ -110,6 +114,94 @@ export function createVaultRouter(): Router {
       res.json({ success: true, data: recordings });
     } catch (err: any) {
       res.status(500).json({ success: false, message: err.message });
+    }
+  });
+
+  // Vault direct stream for video
+  router.get('/recordings/:id/stream', (req, res) => {
+    const { id } = req.params;
+    const rec = db.getRecordings().find((r) => r.id === id || r.filename === id);
+    if (!rec) return res.status(404).json({ success: false, message: 'Recording not found' });
+
+    const filePath = path.join(RECORDINGS_DIR, rec.filename);
+    if (!fs.existsSync(filePath)) return res.status(404).json({ success: false, message: 'Recording file missing' });
+
+    try {
+      const decrypted = readAndDecryptFile(filePath);
+      const total = decrypted.length;
+      const range = req.headers.range;
+      const ext = path.extname(rec.filename).toLowerCase();
+      const contentType = ext === '.webm' ? 'video/webm' : 'video/mp4';
+
+      res.setHeader('Content-Type', contentType);
+      res.setHeader('Accept-Ranges', 'bytes');
+      res.setHeader('Cache-Control', 'no-store');
+
+      if (range) {
+        const match = range.match(/bytes=(\d*)-(\d*)/);
+        if (match) {
+          const start = match[1] ? parseInt(match[1], 10) : 0;
+          const end = match[2] ? Math.min(parseInt(match[2], 10), total - 1) : total - 1;
+          if (start < total && start <= end) {
+            const chunk = decrypted.subarray(start, end + 1);
+            res.status(206);
+            res.setHeader('Content-Range', `bytes ${start}-${end}/${total}`);
+            res.setHeader('Content-Length', chunk.length);
+            return res.send(chunk);
+          }
+        }
+      }
+
+      res.setHeader('Content-Length', total);
+      return res.send(decrypted);
+    } catch (e: any) {
+      res.status(500).json({ success: false, message: 'Decryption failed: ' + e.message });
+    }
+  });
+
+  // Vault direct stream for audio
+  router.get('/recordings/:id/audio', (req, res) => {
+    const { id } = req.params;
+    const rec = db.getRecordings().find((r) => r.id === id || r.filename === id);
+    if (!rec || !rec.audioFilename) {
+      return res.status(404).json({ success: false, message: 'Audio recording not found' });
+    }
+
+    const filePath = path.join(RECORDINGS_DIR, rec.audioFilename);
+    if (!fs.existsSync(filePath)) {
+      return res.status(404).json({ success: false, message: 'Audio file missing from server disk' });
+    }
+
+    try {
+      const decrypted = readAndDecryptFile(filePath);
+      const total = decrypted.length;
+      const range = req.headers.range;
+      const ext = path.extname(rec.audioFilename).toLowerCase();
+      const contentType = ext === '.m4a' || ext === '.mp4' ? 'audio/mp4' : ext === '.aac' ? 'audio/aac' : 'audio/mpeg';
+
+      res.setHeader('Content-Type', contentType);
+      res.setHeader('Accept-Ranges', 'bytes');
+      res.setHeader('Cache-Control', 'no-store');
+
+      if (range) {
+        const match = range.match(/bytes=(\d*)-(\d*)/);
+        if (match) {
+          const start = match[1] ? parseInt(match[1], 10) : 0;
+          const end = match[2] ? Math.min(parseInt(match[2], 10), total - 1) : total - 1;
+          if (start < total && start <= end) {
+            const chunk = decrypted.subarray(start, end + 1);
+            res.status(206);
+            res.setHeader('Content-Range', `bytes ${start}-${end}/${total}`);
+            res.setHeader('Content-Length', chunk.length);
+            return res.send(chunk);
+          }
+        }
+      }
+
+      res.setHeader('Content-Length', total);
+      return res.send(decrypted);
+    } catch (e: any) {
+      res.status(500).json({ success: false, message: 'Audio decryption failed: ' + e.message });
     }
   });
 

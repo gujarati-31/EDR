@@ -34,7 +34,7 @@ app.use(cors({ origin: '*' }));
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 // Encrypted uploads middleware: files stored on disk are AES-256-GCM encrypted.
-// When requested, they are decrypted in transient RAM and served to authorized clients.
+// When requested, they are decrypted in transient RAM and served to authorized clients with Range support.
 app.use('/uploads', (req, res, next) => {
   const relPath = decodeURIComponent(req.path);
   const targetPath = path.join(UPLOADS_DIR, relPath);
@@ -42,15 +42,53 @@ app.use('/uploads', (req, res, next) => {
     try {
       const decrypted = readAndDecryptFile(targetPath);
       const ext = path.extname(targetPath).toLowerCase();
+      let contentType = 'application/octet-stream';
+
       if (ext === '.jpg' || ext === '.jpeg') {
-        res.setHeader('Content-Type', 'image/jpeg');
+        contentType = 'image/jpeg';
+      } else if (ext === '.png') {
+        contentType = 'image/png';
       } else if (ext === '.mp4') {
-        res.setHeader('Content-Type', 'video/mp4');
+        contentType = 'video/mp4';
       } else if (ext === '.webm') {
-        res.setHeader('Content-Type', 'video/webm');
+        contentType = 'video/webm';
+      } else if (ext === '.m4a') {
+        contentType = 'audio/mp4';
+      } else if (ext === '.aac') {
+        contentType = 'audio/aac';
+      } else if (ext === '.mp3') {
+        contentType = 'audio/mpeg';
+      } else if (ext === '.wav') {
+        contentType = 'audio/wav';
+      } else if (ext === '.3gp') {
+        contentType = 'audio/3gpp';
+      } else if (ext === '.ogg') {
+        contentType = 'audio/ogg';
       }
-      res.setHeader('Content-Length', decrypted.length);
-      res.setHeader('Cache-Control', 'public, max-age=86400');
+
+      res.setHeader('Content-Type', contentType);
+      res.setHeader('Accept-Ranges', 'bytes');
+      res.setHeader('Cache-Control', 'no-store');
+
+      const total = decrypted.length;
+      const range = req.headers.range;
+
+      if (range) {
+        const match = range.match(/bytes=(\d*)-(\d*)/);
+        if (match) {
+          const start = match[1] ? parseInt(match[1], 10) : 0;
+          const end = match[2] ? Math.min(parseInt(match[2], 10), total - 1) : total - 1;
+          if (start < total && start <= end) {
+            const chunk = decrypted.subarray(start, end + 1);
+            res.status(206);
+            res.setHeader('Content-Range', `bytes ${start}-${end}/${total}`);
+            res.setHeader('Content-Length', chunk.length);
+            return res.send(chunk);
+          }
+        }
+      }
+
+      res.setHeader('Content-Length', total);
       return res.send(decrypted);
     } catch (err: any) {
       console.warn('[Uploads] Error decrypting on-the-fly:', err.message);

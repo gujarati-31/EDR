@@ -122,6 +122,7 @@ export interface RecordedVideo {
   audioUrl?: string;
   audioSizeBytes?: number;
   hasAudio?: boolean;
+  hasVideo?: boolean;
   timestamp: string;
   createdAt: string;
 }

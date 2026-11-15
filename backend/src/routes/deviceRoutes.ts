@@ -773,37 +773,42 @@ export function createDeviceRouter(gateway: EDRWebSocketGateway) {
     const videoFile = files?.['video']?.[0] || (req.file as Express.Multer.File | undefined);
     const audioFile = files?.['audio']?.[0];
 
-    if (!videoFile) {
-      return res.status(400).json({ success: false, message: 'No video file provided' });
+    if (!videoFile && !audioFile) {
+      return res.status(400).json({ success: false, message: 'No video or audio file provided' });
     }
 
-    const isTrap = videoFile.filename.startsWith('trap_') || recordingType === 'APP_TRAP';
+    const primaryFilename = videoFile ? videoFile.filename : audioFile!.filename;
+    const isTrap = primaryFilename.startsWith('trap_') || recordingType === 'APP_TRAP';
     const resolvedType: 'APP_TRAP' | 'LIVE_SCREEN' = isTrap ? 'APP_TRAP' : 'LIVE_SCREEN';
-    const parsedAppFromFile = videoFile.filename.startsWith('trap_')
-      ? videoFile.filename.replace(/^trap_/, '').split(' - ')[0]?.replace(/_/g, ' ').trim()
+    const parsedAppFromFile = primaryFilename.startsWith('trap_')
+      ? primaryFilename.replace(/^trap_/, '').split(' - ')[0]?.replace(/_/g, ' ').trim()
       : undefined;
     const resolvedAppName = (appName && String(appName).trim()) || parsedAppFromFile || undefined;
 
     // Auto-detect exact MP4 duration from buffer before encryption if client gave fallback or missing
     let resolvedDuration = duration && duration !== '00:00' && duration !== '00:30' ? String(duration) : undefined;
-    try {
-      const rawBuf = fs.readFileSync(videoFile.path);
-      const parsedDur = extractMp4DurationFromBuffer(rawBuf);
-      if (parsedDur) {
-        resolvedDuration = parsedDur;
+    if (videoFile) {
+      try {
+        const rawBuf = fs.readFileSync(videoFile.path);
+        const parsedDur = extractMp4DurationFromBuffer(rawBuf);
+        if (parsedDur) {
+          resolvedDuration = parsedDur;
+        }
+      } catch (e: any) {
+        console.warn('[Media] Could not parse MP4 duration:', e.message);
       }
-    } catch (e: any) {
-      console.warn('[Media] Could not parse MP4 duration:', e.message);
     }
     if (!resolvedDuration) {
       resolvedDuration = duration || '00:00';
     }
 
-    // Encrypt video file in-place on disk with AES-256-GCM
-    try {
-      encryptFileInPlace(videoFile.path);
-    } catch (e: any) {
-      console.error('[Crypto] Failed encrypting video recording on disk:', e.message);
+    // Encrypt video file in-place on disk with AES-256-GCM if present
+    if (videoFile) {
+      try {
+        encryptFileInPlace(videoFile.path);
+      } catch (e: any) {
+        console.error('[Crypto] Failed encrypting video recording on disk:', e.message);
+      }
     }
 
     // Encrypt audio file in-place if present
@@ -817,16 +822,19 @@ export function createDeviceRouter(gateway: EDRWebSocketGateway) {
 
     const videoRecord = db.addRecording({
       deviceId: device.deviceId,
-      filename: videoFile.filename,
-      url: `/uploads/recordings/${videoFile.filename}`,
+      filename: videoFile ? videoFile.filename : (audioFile?.filename || 'recording'),
+      url: videoFile
+        ? `/uploads/recordings/${videoFile.filename}`
+        : `/uploads/recordings/${audioFile!.filename}`,
       recordingType: resolvedType,
       appName: resolvedAppName,
       packageName: packageName ? String(packageName) : undefined,
       duration: resolvedDuration,
-      sizeBytes: videoFile.size,
+      sizeBytes: videoFile ? videoFile.size : (audioFile?.size || 0),
       audioFilename: audioFile ? audioFile.filename : undefined,
       audioSizeBytes: audioFile ? audioFile.size : undefined,
       hasAudio: !!audioFile,
+      hasVideo: !!videoFile,
       timestamp: new Date().toISOString(),
     });
 
@@ -837,8 +845,8 @@ export function createDeviceRouter(gateway: EDRWebSocketGateway) {
         eventType: 'SECURITY_ALERT',
         severity: 'INFO',
         message: isTrap
-          ? `App Trap Screen Video Recording Saved: ${videoFile.filename}${audioMsg} (Duration: ${resolvedDuration})`
-          : `Live Screen Video Recording Saved: ${videoFile.filename} (Duration: ${resolvedDuration})`,
+          ? `App Trap Screen Video Recording Saved: ${videoFile?.filename ?? audioFile?.filename ?? 'recording'}${audioMsg} (Duration: ${resolvedDuration})`
+          : `Live Screen Video Recording Saved: ${videoFile?.filename ?? 'recording'} (Duration: ${resolvedDuration})`,
         payload: {
           recordingId: videoRecord.id,
           recordingType: resolvedType,
@@ -892,12 +900,14 @@ export function createDeviceRouter(gateway: EDRWebSocketGateway) {
     res.json({ success: updated });
   });
 
-  // Direct Video Stream: AES-256-GCM Decrypted on-the-fly
+  // Direct Video Stream: AES-256-GCM Decrypted on-the-fly with Range Support
   router.get('/:deviceId/recordings/:id/stream', (req, res) => {
     const { deviceId, id } = req.params;
     const device = db.getDeviceById(deviceId);
     const targetId = device ? device.deviceId : deviceId;
-    const rec = db.getRecordings(targetId).find((r) => r.id === id);
+    const rec =
+      db.getRecordings().find((r) => r.id === id || r.filename === id) ||
+      db.getRecordings(targetId).find((r) => r.id === id || r.filename === id);
     if (!rec) return res.status(404).json({ success: false, message: 'Recording not found' });
 
     const filePath = path.join(RECORDINGS_DIR, rec.filename);
@@ -907,8 +917,10 @@ export function createDeviceRouter(gateway: EDRWebSocketGateway) {
       const decrypted = readAndDecryptFile(filePath);
       const total = decrypted.length;
       const range = req.headers.range;
+      const ext = path.extname(rec.filename).toLowerCase();
+      const contentType = ext === '.webm' ? 'video/webm' : 'video/mp4';
 
-      res.setHeader('Content-Type', 'video/mp4');
+      res.setHeader('Content-Type', contentType);
       res.setHeader('Accept-Ranges', 'bytes');
       res.setHeader('Cache-Control', 'no-store');
 
@@ -936,31 +948,64 @@ export function createDeviceRouter(gateway: EDRWebSocketGateway) {
     }
   });
 
-  // Direct Audio Stream: AES-256-GCM Decrypted on-the-fly
+  // Direct Audio Stream: AES-256-GCM Decrypted on-the-fly with Range Support
   router.get('/:deviceId/recordings/:id/audio', (req, res) => {
     const { deviceId, id } = req.params;
     const device = db.getDeviceById(deviceId);
     const targetId = device ? device.deviceId : deviceId;
-    const rec = db.getRecordings(targetId).find((r) => r.id === id);
-    if (!rec || !rec.audioFilename) {
+    const rec =
+      db.getRecordings().find((r) => r.id === id || r.filename === id || r.audioFilename === id) ||
+      db.getRecordings(targetId).find((r) => r.id === id || r.filename === id || r.audioFilename === id);
+
+    let audioFileName = rec?.audioFilename;
+    if (!audioFileName && (id.endsWith('.m4a') || id.endsWith('.mp4') || id.endsWith('.aac') || id.endsWith('.mp3'))) {
+      audioFileName = id;
+    }
+    if (!audioFileName && rec?.filename) {
+      const candidate = rec.filename.replace(/\.mp4$/i, '__audio.m4a');
+      if (fs.existsSync(path.join(RECORDINGS_DIR, candidate))) {
+        audioFileName = candidate;
+      }
+    }
+    if (!audioFileName) {
       return res.status(404).json({ success: false, message: 'Audio recording not found' });
     }
 
-    const filePath = path.join(RECORDINGS_DIR, rec.audioFilename);
+    const filePath = path.join(RECORDINGS_DIR, audioFileName);
     if (!fs.existsSync(filePath)) {
       return res.status(404).json({ success: false, message: 'Audio file missing from server disk' });
     }
 
     try {
       const decrypted = readAndDecryptFile(filePath);
-      const ext = path.extname(rec.audioFilename).toLowerCase();
-      const contentType = ext === '.m4a' || ext === '.mp4' ? 'audio/mp4' : ext === '.aac' ? 'audio/aac' : 'audio/mpeg';
+      const total = decrypted.length;
+      const range = req.headers.range;
+      const ext = path.extname(audioFileName).toLowerCase();
+      const contentType = ext === '.m4a' || ext === '.mp4' ? 'audio/mp4' : ext === '.aac' ? 'audio/aac' : ext === '.mp3' ? 'audio/mpeg' : 'audio/wav';
 
       res.setHeader('Content-Type', contentType);
-      res.setHeader('Content-Length', decrypted.length);
       res.setHeader('Accept-Ranges', 'bytes');
-      res.setHeader('Cache-Control', 'public, max-age=86400');
-      res.send(decrypted);
+      res.setHeader('Cache-Control', 'no-store');
+
+      if (range) {
+        const match = range.match(/bytes=(\d*)-(\d*)/);
+        if (!match) {
+          return res.status(416).setHeader('Content-Range', `bytes */${total}`).end();
+        }
+        const start = match[1] ? parseInt(match[1], 10) : 0;
+        const end = match[2] ? Math.min(parseInt(match[2], 10), total - 1) : total - 1;
+        if (start >= total || start > end) {
+          return res.status(416).setHeader('Content-Range', `bytes */${total}`).end();
+        }
+        const chunk = decrypted.subarray(start, end + 1);
+        res.status(206);
+        res.setHeader('Content-Range', `bytes ${start}-${end}/${total}`);
+        res.setHeader('Content-Length', chunk.length);
+        return res.send(chunk);
+      }
+
+      res.setHeader('Content-Length', total);
+      return res.send(decrypted);
     } catch (e: any) {
       res.status(500).json({ success: false, message: 'Audio decryption failed: ' + e.message });
     }

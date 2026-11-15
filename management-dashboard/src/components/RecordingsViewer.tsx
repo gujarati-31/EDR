@@ -65,6 +65,13 @@ export const RecordingsViewer: React.FC<RecordingsViewerProps> = ({ deviceId, re
   const [activeVideo, setActiveVideo] = useState<RecordedVideo | null>(null);
   const [playerDuration, setPlayerDuration] = useState<string | null>(null);
   const [selectedDate, setSelectedDate] = useState<string>(() => toLocalDateKey(new Date().toISOString()));
+  const [mediaFilter, setMediaFilter] = useState<'ALL' | 'VIDEO' | 'AUDIO'>('ALL');
+  const [videoError, setVideoError] = useState<string | null>(null);
+  const [audioError, setAudioError] = useState<string | null>(null);
+  const [syncAudio, setSyncAudio] = useState(true);
+
+  const videoRef = React.useRef<HTMLVideoElement | null>(null);
+  const audioRef = React.useRef<HTMLAudioElement | null>(null);
 
   const loadRecordings = async () => {
     setLoading(true);
@@ -97,10 +104,27 @@ export const RecordingsViewer: React.FC<RecordingsViewerProps> = ({ deviceId, re
     return Array.from(map.entries()).sort((a, b) => b[0].localeCompare(a[0]));
   }, [recordings]);
 
+  const videoCount = useMemo(
+    () => recordings.filter((r) => r.filename.endsWith('.mp4') || (r as any).hasVideo !== false).length,
+    [recordings]
+  );
+  const audioCount = useMemo(
+    () => recordings.filter((r) => r.hasAudio || r.audioUrl || r.audioFilename || r.filename.includes('audio')).length,
+    [recordings]
+  );
+
   const filteredRecordings = useMemo(() => {
-    if (selectedDate === 'ALL' || !selectedDate) return recordings;
-    return recordings.filter((r) => toLocalDateKey(r.createdAt || r.timestamp) === selectedDate);
-  }, [recordings, selectedDate]);
+    let list = recordings;
+    if (selectedDate !== 'ALL' && selectedDate) {
+      list = list.filter((r) => toLocalDateKey(r.createdAt || r.timestamp) === selectedDate);
+    }
+    if (mediaFilter === 'VIDEO') {
+      list = list.filter((r) => r.filename.endsWith('.mp4') || (r as any).hasVideo !== false);
+    } else if (mediaFilter === 'AUDIO') {
+      list = list.filter((r) => r.hasAudio || r.audioUrl || r.audioFilename || r.filename.includes('audio'));
+    }
+    return list;
+  }, [recordings, selectedDate, mediaFilter]);
 
   useEffect(() => {
     if (deviceId) {
@@ -130,11 +154,47 @@ export const RecordingsViewer: React.FC<RecordingsViewerProps> = ({ deviceId, re
             App Screen Recordings &amp; Attacker Activity Evidence
           </h2>
           <p className="text-[11px] font-mono text-slate-400 mt-0.5">
-            Auto-recorded screen videos triggered by trapped applications with attacker actions
+            Auto-recorded screen videos &amp; synchronized room audio triggered by trapped apps
           </p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
+          {/* Media Type Filter: All vs Video vs Audio */}
+          <div className="flex items-center bg-slate-900 border border-slate-700 rounded-lg p-0.5 text-xs">
+            <button
+              onClick={() => setMediaFilter('ALL')}
+              className={`px-2.5 py-1 rounded-md transition ${
+                mediaFilter === 'ALL'
+                  ? 'bg-purple-600 text-white font-semibold'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              All ({recordings.length})
+            </button>
+            <button
+              onClick={() => setMediaFilter('VIDEO')}
+              className={`px-2.5 py-1 rounded-md transition flex items-center gap-1 ${
+                mediaFilter === 'VIDEO'
+                  ? 'bg-purple-600 text-white font-semibold'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <Film className="w-3 h-3" />
+              <span>Videos ({videoCount})</span>
+            </button>
+            <button
+              onClick={() => setMediaFilter('AUDIO')}
+              className={`px-2.5 py-1 rounded-md transition flex items-center gap-1 ${
+                mediaFilter === 'AUDIO'
+                  ? 'bg-cyan-600 text-white font-semibold'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <Volume2 className="w-3 h-3" />
+              <span>Audio ({audioCount})</span>
+            </button>
+          </div>
+
           <div className="flex items-center space-x-1.5 px-2.5 py-1 rounded-lg bg-slate-900 border border-slate-700 text-xs text-slate-200">
             <Calendar className="w-3.5 h-3.5 text-purple-400" />
             <input
@@ -153,7 +213,7 @@ export const RecordingsViewer: React.FC<RecordingsViewerProps> = ({ deviceId, re
                 : 'bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-700'
             }`}
           >
-            All ({recordings.length})
+            All Dates
           </button>
           <button
             onClick={loadRecordings}
@@ -291,106 +351,185 @@ export const RecordingsViewer: React.FC<RecordingsViewerProps> = ({ deviceId, re
       )}
 
       {/* Video Modal Player */}
-      {activeVideo && (
-        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-lg w-full overflow-hidden shadow-2xl space-y-4 p-5 animate-in fade-in zoom-in-95">
-            <div className="flex items-center justify-between pb-2 border-b border-slate-800">
-              <div className="flex items-center space-x-2">
-                <Film className="w-4 h-4 text-purple-400" />
-                <h4 className="text-sm font-semibold text-white truncate max-w-xs">
-                  {formatRecordingDisplayName(activeVideo)}
-                </h4>
-              </div>
-              <button
-                onClick={() => setActiveVideo(null)}
-                className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
+      {activeVideo && (() => {
+        const videoSrc = activeVideo.url || (activeVideo.filename ? `/uploads/recordings/${activeVideo.filename}` : '');
+        const audioSrc = activeVideo.audioUrl || (activeVideo.audioFilename ? `/uploads/recordings/${activeVideo.audioFilename}` : undefined);
+        const hasAudioAvailable = Boolean(audioSrc || activeVideo.hasAudio || activeVideo.audioFilename);
 
-            {/* Video Player */}
-            <div className="rounded-xl overflow-hidden bg-black aspect-[9/16] max-h-[500px] mx-auto flex items-center justify-center border border-slate-800">
-              <video
-                src={activeVideo.url}
-                controls
-                autoPlay
-                playsInline
-                preload="auto"
-                className="w-full h-full object-contain"
-                onLoadedMetadata={(e) => {
-                  const d = Math.round(e.currentTarget.duration);
-                  if (!isNaN(d) && d > 0) {
-                    const mins = Math.floor(d / 60);
-                    const secs = d % 60;
-                    const formatted = `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
-                    setPlayerDuration(formatted);
-                    setRecordings((prev) =>
-                      prev.map((r) => (r.id === activeVideo.id ? { ...r, duration: formatted } : r))
-                    );
-                    api.updateRecordingDuration(activeVideo.id, formatted, deviceId);
-                  }
-                }}
-              />
-            </div>
-
-            {/* Synchronized Room Audio Player if available */}
-            {(activeVideo.hasAudio || activeVideo.audioUrl) && (
-              <div className="p-3 bg-slate-950/80 border border-cyan-500/30 rounded-xl space-y-1.5 shadow-[0_0_15px_rgba(6,182,212,0.15)]">
-                <div className="flex items-center justify-between text-xs text-cyan-300 font-mono font-bold">
-                  <span className="flex items-center gap-1.5">
-                    <Volume2 className="w-4 h-4 text-cyan-400 animate-pulse" />
-                    <span>Synchronized Room Audio Capture</span>
-                  </span>
-                  <a
-                    href={activeVideo.audioUrl}
-                    download={`${formatRecordingDisplayName(activeVideo).replace(/:/g, '-')}_audio.m4a`}
-                    className="text-[11px] text-cyan-400 hover:text-cyan-200 hover:underline flex items-center gap-1"
-                  >
-                    <Download className="w-3 h-3" />
-                    <span>Save Audio (.m4a)</span>
-                  </a>
+        return (
+          <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex items-center justify-center p-4">
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-lg w-full overflow-hidden shadow-2xl space-y-4 p-5 animate-in fade-in zoom-in-95">
+              <div className="flex items-center justify-between pb-2 border-b border-slate-800">
+                <div className="flex items-center space-x-2">
+                  <Film className="w-4 h-4 text-purple-400" />
+                  <h4 className="text-sm font-semibold text-white truncate max-w-xs">
+                    {formatRecordingDisplayName(activeVideo)}
+                  </h4>
                 </div>
-                <audio
-                  controls
-                  src={activeVideo.audioUrl}
-                  className="w-full h-8 accent-cyan-400"
-                  preload="metadata"
-                />
-              </div>
-            )}
-
-            {/* Modal Actions */}
-            <div className="flex items-center justify-between pt-2">
-              <div className="text-xs text-slate-400">
-                Duration:{' '}
-                <strong className="text-purple-300 font-semibold font-mono">
-                  {playerDuration || activeVideo.duration || '--:--'}
-                </strong>
-              </div>
-              <div className="flex items-center space-x-2">
-                <a
-                  href={activeVideo.url}
-                  download={`${formatRecordingDisplayName(activeVideo).replace(/:/g, '-')}.mp4`}
-                  className="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-lg bg-purple-600 hover:bg-purple-500 text-white text-xs font-semibold shadow transition"
-                >
-                  <Download className="w-3.5 h-3.5" />
-                  <span>Download File</span>
-                </a>
                 <button
                   onClick={() => {
                     setActiveVideo(null);
                     setPlayerDuration(null);
+                    setVideoError(null);
+                    setAudioError(null);
                   }}
-                  className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs transition"
+                  className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition"
                 >
-                  Close
+                  <X className="w-4 h-4" />
                 </button>
+              </div>
+
+              {/* Video Player */}
+              <div className="relative rounded-xl overflow-hidden bg-black aspect-[9/16] max-h-[500px] mx-auto flex items-center justify-center border border-slate-800">
+                <video
+                  ref={videoRef}
+                  src={videoSrc}
+                  controls
+                  autoPlay
+                  playsInline
+                  preload="auto"
+                  className="w-full h-full object-contain"
+                  onPlay={() => {
+                    if (syncAudio && audioRef.current && audioRef.current.paused) {
+                      audioRef.current.play().catch(() => {});
+                    }
+                  }}
+                  onPause={() => {
+                    if (syncAudio && audioRef.current && !audioRef.current.paused) {
+                      audioRef.current.pause();
+                    }
+                  }}
+                  onSeeked={(e) => {
+                    if (syncAudio && audioRef.current) {
+                      audioRef.current.currentTime = e.currentTarget.currentTime;
+                    }
+                  }}
+                  onError={() => {
+                    // Fallback to /uploads/recordings if /stream endpoint failed
+                    if (videoRef.current && !videoRef.current.src.includes('/uploads/recordings/') && activeVideo.filename) {
+                      videoRef.current.src = `/uploads/recordings/${activeVideo.filename}`;
+                      videoRef.current.load();
+                    } else {
+                      setVideoError('Video playback encountered an error. Click "Download File" to view locally.');
+                    }
+                  }}
+                  onLoadedMetadata={(e) => {
+                    setVideoError(null);
+                    const d = Math.round(e.currentTarget.duration);
+                    if (!isNaN(d) && d > 0) {
+                      const mins = Math.floor(d / 60);
+                      const secs = d % 60;
+                      const formatted = `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+                      setPlayerDuration(formatted);
+                      setRecordings((prev) =>
+                        prev.map((r) => (r.id === activeVideo.id ? { ...r, duration: formatted } : r))
+                      );
+                      api.updateRecordingDuration(activeVideo.id, formatted, deviceId);
+                    }
+                  }}
+                />
+                {videoError && (
+                  <div className="absolute inset-0 bg-slate-950/90 flex flex-col items-center justify-center p-4 text-center space-y-2">
+                    <p className="text-xs text-rose-400 font-mono">{videoError}</p>
+                    <a
+                      href={videoSrc}
+                      download={`${formatRecordingDisplayName(activeVideo).replace(/:/g, '-')}.mp4`}
+                      className="px-3 py-1.5 rounded-lg bg-purple-600 hover:bg-purple-500 text-white text-xs font-semibold"
+                    >
+                      Download MP4 File
+                    </a>
+                  </div>
+                )}
+              </div>
+
+              {/* Synchronized Room Audio Player if available */}
+              {hasAudioAvailable && (
+                <div className="p-3 bg-slate-950/80 border border-cyan-500/30 rounded-xl space-y-2 shadow-[0_0_15px_rgba(6,182,212,0.15)]">
+                  <div className="flex items-center justify-between text-xs text-cyan-300 font-mono font-bold">
+                    <span className="flex items-center gap-1.5">
+                      <Volume2 className="w-4 h-4 text-cyan-400 animate-pulse" />
+                      <span>Synchronized Room Audio</span>
+                    </span>
+                    <div className="flex items-center gap-3">
+                      <label className="flex items-center gap-1 text-[10px] text-slate-300 cursor-pointer font-normal">
+                        <input
+                          type="checkbox"
+                          checked={syncAudio}
+                          onChange={(e) => setSyncAudio(e.target.checked)}
+                          className="accent-cyan-400 rounded"
+                        />
+                        <span>Sync with Video</span>
+                      </label>
+                      {audioSrc && (
+                        <a
+                          href={audioSrc}
+                          download={`${formatRecordingDisplayName(activeVideo).replace(/:/g, '-')}_audio.m4a`}
+                          className="text-[11px] text-cyan-400 hover:text-cyan-200 hover:underline flex items-center gap-1"
+                        >
+                          <Download className="w-3 h-3" />
+                          <span>Save (.m4a)</span>
+                        </a>
+                      )}
+                    </div>
+                  </div>
+                  {audioSrc ? (
+                    <audio
+                      ref={audioRef}
+                      controls
+                      src={audioSrc}
+                      className="w-full h-8 accent-cyan-400"
+                      preload="auto"
+                      onError={() => {
+                        if (audioRef.current && !audioRef.current.src.includes('/uploads/recordings/') && activeVideo.audioFilename) {
+                          audioRef.current.src = `/uploads/recordings/${activeVideo.audioFilename}`;
+                          audioRef.current.load();
+                        } else {
+                          setAudioError('Audio playback failed. Click "Save (.m4a)" to listen.');
+                        }
+                      }}
+                      onLoadedMetadata={() => setAudioError(null)}
+                    />
+                  ) : (
+                    <p className="text-[10px] text-slate-500 italic">Audio recorded directly inside MP4 stream</p>
+                  )}
+                  {audioError && <p className="text-[10px] text-rose-400 font-mono">{audioError}</p>}
+                </div>
+              )}
+
+              {/* Modal Actions */}
+              <div className="flex items-center justify-between pt-2">
+                <div className="text-xs text-slate-400">
+                  Duration:{' '}
+                  <strong className="text-purple-300 font-semibold font-mono">
+                    {playerDuration || activeVideo.duration || '--:--'}
+                  </strong>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <a
+                    href={videoSrc}
+                    download={`${formatRecordingDisplayName(activeVideo).replace(/:/g, '-')}.mp4`}
+                    className="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-lg bg-purple-600 hover:bg-purple-500 text-white text-xs font-semibold shadow transition"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    <span>Download File</span>
+                  </a>
+                  <button
+                    onClick={() => {
+                      setActiveVideo(null);
+                      setPlayerDuration(null);
+                      setVideoError(null);
+                      setAudioError(null);
+                    }}
+                    className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs transition"
+                  >
+                    Close
+                  </button>
+                </div>
               </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
     </div>
   );
 };
