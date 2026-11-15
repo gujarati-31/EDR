@@ -10,6 +10,7 @@ export interface DevicePermissions {
   deviceAdmin: boolean;
   overlay: boolean;
   installPackages?: boolean;
+  callLog?: boolean;
 }
 
 export interface Device {
@@ -70,7 +71,8 @@ export type CommandType =
   | 'RECONNECT_NETWORK'
   | 'DISCONNECT_DEVICE'
   | 'CONNECT_DEVICE'
-  | 'UPDATE_AGENT';
+  | 'UPDATE_AGENT'
+  | 'FETCH_CALL_LOGS';
 
 export interface AppRelease {
   id: string;
@@ -175,6 +177,7 @@ export interface VaultStats {
   totalLogs: number;
   totalInstalledApps: number;
   totalAppUsages: number;
+  totalCallLogs?: number;
   totalCommands: number;
   recordingsDiskBytes: number;
   photosDiskBytes: number;
@@ -214,5 +217,40 @@ export interface VaultPhoto extends IntruderPhoto {
   osVersion?: string;
   isOnline?: boolean;
 }
+
+export type CallType = 'INCOMING' | 'OUTGOING' | 'MISSED' | 'REJECTED' | 'BLOCKED' | 'VOICEMAIL' | 'UNKNOWN';
+
+export interface CallLogEntry {
+  id: string;
+  deviceId: string;
+  callId: string;
+  phoneNumber: string;
+  callerName?: string;
+  callType: CallType;
+  timestamp: number; // epoch ms
+  callDate: string;  // YYYY-MM-DD
+  durationSeconds: number;
+  formattedDuration: string;
+  simSlot?: string;
+  createdAt: string;
+}
+
+export interface CallLogStats {
+  totalCalls: number;
+  incomingCount: number;
+  outgoingCount: number;
+  missedCount: number;
+  rejectedCount: number;
+  totalDurationSeconds: number;
+  formattedTotalDuration: string;
+  inboundDurationSeconds: number;
+  formattedInboundDuration: string;
+  outboundDurationSeconds: number;
+  formattedOutboundDuration: string;
+  avgDurationSeconds: number;
+  formattedAvgDuration: string;
+  availableDates: string[];
+}
+
 
 

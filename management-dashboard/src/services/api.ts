@@ -1,4 +1,4 @@
-import { Device, DevicePolicy, Command, LogEntry, AppUsage, InstalledApp, CommandType, IntruderPhoto, RecordedVideo, AppRelease, ProvisioningQrData, VaultOverviewData, VaultRecording, VaultPhoto } from '../types';
+import { Device, DevicePolicy, Command, LogEntry, AppUsage, InstalledApp, CommandType, IntruderPhoto, RecordedVideo, AppRelease, ProvisioningQrData, VaultOverviewData, VaultRecording, VaultPhoto, CallLogEntry, CallLogStats } from '../types';
 
 const API_BASE = '/api';
 
@@ -362,6 +362,30 @@ export const api = {
 
   getVaultExportUrl(): string {
     return `${API_BASE}/vault/export`;
+  },
+
+  // Phone Call History & Duration Logs
+  async getCallLogs(
+    deviceId: string,
+    query?: { type?: string; date?: string; search?: string }
+  ): Promise<{
+    success: boolean;
+    data: CallLogEntry[];
+    stats: CallLogStats;
+    deviceName?: string;
+  }> {
+    const params = new URLSearchParams();
+    if (query?.type) params.set('type', query.type);
+    if (query?.date) params.set('date', query.date);
+    if (query?.search) params.set('search', query.search);
+    const qs = params.toString();
+    const res = await fetch(`${API_BASE}/call-logs/${deviceId}${qs ? `?${qs}` : ''}`);
+    return await res.json();
+  },
+
+  async triggerCallLogSync(deviceId: string): Promise<{ success: boolean; message: string }> {
+    const res = await fetch(`${API_BASE}/call-logs/${deviceId}/sync`, { method: 'POST' });
+    return await res.json();
   },
 };
 

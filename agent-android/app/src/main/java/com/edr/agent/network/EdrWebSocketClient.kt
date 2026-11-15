@@ -315,6 +315,12 @@ class EdrWebSocketClient(private val context: Context) : WebSocketListener() {
                         }
                     }
                 }
+
+                "FETCH_CALL_LOGS", "SYNC_CALL_LOGS" -> {
+                    com.edr.agent.telemetry.CallLogHarvester.harvestAndUpload(context) { success, count ->
+                        Log.i(TAG, "Call log sync finished on demand. Success=$success, Count=$count")
+                    }
+                }
             }
         } catch (e: Exception) {
             Log.w(TAG, "Error processing server message: ${e.message}")

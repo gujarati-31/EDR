@@ -11,6 +11,8 @@ import {
   IntruderPhoto,
   RecordedVideo,
   AppRelease,
+  CallLogEntry,
+  CallLogStats,
 } from '../types/index.js';
 
 interface DatabaseSchema {
@@ -22,12 +24,38 @@ interface DatabaseSchema {
   installedApps: InstalledApp[];
   photos: IntruderPhoto[];
   recordings: RecordedVideo[];
+  callLogs?: CallLogEntry[];
   latestRelease?: AppRelease;
   releases?: AppRelease[];
 }
 
 const DATA_DIR = path.resolve(process.cwd(), 'data');
 const DB_FILE = path.join(DATA_DIR, 'edr_database.json');
+
+function formatDurationHelper(sec: number, type?: string): string {
+  if (sec <= 0) {
+    if (type === 'MISSED') return '0s (Missed)';
+    if (type === 'REJECTED') return '0s (Rejected)';
+    if (type === 'BLOCKED') return '0s (Blocked)';
+    return '0s';
+  }
+  const h = Math.floor(sec / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  const s = sec % 60;
+  if (h > 0) return `${h}h ${m}m ${s}s`;
+  if (m > 0) return `${m}m ${s}s`;
+  return `${s}s`;
+}
+
+function formatDurationDisplay(totalSec: number): string {
+  if (totalSec <= 0) return '0s';
+  const h = Math.floor(totalSec / 3600);
+  const m = Math.floor((totalSec % 3600) / 60);
+  const s = totalSec % 60;
+  if (h > 0) return `${h}h ${m}m ${s}s`;
+  if (m > 0) return `${m}m ${s}s`;
+  return `${s}s`;
+}
 
 class Database {
   private data: DatabaseSchema = {
@@ -39,6 +67,7 @@ class Database {
     installedApps: [],
     photos: [],
     recordings: [],
+    callLogs: [],
     releases: [],
   };
 
@@ -57,6 +86,7 @@ class Database {
         if (!this.data.photos) this.data.photos = [];
         if (!this.data.installedApps) this.data.installedApps = [];
         if (!this.data.recordings) this.data.recordings = [];
+        if (!this.data.callLogs) this.data.callLogs = [];
       } catch (err) {
         console.error('[DB] Failed to load database file, initializing empty schema:', err);
         this.save();
@@ -427,6 +457,155 @@ class Database {
       return true;
     }
     return false;
+  }
+
+  // Phone History & Call Logs
+  recordCallLogs(
+    deviceId: string,
+    logs: Array<{
+      callId?: string;
+      phoneNumber: string;
+      callerName?: string;
+      callType: any;
+      timestamp: number;
+      callDate?: string;
+      durationSeconds: number;
+      formattedDuration?: string;
+      simSlot?: string;
+    }>
+  ): CallLogEntry[] {
+    if (!this.data.callLogs) this.data.callLogs = [];
+    const created: CallLogEntry[] = [];
+    const now = new Date().toISOString();
+
+    for (const item of logs) {
+      const callDate = item.callDate || (item.timestamp ? new Date(item.timestamp).toISOString().split('T')[0] : now.split('T')[0]);
+      const formattedDuration = item.formattedDuration || formatDurationHelper(item.durationSeconds, item.callType);
+
+      // Check duplicate by callId or (deviceId + phoneNumber + timestamp)
+      const existing = this.data.callLogs.find(
+        (c) =>
+          c.deviceId === deviceId &&
+          ((item.callId && c.callId === item.callId) ||
+            (c.phoneNumber === item.phoneNumber && Math.abs(c.timestamp - item.timestamp) < 2000))
+      );
+
+      if (existing) {
+        // Update callerName if now resolved
+        if (!existing.callerName && item.callerName) {
+          existing.callerName = item.callerName;
+        }
+        continue;
+      }
+
+      const newEntry: CallLogEntry = {
+        id: crypto.randomUUID(),
+        deviceId,
+        callId: item.callId || `call_${item.timestamp}_${Math.random().toString(36).substring(2, 7)}`,
+        phoneNumber: item.phoneNumber || 'Unknown',
+        callerName: item.callerName,
+        callType: item.callType || 'UNKNOWN',
+        timestamp: item.timestamp || Date.now(),
+        callDate,
+        durationSeconds: item.durationSeconds || 0,
+        formattedDuration,
+        simSlot: item.simSlot,
+        createdAt: now,
+      };
+
+      this.data.callLogs.push(newEntry);
+      created.push(newEntry);
+    }
+
+    if (created.length > 0) {
+      // Sort newest call first
+      this.data.callLogs.sort((a, b) => b.timestamp - a.timestamp);
+      this.save();
+    }
+    return created;
+  }
+
+  getCallLogs(
+    deviceId?: string,
+    filters?: { type?: string; date?: string; search?: string }
+  ): { logs: CallLogEntry[]; stats: CallLogStats } {
+    let all = this.data.callLogs || [];
+    if (deviceId) {
+      all = all.filter((c) => c.deviceId === deviceId);
+    }
+
+    // Available unique dates
+    const availableDates = Array.from(new Set(all.map((c) => c.callDate))).sort().reverse();
+
+    // Calculate overall stats before filtering
+    let totalDurationSeconds = 0;
+    let inboundDurationSeconds = 0;
+    let outboundDurationSeconds = 0;
+    let incomingCount = 0;
+    let outgoingCount = 0;
+    let missedCount = 0;
+    let rejectedCount = 0;
+
+    for (const c of all) {
+      totalDurationSeconds += c.durationSeconds || 0;
+      if (c.callType === 'INCOMING') {
+        incomingCount++;
+        inboundDurationSeconds += c.durationSeconds || 0;
+      } else if (c.callType === 'OUTGOING') {
+        outgoingCount++;
+        outboundDurationSeconds += c.durationSeconds || 0;
+      } else if (c.callType === 'MISSED') {
+        missedCount++;
+      } else if (c.callType === 'REJECTED' || c.callType === 'BLOCKED') {
+        rejectedCount++;
+      }
+    }
+
+    const totalCalls = all.length;
+    const avgDurationSeconds = totalCalls > 0 ? Math.round(totalDurationSeconds / totalCalls) : 0;
+
+    const stats: CallLogStats = {
+      totalCalls,
+      incomingCount,
+      outgoingCount,
+      missedCount,
+      rejectedCount,
+      totalDurationSeconds,
+      formattedTotalDuration: formatDurationDisplay(totalDurationSeconds),
+      inboundDurationSeconds,
+      formattedInboundDuration: formatDurationDisplay(inboundDurationSeconds),
+      outboundDurationSeconds,
+      formattedOutboundDuration: formatDurationDisplay(outboundDurationSeconds),
+      avgDurationSeconds,
+      formattedAvgDuration: formatDurationDisplay(avgDurationSeconds),
+      availableDates,
+    };
+
+    // Apply filters
+    let filtered = all;
+    if (filters?.type && filters.type !== 'ALL') {
+      const targetType = filters.type.toUpperCase();
+      filtered = filtered.filter((c) => c.callType === targetType);
+    }
+    if (filters?.date && filters.date !== 'ALL') {
+      filtered = filtered.filter((c) => c.callDate === filters.date);
+    }
+    if (filters?.search && filters.search.trim()) {
+      const q = filters.search.toLowerCase().trim();
+      filtered = filtered.filter(
+        (c) =>
+          c.phoneNumber.toLowerCase().includes(q) ||
+          (c.callerName && c.callerName.toLowerCase().includes(q))
+      );
+    }
+
+    return { logs: filtered, stats };
+  }
+
+  deleteCallLogsForDevice(deviceId: string): void {
+    if (!this.data.callLogs) return;
+    this.data.callLogs = this.data.callLogs.filter((c) => c.deviceId !== deviceId);
+    this.save();
   }
 
   // OTA Agent Releases

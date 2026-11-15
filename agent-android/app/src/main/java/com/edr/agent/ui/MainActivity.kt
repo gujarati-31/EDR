@@ -196,6 +196,12 @@ class MainActivity : AppCompatActivity() {
             setTextColor(Color.WHITE)
             setPadding(28, 12, 28, 12)
             setOnClickListener {
+                if (item.key == "callLog") {
+                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
+                        requestPermissions(arrayOf(android.Manifest.permission.READ_CALL_LOG), 1011)
+                        return@setOnClickListener
+                    }
+                }
                 val intent = EdrPermissionManager.getLaunchIntentForPermission(this@MainActivity, item.key)
                 if (intent != null) {
                     try {
@@ -251,6 +257,11 @@ class MainActivity : AppCompatActivity() {
         row.addView(titleView)
         row.addView(statusBadge)
         return row
+    }
+
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        refreshPermissionsUI()
     }
 
     private fun ensureServiceRunning() {

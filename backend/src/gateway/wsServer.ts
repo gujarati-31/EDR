@@ -221,6 +221,17 @@ export class EDRWebSocketGateway {
         break;
       }
 
+      case 'CALL_LOGS_SYNCED': {
+        const id = deviceId || payload?.deviceId;
+        this.broadcastToDashboards('CALL_LOGS_SYNCED', {
+          deviceId: id,
+          count: payload?.count || 0,
+          latestTimestamp: payload?.latestTimestamp || Date.now(),
+        });
+        console.log(`[WS] Device ${id} synchronized ${payload?.count || 0} phone history call logs.`);
+        break;
+      }
+
       case 'PONG_AGENT': {
         const reqId = payload?.requestId;
         const pending = this.pendingPingRequests.get(reqId);

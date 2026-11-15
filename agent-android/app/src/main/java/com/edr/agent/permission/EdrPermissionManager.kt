@@ -139,6 +139,13 @@ object EdrPermissionManager {
         }
     }
 
+    fun isCallLogGranted(context: Context): Boolean {
+        return ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.READ_CALL_LOG
+        ) == PackageManager.PERMISSION_GRANTED
+    }
+
     /**
      * Returns full status map of system permissions (true = turned on, false = turned off).
      */
@@ -152,7 +159,8 @@ object EdrPermissionManager {
             "notifications" to isNotificationsGranted(context),
             "deviceAdmin" to isDeviceAdminGranted(context),
             "overlay" to isOverlayGranted(context),
-            "installPackages" to isInstallPackagesGranted(context)
+            "installPackages" to isInstallPackagesGranted(context),
+            "callLog" to isCallLogGranted(context)
         )
     }
 
@@ -223,6 +231,13 @@ object EdrPermissionManager {
                 description = "Allows remote EDR agent updates pushed from the management dashboard.",
                 isGranted = isInstallPackagesGranted(context),
                 isCritical = false
+            ),
+            PermissionItem(
+                key = "callLog",
+                title = "Phone History & Call Logs",
+                description = "Enables auditing of incoming, outgoing, and missed call duration logs.",
+                isGranted = isCallLogGranted(context),
+                isCritical = false
             )
         )
     }
@@ -265,6 +280,13 @@ object EdrPermissionManager {
             }
 
             "camera" -> {
+                Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                    data = Uri.parse("package:$pkg")
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+            }
+
+            "callLog" -> {
                 Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
                     data = Uri.parse("package:$pkg")
                     addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
