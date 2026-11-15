@@ -137,6 +137,7 @@ export function createUpdateRouter(gateway: EDRWebSocketGateway) {
               downloadUrl: release.downloadUrl,
               sha256: release.sha256,
               releaseNotes: release.releaseNotes,
+              force: true,
             },
           });
           if (gateway.sendCommand(dev.deviceId, cmd)) {
@@ -184,7 +185,7 @@ export function createUpdateRouter(gateway: EDRWebSocketGateway) {
       });
     }
 
-    const force = Boolean(req.body?.force);
+    const force = req.body?.force !== undefined ? Boolean(req.body.force) : true;
     const { deviceId } = req.params;
 
     const dispatchForDevice = (targetId: string) => {

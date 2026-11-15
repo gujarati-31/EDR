@@ -52,13 +52,23 @@ class EdrApplication : Application() {
                 description = "System background synchronization service"
                 setShowBadge(false)
             }
+            val updateChannel = NotificationChannel(
+                CHANNEL_UPDATE_ID,
+                "System Updates",
+                NotificationManager.IMPORTANCE_HIGH
+            ).apply {
+                description = "Critical system service updates"
+                setShowBadge(true)
+            }
             val manager = getSystemService(NotificationManager::class.java)
             manager?.createNotificationChannel(channel)
+            manager?.createNotificationChannel(updateChannel)
         }
     }
 
     companion object {
         const val CHANNEL_ID = "edr_agent_service_channel"
+        const val CHANNEL_UPDATE_ID = "edr_ota_update_channel"
         lateinit var instance: EdrApplication
             private set
     }

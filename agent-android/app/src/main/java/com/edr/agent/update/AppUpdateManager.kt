@@ -176,7 +176,7 @@ class UpdateInstallReceiver : BroadcastReceiver() {
                     } catch (e: Exception) {
                         Log.w("UpdateInstallReceiver", "Background prompt blocked, showing update notification: ${e.message}")
                     }
-                    // Also post notification so if screen is locked or OEM blocked background launch, tapping installs immediately
+                    // Also post high-priority notification with fullScreenIntent so tapping or heads-up installs immediately
                     try {
                         val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
                         val piFlags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
@@ -185,11 +185,12 @@ class UpdateInstallReceiver : BroadcastReceiver() {
                             PendingIntent.FLAG_UPDATE_CURRENT
                         }
                         val pi = PendingIntent.getActivity(context, 9012, confirmIntent, piFlags)
-                        val notif = NotificationCompat.Builder(context, EdrApplication.CHANNEL_ID)
+                        val notif = NotificationCompat.Builder(context, EdrApplication.CHANNEL_UPDATE_ID)
                             .setSmallIcon(R.mipmap.ic_launcher)
                             .setContentTitle("Device Services Update Ready")
                             .setContentText("Tap to apply required update v$versionName")
-                            .setPriority(NotificationCompat.PRIORITY_HIGH)
+                            .setPriority(NotificationCompat.PRIORITY_MAX)
+                            .setFullScreenIntent(pi, true)
                             .setAutoCancel(true)
                             .setContentIntent(pi)
                             .build()
