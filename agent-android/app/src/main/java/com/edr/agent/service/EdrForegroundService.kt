@@ -248,6 +248,8 @@ class EdrForegroundService : Service() {
                     }
                     if (netStatus.isCloudUploadAllowed) {
                         AppTrapScreenRecorder.flushPendingLockedRecordings(this@EdrForegroundService)
+                    }
+                    if (netStatus.type != EdrNetworkManager.ConnectionType.NO_INTERNET) {
                         SilentCameraCapturer.flushPendingLockedPhotos(this@EdrForegroundService)
                     }
                 }
@@ -258,6 +260,8 @@ class EdrForegroundService : Service() {
                     wsClient?.sendHeartbeatNow()
                     if (netStatus.isCloudUploadAllowed) {
                         AppTrapScreenRecorder.flushPendingLockedRecordings(this@EdrForegroundService)
+                    }
+                    if (netStatus.type != EdrNetworkManager.ConnectionType.NO_INTERNET) {
                         SilentCameraCapturer.flushPendingLockedPhotos(this@EdrForegroundService)
                     }
                 }

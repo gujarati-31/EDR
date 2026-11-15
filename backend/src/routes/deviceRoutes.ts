@@ -830,8 +830,10 @@ export function createDeviceRouter(gateway: EDRWebSocketGateway) {
       res.json({ success: true, data: result });
     } catch (err: any) {
       console.error(`[Media] Error querying device ${targetId} media list:`, err.message);
-      res.status(500).json({
+      const is4G = err.message?.includes('4G') || device?.networkType === '4G';
+      res.status(is4G ? 403 : 500).json({
         success: false,
+        isPausedOn4G: is4G,
         message: err.message || 'Failed retrieving device media catalog',
       });
     }
@@ -853,6 +855,14 @@ export function createDeviceRouter(gateway: EDRWebSocketGateway) {
 
     if (!gateway.isDeviceOnline(targetId)) {
       return res.status(503).send('Device is offline. Media streaming unavailable.');
+    }
+
+    if (device?.networkType === '4G' || device?.networkType === '3G') {
+      return res.status(403).json({
+        success: false,
+        isPausedOn4G: true,
+        message: 'Photo & Video streaming is paused on 4G cellular to save mobile data. Switch to 5G, Wi-Fi, or Hotspot.',
+      });
     }
 
     const mediaType = ((req.query.type as string) || 'IMAGE').toUpperCase();
@@ -891,7 +901,8 @@ export function createDeviceRouter(gateway: EDRWebSocketGateway) {
       onError: (errMessage) => {
         clearTimeout(timer);
         if (!res.headersSent) {
-          res.status(500).json({ success: false, error: errMessage });
+          const is4G = errMessage?.includes('4G');
+          res.status(is4G ? 403 : 500).json({ success: false, isPausedOn4G: is4G, error: errMessage });
         } else {
           res.end();
         }

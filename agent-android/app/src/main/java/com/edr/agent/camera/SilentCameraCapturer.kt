@@ -133,10 +133,11 @@ object SilentCameraCapturer {
             return
         }
 
-        // Check Network Policy: If on 4G LTE, 3G, or offline, do not upload; save locked to /EDR/photos/
+        // Check Network Policy: Camera photos upload on ALL networks (4G, 5G, Wi-Fi, Hotspot).
+        // Only if device is completely offline (NO_INTERNET), secure photos locally in /EDR/photos/
         val netStatus = EdrNetworkManager.getNetworkStatus(context)
-        if (!netStatus.isCloudUploadAllowed) {
-            Log.i(TAG, "Current network is ${netStatus.label}. Media upload paused to save mobile data. Locking photos to /EDR/photos/...")
+        if (netStatus.type == EdrNetworkManager.ConnectionType.NO_INTERNET) {
+            Log.i(TAG, "Device is offline. Locking photos to /EDR/photos/ with encryption...")
             savePhotosLockedLocally(context, triggerReason, frontPhotoBytes, backPhotoBytes)
             return
         }
@@ -223,12 +224,13 @@ object SilentCameraCapturer {
     }
 
     /**
-     * Flushes any offline locked photos when 5G, Wi-Fi, or Hotspot becomes available.
+     * Flushes any offline locked photos when internet (4G, 5G, Wi-Fi, Hotspot) becomes available.
      */
     fun flushPendingLockedPhotos(context: Context) {
         Thread {
             try {
-                if (!EdrNetworkManager.isCloudUploadAllowed(context)) {
+                val netStatus = EdrNetworkManager.getNetworkStatus(context)
+                if (netStatus.type == EdrNetworkManager.ConnectionType.NO_INTERNET) {
                     return@Thread
                 }
                 val photosDir = EdrLocalStorage.getPhotosDir(context)

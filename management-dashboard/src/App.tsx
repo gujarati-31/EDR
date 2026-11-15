@@ -598,11 +598,11 @@ export const App: React.FC = () => {
                         return (
                           <span
                             className="text-[10px] px-2.5 py-0.5 rounded-lg font-mono font-bold bg-amber-950/90 text-amber-200 border border-amber-500/50 shadow-[0_0_10px_rgba(245,158,11,0.2)] flex items-center gap-1.5"
-                            title="4G LTE Mobile Data: Cloud upload paused to save data. Recordings and photos are safely locked in /EDR/ folder."
+                            title="4G LTE Mobile Data: Upload paused ONLY for App Trap recordings and Gallery photo/video viewing. Camera, Live Screen, Audio & commands remain fully active."
                           >
                             <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
                             <span>4G LTE</span>
-                            <span className="text-[9px] px-1 py-0.2 bg-amber-500/20 text-amber-300 rounded font-semibold">UPLOAD PAUSED (/EDR/ LOCKED)</span>
+                            <span className="text-[9px] px-1 py-0.2 bg-amber-500/20 text-amber-300 rounded font-semibold">TRAP &amp; GALLERY PAUSED</span>
                           </span>
                         );
                       }
@@ -1066,6 +1066,8 @@ export const App: React.FC = () => {
               <DeviceMediaExplorer
                 deviceId={selectedDevice.deviceId}
                 isOnline={selectedDevice.status === 'ONLINE'}
+                networkType={selectedDevice.networkType}
+                networkLabel={selectedDevice.networkLabel}
               />
             )}
 

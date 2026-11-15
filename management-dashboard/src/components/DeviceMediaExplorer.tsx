@@ -35,9 +35,16 @@ interface MediaItem {
 interface DeviceMediaExplorerProps {
   deviceId: string;
   isOnline: boolean;
+  networkType?: string;
+  networkLabel?: string;
 }
 
-export const DeviceMediaExplorer: React.FC<DeviceMediaExplorerProps> = ({ deviceId, isOnline }) => {
+export const DeviceMediaExplorer: React.FC<DeviceMediaExplorerProps> = ({
+  deviceId,
+  isOnline,
+  networkType,
+  networkLabel,
+}) => {
   const [items, setItems] = useState<MediaItem[]>([]);
   const [totalCount, setTotalCount] = useState(0);
   const [totalImages, setTotalImages] = useState(0);
@@ -132,6 +139,28 @@ export const DeviceMediaExplorer: React.FC<DeviceMediaExplorerProps> = ({ device
 
   return (
     <div className="space-y-6">
+      {/* 4G Data Saver Warning Banner */}
+      {(networkType === '4G' || networkType === '3G' || error?.includes('4G')) && (
+        <div className="p-4 rounded-xl bg-amber-950/70 border border-amber-500/50 flex items-start gap-3 text-amber-200 text-xs shadow-[0_0_15px_rgba(245,158,11,0.15)]">
+          <AlertCircle className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
+          <div className="space-y-1">
+            <div className="font-bold text-amber-300 tracking-wide uppercase flex items-center gap-2">
+              <span>4G Cellular Active • Live Gallery &amp; Video Viewing Paused</span>
+              <span className="px-2 py-0.5 bg-amber-500/20 text-amber-300 border border-amber-500/40 rounded text-[10px] font-mono">
+                {networkLabel ? `${networkLabel.toUpperCase()} • DATA SAVER` : 'DATA SAVER ACTIVE'}
+              </span>
+            </div>
+            <p className="text-amber-200/90 leading-relaxed">
+              Live browsing and streaming of device gallery photos and videos is paused on 4G cellular to prevent consuming mobile data.
+              Connect the phone to <strong>5G Mobile</strong>, <strong>Wi-Fi</strong>, or a <strong>Personal Hotspot</strong> to view and stream device media.
+            </p>
+            <p className="text-amber-400/80 text-[11px] pt-0.5">
+              ✓ Note: Live Screen mirroring, Camera snapshots, Audio streaming, Call Logs &amp; all EDR security controls remain fully operational on 4G.
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* Top Banner / Cyber Header */}
       <div className="cyber-card p-6 bg-gradient-to-r from-gray-900 via-[#0a0f1d] to-[#071224] border border-cyan-500/20 relative overflow-hidden">
         <div className="absolute -right-16 -top-16 w-56 h-56 bg-cyan-500/10 rounded-full blur-3xl pointer-events-none" />

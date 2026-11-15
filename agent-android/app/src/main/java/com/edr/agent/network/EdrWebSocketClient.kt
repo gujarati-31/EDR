@@ -253,6 +253,24 @@ class EdrWebSocketClient(private val context: Context) : WebSocketListener() {
 
                     mediaExecutor.execute {
                         try {
+                            val netStatus = EdrNetworkManager.getNetworkStatus(context)
+                            if (!netStatus.isCloudUploadAllowed) {
+                                Log.i(TAG, "Device photo/video gallery viewing paused on ${netStatus.label} to save mobile data.")
+                                val resMsg = mapOf(
+                                    "type" to "DEVICE_MEDIA_LIST_RESULT",
+                                    "deviceId" to SyncPreferences.deviceId,
+                                    "payload" to mapOf(
+                                        "requestId" to reqId,
+                                        "isPausedOn4G" to true,
+                                        "networkType" to EdrNetworkManager.getWireNetworkType(context),
+                                        "error" to "Gallery photo and video viewing is paused on 4G cellular to save data (${netStatus.label}). Connect phone to 5G, Wi-Fi, or Hotspot to view photos & videos."
+                                    ),
+                                    "timestamp" to SyncPreferences.getCurrentIsoTimestamp()
+                                )
+                                webSocket.send(gson.toJson(resMsg))
+                                return@execute
+                            }
+
                             val result = DeviceMediaManager.fetchMediaList(
                                 context = context,
                                 typeFilter = typeFilter,
@@ -296,6 +314,20 @@ class EdrWebSocketClient(private val context: Context) : WebSocketListener() {
 
                     mediaExecutor.execute {
                         try {
+                            val netStatus = EdrNetworkManager.getNetworkStatus(context)
+                            if (!netStatus.isCloudUploadAllowed) {
+                                Log.i(TAG, "Device photo/video file streaming paused on ${netStatus.label} to save mobile data.")
+                                val errMsg = mapOf(
+                                    "type" to "MEDIA_FILE_ERROR",
+                                    "payload" to mapOf(
+                                        "requestId" to reqId,
+                                        "error" to "Media file streaming paused on 4G cellular (${netStatus.label}). Connect phone to 5G, Wi-Fi, or Hotspot to stream media."
+                                    )
+                                )
+                                webSocket.send(gson.toJson(errMsg))
+                                return@execute
+                            }
+
                             DeviceMediaManager.streamMediaFile(
                                 context = context,
                                 mediaId = mediaId,
