@@ -30,7 +30,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLogin }) => {
     setError(null);
 
     const inputUser = username.trim();
-    const inputPass = password;
+    const inputPass = password.trim();
 
     if (!inputUser || !inputPass) {
       setError('Please enter both username and password.');
@@ -39,12 +39,12 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLogin }) => {
 
     setIsLoading(true);
 
-    // Validate against configured credentials
+    // Validate against configured credentials (case-insensitive for username, trimmed for password)
     setTimeout(() => {
-      if (
-        inputUser === ADMIN_CREDENTIALS.username &&
-        inputPass === ADMIN_CREDENTIALS.password
-      ) {
+      const userMatch = inputUser.toLowerCase() === ADMIN_CREDENTIALS.username.trim().toLowerCase();
+      const passMatch = inputPass === ADMIN_CREDENTIALS.password.trim();
+
+      if (userMatch && passMatch) {
         if (rememberMe) {
           localStorage.setItem('edr_auth', 'true');
         } else {
@@ -55,7 +55,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLogin }) => {
         setError('Invalid username or password. Access denied.');
         setIsLoading(false);
       }
-    }, 300);
+    }, 200);
   };
 
   return (
