@@ -1,5 +1,5 @@
 import React from 'react';
-import { Shield, ShieldAlert, WifiOff, UploadCloud, PanelLeft, Users, Smartphone, Database } from 'lucide-react';
+import { Shield, ShieldAlert, WifiOff, UploadCloud, PanelLeft, Users, Smartphone, Database, LogOut } from 'lucide-react';
 
 interface HeaderProps {
   wsConnected: boolean;
@@ -12,6 +12,7 @@ interface HeaderProps {
   onOpenOtaModal?: () => void;
   mainView?: 'devices' | 'vault';
   onToggleMainView?: (view: 'devices' | 'vault') => void;
+  onLogout?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -25,6 +26,7 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenOtaModal,
   mainView = 'devices',
   onToggleMainView,
+  onLogout,
 }) => {
   return (
     <header className="bg-slate-950/95 backdrop-blur-md border-b border-cyan-900/30 px-3 sm:px-6 py-2.5 sm:py-3.5 sticky top-0 z-40 shadow-[0_4px_30px_rgba(0,0,0,0.5)]">
@@ -164,6 +166,17 @@ export const Header: React.FC<HeaderProps> = ({
             >
               <UploadCloud className="w-3.5 h-3.5 text-cyan-400" />
               <span>OTA / QR</span>
+            </button>
+          )}
+
+          {onLogout && (
+            <button
+              onClick={onLogout}
+              className="flex items-center space-x-1.5 px-2.5 py-1 sm:px-3 sm:py-1.5 rounded-lg bg-rose-950/60 hover:bg-rose-900 border border-rose-500/40 text-rose-200 text-[11px] sm:text-xs font-mono font-bold transition-all active:scale-95"
+              title="Sign out of Admin Dashboard"
+            >
+              <LogOut className="w-3.5 h-3.5 text-rose-400" />
+              <span className="hidden sm:inline">LOGOUT</span>
             </button>
           )}
         </div>

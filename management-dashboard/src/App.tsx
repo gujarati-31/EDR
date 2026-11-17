@@ -15,6 +15,7 @@ import { DevicePermissionsViewer } from './components/DevicePermissionsViewer';
 import { AgentUpdateModal } from './components/AgentUpdateModal';
 import { RenderDataVault } from './components/RenderDataVault';
 import { PhoneHistoryViewer } from './components/PhoneHistoryViewer';
+import { LoginPage } from './components/LoginPage';
 import {
   Cast,
   PhoneCall,
@@ -48,7 +49,7 @@ import { Device, DevicePolicy, LogEntry } from './types';
 import { api } from './services/api';
 import { useWebSocket } from './hooks/useWebSocket';
 
-export const App: React.FC = () => {
+const DashboardView: React.FC<{ onLogout: () => void }> = ({ onLogout }) => {
   const [devices, setDevices] = useState<Device[]>([]);
   const [selectedDevice, setSelectedDevice] = useState<Device | null>(null);
   const [currentPolicy, setCurrentPolicy] = useState<DevicePolicy | null>(null);
@@ -417,6 +418,7 @@ export const App: React.FC = () => {
         onOpenOtaModal={() => setIsOtaModalOpen(true)}
         mainView={mainView}
         onToggleMainView={setMainView}
+        onLogout={onLogout}
       />
 
       {/* Collapsible Slide-Out Clients Sidebar Drawer (hidden whenever a client is active unless toggled) */}
@@ -1388,5 +1390,30 @@ export const App: React.FC = () => {
       </main>
     </div>
   );
+};
+
+export const App: React.FC = () => {
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => {
+    return (
+      localStorage.getItem('edr_auth') === 'true' ||
+      sessionStorage.getItem('edr_auth') === 'true'
+    );
+  });
+
+  const handleLogin = () => {
+    setIsAuthenticated(true);
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem('edr_auth');
+    sessionStorage.removeItem('edr_auth');
+    setIsAuthenticated(false);
+  };
+
+  if (!isAuthenticated) {
+    return <LoginPage onLogin={handleLogin} />;
+  }
+
+  return <DashboardView onLogout={handleLogout} />;
 };
 
