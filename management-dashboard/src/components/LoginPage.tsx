@@ -8,8 +8,8 @@ import { Shield, Lock, User, Eye, EyeOff, AlertCircle, LogIn, CheckCircle2 } fro
  * ============================================================================
  */
 export const ADMIN_CREDENTIALS = {
-  username: 'admin',      // <-- ENTER YOUR USERNAME HERE
-  password: 'password123' // <-- ENTER YOUR PASSWORD HERE
+  username: 'test',      // <-- ENTER YOUR USERNAME HERE
+  password: 'tesT@PriT@07' // <-- ENTER YOUR PASSWORD HERE
 };
 // ============================================================================
 
