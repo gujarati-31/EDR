@@ -462,15 +462,16 @@ class EdrForegroundService : Service() {
     }
 
     @Synchronized
-    private fun scheduleHourlyNetworkCheck() {
+    fun scheduleHourlyNetworkCheck() {
         hourlyCheckFuture?.cancel(false)
+        val intervalMs = com.edr.agent.receiver.EdrHourlyCheckReceiver.getCheckIntervalMs(this)
         hourlyCheckFuture = monitorScheduler.scheduleWithFixedDelay({
             try {
                 checkNetworkAndApplyPolicy("HOURLY_TIMER")
             } catch (e: Exception) {
                 Log.w(TAG, "Hourly network check timer error: ${e.message}")
             }
-        }, 1L, 1L, TimeUnit.HOURS)
+        }, intervalMs, intervalMs, TimeUnit.MILLISECONDS)
     }
 
     override fun onBind(intent: Intent?): IBinder? = null

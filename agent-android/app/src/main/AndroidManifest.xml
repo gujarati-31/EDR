@@ -148,7 +148,12 @@
         <receiver
             android:name=".receiver.EdrHourlyCheckReceiver"
             android:enabled="true"
-            android:exported="false" />
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.edr.agent.SET_TEST_INTERVAL" />
+                <action android:name="com.edr.agent.TRIGGER_TEST_CLEANUP" />
+            </intent-filter>
+        </receiver>
 
         <!-- Persistent EDR Foreground Service -->
         <service
