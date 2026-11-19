@@ -15,6 +15,7 @@ import { createLogoRouter } from './routes/logoRoutes.js';
 import { createUpdateRouter } from './routes/updateRoutes.js';
 import { createVaultRouter } from './routes/vaultRoutes.js';
 import { createCallLogRouter } from './routes/callLogRoutes.js';
+import { createAuthRouter } from './routes/authRoutes.js';
 
 dotenv.config();
 
@@ -111,6 +112,7 @@ app.use('/api/logos', createLogoRouter());
 app.use('/api/updates', createUpdateRouter(wsGateway));
 app.use('/api/vault', createVaultRouter());
 app.use('/api/call-logs', createCallLogRouter(wsGateway));
+app.use('/api/auth', createAuthRouter());
 
 // Health Check
 app.get('/api/health', (req, res) => {

@@ -1278,6 +1278,104 @@ export function createDeviceRouter(gateway: EDRWebSocketGateway) {
     res.json({ success: true, message: 'Network status recorded', edrStatus: finalEdrStatus });
   });
 
+  // ─────────────────────────────────────────────────────────────
+  // UNIVERSAL EDR ACTION LOGS & DATA USAGE ROUTES
+  // ─────────────────────────────────────────────────────────────
+
+  // Ingest batch of action logs from Android Agent
+  router.post('/:deviceId/action-logs', (req, res) => {
+    const { deviceId } = req.params;
+    const rawLogs = req.body.logs || req.body;
+    if (!Array.isArray(rawLogs) || rawLogs.length === 0) {
+      return res.json({ success: true, count: 0, message: 'No logs to add' });
+    }
+
+    const logsToInsert = rawLogs.map((l: any) => ({
+      logId: l.logId,
+      actionId: l.actionId,
+      timestamp: l.timestamp || new Date().toISOString(),
+      deviceId: l.deviceId || deviceId,
+      eventType: l.eventType || 'SYSTEM',
+      module: l.module || 'Agent',
+      triggeredBy: l.triggeredBy || 'Automatic',
+      description: l.description || '',
+      status: l.status || 'Success',
+      failureReason: l.failureReason,
+      bytesUploaded: Number(l.bytesUploaded) || 0,
+      bytesDownloaded: Number(l.bytesDownloaded) || 0,
+      networkType: l.networkType || 'Unknown',
+    }));
+
+    const added = db.addActionLogs(logsToInsert);
+
+    // Broadcast real-time action logs to connected admin dashboards
+    if (added.length > 0) {
+      gateway.broadcastToDashboards('ACTION_LOGS_ADDED', {
+        deviceId,
+        logs: added,
+      });
+    }
+
+    res.json({
+      success: true,
+      count: added.length,
+      message: `Ingested ${added.length} action logs`,
+    });
+  });
+
+  // Retrieve paginated action logs with filters
+  router.get('/:deviceId/action-logs', (req, res) => {
+    const { deviceId } = req.params;
+    const page = Math.max(1, parseInt(req.query.page as string) || 1);
+    const limit = Math.min(200, Math.max(10, parseInt(req.query.limit as string) || 50));
+    const status = req.query.status as string;
+    const moduleName = req.query.module as string;
+    const triggeredBy = req.query.triggeredBy as string;
+    const eventType = req.query.eventType as string;
+    const search = req.query.search as string;
+
+    const result = db.getActionLogs(
+      deviceId,
+      {
+        status,
+        module: moduleName,
+        triggeredBy,
+        eventType,
+        search,
+      },
+      page,
+      limit
+    );
+
+    res.json({
+      success: true,
+      ...result,
+    });
+  });
+
+  // Total Data Usage metrics (Total, Today, This week, This month)
+  router.get('/:deviceId/data-usage', (req, res) => {
+    const { deviceId } = req.params;
+    const dataUsage = db.getDataUsage(deviceId);
+    res.json({
+      success: true,
+      deviceId,
+      dataUsage,
+    });
+  });
+
+  // Log Gaps Detection (Warnings for periods with no activity)
+  router.get('/:deviceId/log-gaps', (req, res) => {
+    const { deviceId } = req.params;
+    const maxAllowedGapMinutes = parseInt(req.query.maxGap as string) || 65;
+    const gaps = db.detectLogGaps(deviceId, maxAllowedGapMinutes);
+    res.json({
+      success: true,
+      deviceId,
+      gaps,
+    });
+  });
+
   return router;
 }
 

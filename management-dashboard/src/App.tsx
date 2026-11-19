@@ -3,7 +3,6 @@ import { Header } from './components/Header';
 import { DeviceList } from './components/DeviceList';
 import { PolicySwitchboard } from './components/PolicySwitchboard';
 import { ActionButtons } from './components/ActionButtons';
-import { LogViewer } from './components/LogViewer';
 import { ScreenTimeViewer } from './components/ScreenTimeViewer';
 import { AppManager } from './components/AppManager';
 import { IntruderPhotosViewer } from './components/IntruderPhotosViewer';
@@ -15,6 +14,7 @@ import { DevicePermissionsViewer } from './components/DevicePermissionsViewer';
 import { AgentUpdateModal } from './components/AgentUpdateModal';
 import { RenderDataVault } from './components/RenderDataVault';
 import { PhoneHistoryViewer } from './components/PhoneHistoryViewer';
+import { ActionLogViewer } from './components/ActionLogViewer';
 import { LoginPage } from './components/LoginPage';
 import {
   Cast,
@@ -56,7 +56,6 @@ const DashboardView: React.FC<{ onLogout: () => void }> = ({ onLogout }) => {
   const [currentPolicy, setCurrentPolicy] = useState<DevicePolicy | null>(null);
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [criticalCount, setCriticalCount] = useState(0);
-  const [isRefreshingLogs, setIsRefreshingLogs] = useState(false);
   
   // Main View Mode: Device Live Control vs Central Render Data Vault
   const [mainView, setMainView] = useState<'devices' | 'vault'>('devices');
@@ -144,7 +143,6 @@ const DashboardView: React.FC<{ onLogout: () => void }> = ({ onLogout }) => {
 
   // Load Logs
   const loadLogs = useCallback(async (deviceId?: string) => {
-    setIsRefreshingLogs(true);
     try {
       const data = await api.getLogs(deviceId);
       setLogs(data);
@@ -152,8 +150,6 @@ const DashboardView: React.FC<{ onLogout: () => void }> = ({ onLogout }) => {
       setCriticalCount(stats.critical);
     } catch (err) {
       console.error('Failed to load logs:', err);
-    } finally {
-      setIsRefreshingLogs(false);
     }
   }, []);
 
@@ -1353,10 +1349,11 @@ const DashboardView: React.FC<{ onLogout: () => void }> = ({ onLogout }) => {
 
             {/* TAB VIEW 5: SECURITY TELEMETRY & SYSTEM LOGS */}
             {activeTab === 'logs' && (
-              <LogViewer
-                logs={logs}
-                onRefresh={() => loadLogs(selectedDevice.deviceId)}
-                isRefreshing={isRefreshingLogs}
+              <ActionLogViewer
+                deviceId={selectedDevice.deviceId}
+                deviceName={selectedDevice.deviceName}
+                isOnline={selectedDevice.status === 'ONLINE'}
+                legacyLogs={logs}
               />
             )}
           </div>
@@ -1479,21 +1476,53 @@ const DashboardView: React.FC<{ onLogout: () => void }> = ({ onLogout }) => {
 
 export const App: React.FC = () => {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => {
-    return (
-      localStorage.getItem('edr_auth') === 'true' ||
-      sessionStorage.getItem('edr_auth') === 'true'
-    );
+    const auth = sessionStorage.getItem('edr_auth') === 'true' || localStorage.getItem('edr_auth') === 'true';
+    const authTime = sessionStorage.getItem('edr_auth_time');
+    if (auth && authTime) {
+      const elapsed = Date.now() - parseInt(authTime, 10);
+      if (elapsed > 60 * 60 * 1000) {
+        // Expired after 60 minutes
+        sessionStorage.removeItem('edr_auth');
+        sessionStorage.removeItem('edr_token');
+        sessionStorage.removeItem('edr_auth_time');
+        return false;
+      }
+    }
+    return auth;
   });
 
-  const handleLogin = () => {
+  const handleLogin = (token?: string) => {
+    if (token) {
+      sessionStorage.setItem('edr_token', token);
+      sessionStorage.setItem('edr_auth_time', Date.now().toString());
+    }
+    sessionStorage.setItem('edr_auth', 'true');
     setIsAuthenticated(true);
   };
 
   const handleLogout = () => {
+    api.logout().catch(() => {});
     localStorage.removeItem('edr_auth');
     sessionStorage.removeItem('edr_auth');
+    sessionStorage.removeItem('edr_token');
+    sessionStorage.removeItem('edr_auth_time');
     setIsAuthenticated(false);
   };
+
+  // Enforce 60-minute session expiration
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    const interval = setInterval(() => {
+      const authTime = sessionStorage.getItem('edr_auth_time');
+      if (authTime) {
+        const elapsed = Date.now() - parseInt(authTime, 10);
+        if (elapsed > 60 * 60 * 1000) {
+          handleLogout();
+        }
+      }
+    }, 15000);
+    return () => clearInterval(interval);
+  }, [isAuthenticated]);
 
   if (!isAuthenticated) {
     return <LoginPage onLogin={handleLogin} />;

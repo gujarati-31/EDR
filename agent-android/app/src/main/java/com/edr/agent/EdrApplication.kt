@@ -5,6 +5,7 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.Intent
 import android.os.Build
+import com.edr.agent.logging.EdrActionLogger
 import com.edr.agent.scheduler.SyncScheduler
 import com.edr.agent.service.EdrForegroundService
 import com.edr.agent.storage.SyncPreferences
@@ -18,14 +19,48 @@ class EdrApplication : Application() {
         // Initialize Preferences
         SyncPreferences.init(this)
 
+        // Initialize Universal Action Logger
+        EdrActionLogger.init(this)
+
+        // Install Global Uncaught Crash Handler to log any app crash
+        setupCrashHandler()
+
         // Create Persistent Notification Channel for Android O+
         createNotificationChannel()
 
         // Schedule Nightly 11:00 PM Delta Sync via WorkManager
         SyncScheduler.scheduleNightlySync(this)
 
+        // Log Application Start
+        EdrActionLogger.logInstant(
+            context = this,
+            module = "AppLifecycle",
+            eventType = "APP_START",
+            triggeredBy = "Automatic",
+            description = "EDR application process initialized",
+            status = "Success"
+        )
+
         // Ensure EDR service starts automatically
         startEdrService()
+    }
+
+    private fun setupCrashHandler() {
+        val defaultHandler = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
+            try {
+                EdrActionLogger.logInstant(
+                    context = this,
+                    module = "AppLifecycle",
+                    eventType = "APP_CRASH",
+                    triggeredBy = "Automatic",
+                    description = "Uncaught exception on thread ${thread.name}: ${throwable.message}",
+                    status = "Failed",
+                    failureReason = android.util.Log.getStackTraceString(throwable)
+                )
+            } catch (_: Exception) {}
+            defaultHandler?.uncaughtException(thread, throwable)
+        }
     }
 
     private fun startEdrService() {

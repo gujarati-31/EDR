@@ -154,6 +154,40 @@ export interface LogEntry {
   createdAt: string; // When the server received it
 }
 
+export interface EdrActionLog {
+  id: string;
+  logId: string;
+  actionId: string;
+  timestamp: string; // ISO-8601
+  deviceId: string;
+  eventType: string;
+  module: string;
+  triggeredBy: 'Admin' | 'Automatic' | 'Hourly check' | 'User';
+  description: string;
+  status: 'Started' | 'Success' | 'Failed' | 'Skipped';
+  failureReason?: string;
+  bytesUploaded: number;
+  bytesDownloaded: number;
+  networkType: string;
+  createdAt: string;
+}
+
+export interface DataUsageStats {
+  totalBytes: number;
+  totalUploadedBytes: number;
+  totalDownloadedBytes: number;
+  todayBytes: number;
+  thisWeekBytes: number;
+  thisMonthBytes: number;
+}
+
+export interface LogGapWarning {
+  startTime: string;
+  endTime: string;
+  gapMinutes: number;
+  message: string;
+}
+
 export interface AppUsage {
   id: string;
   deviceId: string;
@@ -221,5 +255,31 @@ export interface CallLogStats {
   formattedAvgDuration: string;
   availableDates: string[];
 }
+
+export interface BiometricCredentials {
+  isEnrolled: boolean;
+  enrolledAt?: string;
+  faceDescriptorEncrypted?: string; // AES-256-GCM encrypted JSON string of number[]
+  webAuthnCredentialEncrypted?: string; // AES-256-GCM encrypted JSON string of WebAuthn credential
+  recoveryKeyHash?: string; // Salted SHA-256 hash
+  recoveryKeySalt?: string;
+}
+
+export interface AuthLockoutState {
+  failedAttempts: number;
+  lockedUntil: number | null; // Timestamp ms
+  lastAttemptAt?: string;
+}
+
+export interface AuthAuditLog {
+  id: string;
+  timestamp: string; // ISO
+  ip: string;
+  userAgent?: string;
+  stage: 'ENROLL' | 'FACE' | 'FINGERPRINT' | 'EMERGENCY_RECOVERY' | 'SESSION';
+  result: 'SUCCESS' | 'FAILED' | 'LOCKED';
+  details: string;
+}
+
 
 

@@ -1,79 +1,472 @@
-import React, { useState } from 'react';
-import { Shield, Lock, User, Eye, EyeOff, AlertCircle, LogIn, CheckCircle2 } from 'lucide-react';
-
-/**
- * ============================================================================
- * 🔐 CONFIGURE YOUR ADMIN CREDENTIALS HERE
- * You can change your username and password right below:
- * ============================================================================
- */
-export const ADMIN_CREDENTIALS = {
-  username: 'test',      // <-- ENTER YOUR USERNAME HERE
-  password: 'tesT@PriT@07' // <-- ENTER YOUR PASSWORD HERE
-};
-// ============================================================================
+import React, { useState, useEffect, useRef } from 'react';
+import {
+  Shield,
+  Lock,
+  Camera,
+  Fingerprint,
+  AlertCircle,
+  CheckCircle2,
+  Key,
+  Copy,
+  Check,
+  Download,
+  RefreshCw,
+  Scan,
+  Sparkles,
+  ShieldAlert,
+} from 'lucide-react';
+import { api } from '../services/api';
+import {
+  extractFaceFeatureVector,
+  executeLivenessChallenge,
+  registerPlatformPasskey,
+  authenticatePlatformPasskey,
+} from '../services/biometricService';
+import { AuthStatus } from '../types';
 
 interface LoginPageProps {
-  onLogin: () => void;
+  onLogin: (sessionToken: string) => void;
 }
 
 export const LoginPage: React.FC<LoginPageProps> = ({ onLogin }) => {
-  const [username, setUsername] = useState('');
-  const [password, setPassword] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [rememberMe, setRememberMe] = useState(true);
-  const [isLoading, setIsLoading] = useState(false);
+  // Authentication & System State
+  const [authStatus, setAuthStatus] = useState<AuthStatus | null>(null);
+  const [isLoadingStatus, setIsLoadingStatus] = useState(true);
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    setError(null);
+  // Flow & Step Navigation
+  // Steps: 'FACE' (Step 1) -> 'FINGERPRINT' (Step 2) -> 'RECOVERY' | 'ENROLLMENT'
+  const [authStep, setAuthStep] = useState<'FACE' | 'FINGERPRINT' | 'RECOVERY' | 'ENROLLMENT'>('FACE');
+  const [faceVerificationToken, setFaceVerificationToken] = useState<string | null>(null);
+  const [faceSimilarity, setFaceSimilarity] = useState<number | null>(null);
 
-    const inputUser = username.trim();
-    const inputPass = password.trim();
+  // Camera & Face Verification State
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const [isCameraActive, setIsCameraActive] = useState(false);
+  const [cameraError, setCameraError] = useState<string | null>(null);
+  const [isScanningFace, setIsScanningFace] = useState(false);
+  const [livenessStatusText, setLivenessStatusText] = useState<string>('Align face inside the biometric frame');
+  const [flashColor, setFlashColor] = useState<string | null>(null);
 
-    if (!inputUser || !inputPass) {
-      setError('Please enter both username and password.');
+  // Fingerprint / WebAuthn State
+  const [isVerifyingFingerprint, setIsVerifyingFingerprint] = useState(false);
+  const [fingerprintError, setFingerprintError] = useState<string | null>(null);
+
+  // Enrollment Wizard State (Step 1 Face, Step 2 Fingerprint, Step 3 Recovery Key)
+  const [enrollStep, setEnrollStep] = useState<1 | 2 | 3>(1);
+  const [enrolledFaceDescriptor, setEnrolledFaceDescriptor] = useState<number[] | null>(null);
+  const [generatedRecoveryKey, setGeneratedRecoveryKey] = useState<string | null>(null);
+  const [hasCopiedRecoveryKey, setHasCopiedRecoveryKey] = useState(false);
+  const [confirmedOfflineSave, setConfirmedOfflineSave] = useState(false);
+  const [isSubmittingEnrollment, setIsSubmittingEnrollment] = useState(false);
+
+  // Emergency Recovery Modal State
+  const [recoveryInput, setRecoveryInput] = useState('');
+  const [isSubmittingRecovery, setIsSubmittingRecovery] = useState(false);
+  const [recoveryError, setRecoveryError] = useState<string | null>(null);
+
+  // Lockout & Error Notifications
+  const [generalError, setGeneralError] = useState<string | null>(null);
+  const [lockCountdownSec, setLockCountdownSec] = useState<number>(0);
+
+  // 1. Load Initial Authentication Status from Server
+  const loadStatus = async () => {
+    try {
+      setIsLoadingStatus(true);
+      setGeneralError(null);
+      const status = await api.getAuthStatus();
+      setAuthStatus(status);
+
+      if (!status.isEnrolled) {
+        setAuthStep('ENROLLMENT');
+      } else {
+        setAuthStep('FACE');
+      }
+
+      if (status.isLocked && status.lockExpiresInMs > 0) {
+        setLockCountdownSec(Math.ceil(status.lockExpiresInMs / 1000));
+      }
+    } catch (err: any) {
+      setGeneralError(`Failed to connect to authentication server: ${err.message}`);
+    } finally {
+      setIsLoadingStatus(false);
+    }
+  };
+
+  useEffect(() => {
+    loadStatus();
+  }, []);
+
+  // Lockout Countdown Timer
+  useEffect(() => {
+    if (lockCountdownSec <= 0) return;
+    const interval = setInterval(() => {
+      setLockCountdownSec((prev) => {
+        if (prev <= 1) {
+          clearInterval(interval);
+          loadStatus();
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [lockCountdownSec]);
+
+  // 2. Camera Management (Start/Stop stream)
+  const startCamera = async () => {
+    setCameraError(null);
+    try {
+      if (videoRef.current && videoRef.current.srcObject) {
+        return; // already active
+      }
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          facingMode: 'user',
+          width: { ideal: 640 },
+          height: { ideal: 480 },
+        },
+        audio: false,
+      });
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        await videoRef.current.play();
+        setIsCameraActive(true);
+      }
+    } catch (err: any) {
+      console.error('[Camera] Access error:', err);
+      setCameraError(
+        'Camera permission denied or camera device not found. Please allow camera access in your browser settings.'
+      );
+      setIsCameraActive(false);
+    }
+  };
+
+  const stopCamera = () => {
+    if (videoRef.current && videoRef.current.srcObject) {
+      const stream = videoRef.current.srcObject as MediaStream;
+      stream.getTracks().forEach((track) => track.stop());
+      videoRef.current.srcObject = null;
+    }
+    setIsCameraActive(false);
+  };
+
+  // Start camera when entering Face step or Enrollment face step
+  useEffect(() => {
+    if (authStep === 'FACE' || (authStep === 'ENROLLMENT' && enrollStep === 1)) {
+      startCamera();
+    } else {
+      stopCamera();
+    }
+    return () => {
+      stopCamera();
+    };
+  }, [authStep, enrollStep]);
+
+  // ============================================================================
+  // STEP 1: FACE VERIFICATION WITH ACTIVE LIVENESS
+  // ============================================================================
+  const handleVerifyFace = async () => {
+    if (!videoRef.current || isScanningFace) return;
+    setIsScanningFace(true);
+    setGeneralError(null);
+
+    try {
+      // Execute active optical reflection challenge + micro-movement check
+      const livenessResult = await executeLivenessChallenge(
+        videoRef.current,
+        (color) => setFlashColor(color),
+        (text) => setLivenessStatusText(text)
+      );
+
+      if (!livenessResult.faceDetected) {
+        setGeneralError('No face detected in the frame. Please look directly into the camera.');
+        setLivenessStatusText('Face not detected. Center face in frame.');
+        setIsScanningFace(false);
+        return;
+      }
+
+      setLivenessStatusText('Extracting biometric signature...');
+      const extraction = extractFaceFeatureVector(videoRef.current);
+
+      setLivenessStatusText('Server verifying biometric template...');
+      const response = await api.verifyFace(extraction.descriptor, {
+        faceDetected: true,
+        lightReflectionScore: livenessResult.lightReflectionScore,
+        microMotionScore: livenessResult.microMotionScore,
+        challengeTimestamp: Date.now(),
+      });
+
+      if (!response.success || !response.faceVerificationToken) {
+        setGeneralError(response.error || 'Face verification failed.');
+        if (response.isLocked) {
+          loadStatus();
+        } else if (typeof response.remainingAttempts === 'number') {
+          setGeneralError(
+            `${response.error || 'Identity mismatch.'} (${response.remainingAttempts} attempts remaining)`
+          );
+        }
+        setLivenessStatusText('Verification rejected. Try again.');
+        setIsScanningFace(false);
+        return;
+      }
+
+      // Step 1 Success!
+      setFaceVerificationToken(response.faceVerificationToken);
+      setFaceSimilarity(response.similarity || 95);
+      setLivenessStatusText(`Identity Verified (${response.similarity || 95}% match)`);
+
+      // Smooth transition to Step 2 (Fingerprint)
+      setTimeout(() => {
+        setIsScanningFace(false);
+        stopCamera();
+        setAuthStep('FINGERPRINT');
+      }, 700);
+    } catch (err: any) {
+      setGeneralError(err.message || 'An error occurred during face scan.');
+      setLivenessStatusText('Scan interrupted.');
+      setIsScanningFace(false);
+    }
+  };
+
+  // ============================================================================
+  // STEP 2: FINGERPRINT VERIFICATION VIA WEBAUTHN
+  // Server strictly enforces that Step 1 must have passed!
+  // ============================================================================
+  const handleVerifyFingerprint = async () => {
+    if (!faceVerificationToken) {
+      setGeneralError('Face verification session expired. Please verify face again.');
+      setAuthStep('FACE');
       return;
     }
 
-    setIsLoading(true);
+    setIsVerifyingFingerprint(true);
+    setFingerprintError(null);
+    setGeneralError(null);
 
-    // Validate against configured credentials (case-insensitive for username, trimmed for password)
-    setTimeout(() => {
-      const userMatch = inputUser.toLowerCase() === ADMIN_CREDENTIALS.username.trim().toLowerCase();
-      const passMatch = inputPass === ADMIN_CREDENTIALS.password.trim();
-
-      if (userMatch && passMatch) {
-        if (rememberMe) {
-          localStorage.setItem('edr_auth', 'true');
-        } else {
-          sessionStorage.setItem('edr_auth', 'true');
-        }
-        onLogin();
-      } else {
-        setError('Invalid username or password. Access denied.');
-        setIsLoading(false);
+    try {
+      // 1. Request WebAuthn Challenge from Server (server validates faceVerificationToken)
+      const challengeRes = await api.getFingerprintChallenge(faceVerificationToken);
+      if (!challengeRes.success || !challengeRes.data) {
+        throw new Error(challengeRes.error || 'Failed to initialize fingerprint challenge');
       }
-    }, 200);
+
+      const { challenge, credentialId } = challengeRes.data;
+
+      // 2. Invoke browser/device platform biometric prompt (Windows Hello / Touch ID / Fingerprint)
+      const assertion = await authenticatePlatformPasskey(challenge, credentialId);
+
+      // 3. Send Assertion & Face Verification Token to Server for final verification
+      const verifyRes = await api.verifyFingerprint(faceVerificationToken, assertion);
+
+      if (!verifyRes.success || !verifyRes.token) {
+        throw new Error(verifyRes.error || 'Fingerprint verification failed.');
+      }
+
+      // 4. Success! Save Session Token and Notify App
+      sessionStorage.setItem('edr_auth', 'true');
+      sessionStorage.setItem('edr_token', verifyRes.token);
+      onLogin(verifyRes.token);
+    } catch (err: any) {
+      console.error('[Fingerprint] Verification error:', err);
+      const msg = err.message || 'Fingerprint verification failed.';
+      setFingerprintError(msg);
+      setGeneralError(msg);
+    } finally {
+      setIsVerifyingFingerprint(false);
+    }
+  };
+
+  // Auto-prompt fingerprint scanner when entering Step 2
+  useEffect(() => {
+    if (authStep === 'FINGERPRINT' && faceVerificationToken) {
+      const timer = setTimeout(() => {
+        handleVerifyFingerprint();
+      }, 400);
+      return () => clearTimeout(timer);
+    }
+  }, [authStep, faceVerificationToken]);
+
+  // ============================================================================
+  // ENROLLMENT WIZARD HANDLERS
+  // ============================================================================
+  const handleCaptureEnrollmentFace = async () => {
+    if (!videoRef.current || isScanningFace) return;
+    setIsScanningFace(true);
+    setGeneralError(null);
+
+    try {
+      const liveness = await executeLivenessChallenge(
+        videoRef.current,
+        (c) => setFlashColor(c),
+        (t) => setLivenessStatusText(t)
+      );
+
+      if (!liveness.faceDetected) {
+        setGeneralError('Could not detect face clearly. Please center your face and look at the camera.');
+        setIsScanningFace(false);
+        return;
+      }
+
+      const extraction = extractFaceFeatureVector(videoRef.current);
+      if (!extraction.faceDetected) {
+        setGeneralError('Insufficient facial lighting or skin contrast. Please improve lighting.');
+        setIsScanningFace(false);
+        return;
+      }
+
+      setEnrolledFaceDescriptor(extraction.descriptor);
+      setLivenessStatusText('Face template captured & normalized.');
+
+      setTimeout(() => {
+        setIsScanningFace(false);
+        stopCamera();
+        setEnrollStep(2); // Proceed to Fingerprint registration
+      }, 600);
+    } catch (err: any) {
+      setGeneralError(err.message || 'Failed to capture facial template.');
+      setIsScanningFace(false);
+    }
+  };
+
+  const handleRegisterFingerprint = async () => {
+    if (!enrolledFaceDescriptor) {
+      setEnrollStep(1);
+      return;
+    }
+
+    setIsSubmittingEnrollment(true);
+    setGeneralError(null);
+
+    try {
+      // Register platform authenticator passkey
+      const credential = await registerPlatformPasskey('admin');
+
+      // Submit both biometrics to backend
+      const res = await api.enrollBiometrics(enrolledFaceDescriptor, credential);
+
+      if (!res.success || !res.emergencyRecoveryKey) {
+        throw new Error(res.error || 'Server rejected biometric enrollment.');
+      }
+
+      setGeneratedRecoveryKey(res.emergencyRecoveryKey);
+      setEnrollStep(3); // Proceed to Emergency Key Display
+    } catch (err: any) {
+      console.error('[Enrollment] Error:', err);
+      setGeneralError(err.message || 'Biometric hardware enrollment failed.');
+    } finally {
+      setIsSubmittingEnrollment(false);
+    }
+  };
+
+  const handleCopyRecoveryKey = () => {
+    if (!generatedRecoveryKey) return;
+    navigator.clipboard.writeText(generatedRecoveryKey);
+    setHasCopiedRecoveryKey(true);
+    setTimeout(() => setHasCopiedRecoveryKey(false), 3000);
+  };
+
+  const handleDownloadRecoveryKey = () => {
+    if (!generatedRecoveryKey) return;
+    const blob = new Blob(
+      [
+        `=================================================================\n` +
+          `CYBER-EDR CONSOLE - EMERGENCY OFFLINE RECOVERY KEY\n` +
+          `=================================================================\n` +
+          `Recovery Key:  ${generatedRecoveryKey}\n` +
+          `Generated At:  ${new Date().toISOString()}\n\n` +
+          `IMPORTANT SECURITY NOTICE:\n` +
+          `Store this key in a secure physical location (safe, encrypted vault).\n` +
+          `If your biometric sensors (camera, fingerprint) fail, this key is\n` +
+          `the only emergency method to unlock your admin console.\n` +
+          `=================================================================\n`,
+      ],
+      { type: 'text/plain' }
+    );
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `edr-admin-recovery-key-${new Date().toISOString().slice(0, 10)}.txt`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleCompleteEnrollment = () => {
+    if (!confirmedOfflineSave) return;
+    setAuthStatus((prev) => (prev ? { ...prev, isEnrolled: true } : null));
+    setAuthStep('FACE');
+  };
+
+  // ============================================================================
+  // EMERGENCY RECOVERY HANDLER
+  // ============================================================================
+  const handleEmergencyRecover = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!recoveryInput.trim()) return;
+
+    setIsSubmittingRecovery(true);
+    setRecoveryError(null);
+
+    try {
+      const res = await api.emergencyRecover(recoveryInput.trim());
+      if (!res.success || !res.token) {
+        throw new Error(res.error || 'Invalid emergency recovery key.');
+      }
+
+      sessionStorage.setItem('edr_auth', 'true');
+      sessionStorage.setItem('edr_token', res.token);
+      onLogin(res.token);
+    } catch (err: any) {
+      setRecoveryError(err.message || 'Recovery key verification failed.');
+    } finally {
+      setIsSubmittingRecovery(false);
+    }
+  };
+
+  // ============================================================================
+  // RENDER: LOADING STATUS
+  // ============================================================================
+  if (isLoadingStatus) {
+    return (
+      <div className="min-h-screen w-full bg-slate-950 flex flex-col items-center justify-center p-4">
+        <div className="relative p-4 rounded-2xl bg-cyan-950/40 border border-cyan-500/30 text-cyan-400 mb-4 animate-pulse">
+          <Scan className="w-10 h-10 animate-spin" />
+        </div>
+        <p className="text-xs font-mono text-cyan-300 tracking-widest uppercase">
+          Initializing Biometric Security Module...
+        </p>
+      </div>
+    );
+  }
+
+  // Format lockout timer MM:SS
+  const formatTimer = (sec: number) => {
+    const m = Math.floor(sec / 60);
+    const s = sec % 60;
+    return `${m}:${s < 10 ? '0' : ''}${s}`;
   };
 
   return (
-    <div className="min-h-screen w-full bg-slate-950 flex items-center justify-center p-4 relative overflow-hidden font-sans">
-      {/* Background Cyber Ambient Glows */}
-      <div className="absolute top-1/4 -left-20 w-96 h-96 bg-cyan-500/10 rounded-full blur-3xl pointer-events-none animate-pulse"></div>
-      <div className="absolute bottom-1/4 -right-20 w-96 h-96 bg-purple-500/10 rounded-full blur-3xl pointer-events-none"></div>
+    <div className="min-h-screen w-full bg-slate-950 flex items-center justify-center p-4 relative overflow-hidden font-sans select-none">
+      {/* Dynamic Ambient Optical Reflection Background Flash */}
+      <div
+        className="fixed inset-0 pointer-events-none transition-colors duration-200 z-0"
+        style={{ backgroundColor: flashColor || 'transparent' }}
+      />
 
-      {/* Main Login Card */}
-      <div className="w-full max-w-md bg-slate-900/90 border border-cyan-900/50 rounded-2xl shadow-[0_0_50px_rgba(6,182,212,0.15)] backdrop-blur-xl p-6 sm:p-8 relative z-10">
+      {/* Cyber Ambient Background Glows */}
+      <div className="absolute top-1/4 -left-20 w-96 h-96 bg-cyan-500/10 rounded-full blur-3xl pointer-events-none animate-pulse" />
+      <div className="absolute bottom-1/4 -right-20 w-96 h-96 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none" />
+
+      {/* Main Glassmorphic Security Container */}
+      <div className="w-full max-w-lg bg-slate-900/90 border border-cyan-900/60 rounded-3xl shadow-[0_0_60px_rgba(6,182,212,0.15)] backdrop-blur-2xl p-6 sm:p-8 relative z-10">
         
-        {/* Header with Cyber Shield */}
-        <div className="flex flex-col items-center text-center mb-7">
-          <div className="relative p-3.5 bg-gradient-to-br from-cyan-950 to-slate-900 text-cyan-400 rounded-2xl border border-cyan-500/40 shadow-[0_0_25px_rgba(6,182,212,0.3)] mb-3.5">
-            <Shield className="w-9 h-9 text-cyan-400" />
+        {/* Top Header Badge */}
+        <div className="flex flex-col items-center text-center mb-6">
+          <div className="relative p-3.5 bg-gradient-to-br from-cyan-950 to-slate-900 text-cyan-400 rounded-2xl border border-cyan-500/40 shadow-[0_0_25px_rgba(6,182,212,0.3)] mb-3">
+            <Shield className="w-8 h-8 text-cyan-400" />
             <span className="absolute -top-1 -right-1 flex h-3 w-3">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-cyan-400 opacity-75"></span>
-              <span className="relative inline-flex rounded-full h-3 w-3 bg-cyan-500"></span>
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-cyan-400 opacity-75" />
+              <span className="relative inline-flex rounded-full h-3 w-3 bg-cyan-500" />
             </span>
           </div>
 
@@ -82,115 +475,469 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLogin }) => {
               CYBER-EDR <span className="text-cyan-400 font-normal">CONSOLE</span>
             </h1>
           </div>
-          <p className="text-xs font-mono text-cyan-300/80 mt-1 uppercase tracking-widest">
-            Restricted Admin Access
-          </p>
-          <div className="mt-2 text-[11px] text-slate-400 max-w-xs">
-            Enter your administrative credentials to manage endpoint devices &amp; security vault.
+          <div className="inline-flex items-center gap-1.5 px-3 py-1 mt-1.5 rounded-full bg-cyan-950/80 border border-cyan-800/60 text-[10px] font-mono text-cyan-300 uppercase tracking-widest">
+            <Lock className="w-3 h-3 text-cyan-400" />
+            <span>Multi-Factor Biometric Authentication</span>
           </div>
         </div>
 
-        {/* Error Alert Banner */}
-        {error && (
+        {/* Global Error Banner */}
+        {generalError && (
           <div className="mb-5 p-3 rounded-xl bg-rose-950/80 border border-rose-700/60 text-rose-200 text-xs font-mono flex items-center gap-2.5 animate-in fade-in slide-in-from-top-2">
             <AlertCircle className="w-4 h-4 text-rose-400 flex-shrink-0" />
-            <span>{error}</span>
+            <span className="flex-1">{generalError}</span>
           </div>
         )}
 
-        {/* Login Form */}
-        <form onSubmit={handleSubmit} className="space-y-4">
-          {/* Username Field */}
-          <div>
-            <label className="block text-xs font-mono font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
-              Admin Username
-            </label>
-            <div className="relative">
-              <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-500">
-                <User className="w-4 h-4 text-cyan-400/70" />
+        {/* Account Lockout Notice */}
+        {lockCountdownSec > 0 && (
+          <div className="mb-5 p-4 rounded-2xl bg-amber-950/70 border border-amber-600/70 text-amber-200 text-xs font-mono flex flex-col items-center text-center gap-2">
+            <ShieldAlert className="w-7 h-7 text-amber-400 animate-pulse" />
+            <span className="font-bold text-amber-300 uppercase tracking-wide">
+              Security Lockout Active
+            </span>
+            <p className="text-[11px] text-amber-200/80">
+              5 consecutive verification failures detected. Access is temporarily locked.
+            </p>
+            <div className="text-lg font-mono font-bold text-amber-400 bg-black/40 px-3 py-1 rounded-lg border border-amber-500/40">
+              {formatTimer(lockCountdownSec)}
+            </div>
+            <p className="text-[10px] text-slate-400 mt-1">
+              If your sensors are impaired, use your offline emergency recovery key below.
+            </p>
+          </div>
+        )}
+
+        {/* ================================================================== */}
+        {/* VIEW 1: ONE-TIME ENROLLMENT WIZARD                                  */}
+        {/* ================================================================== */}
+        {authStep === 'ENROLLMENT' && (
+          <div className="space-y-5">
+            <div className="p-3 rounded-xl bg-cyan-950/30 border border-cyan-800/40 flex items-center justify-between text-xs font-mono text-cyan-300">
+              <span className="flex items-center gap-2">
+                <Sparkles className="w-4 h-4 text-cyan-400" />
+                <span>One-Time Admin Enrollment</span>
+              </span>
+              <span className="text-[11px] text-slate-400">Step {enrollStep} of 3</span>
+            </div>
+
+            {/* Step 1: Enroll Face */}
+            {enrollStep === 1 && (
+              <div className="space-y-4">
+                <div className="text-center">
+                  <h3 className="text-sm font-mono font-bold text-white uppercase tracking-wider">
+                    Register Facial Identity
+                  </h3>
+                  <p className="text-xs text-slate-400 mt-1">
+                    Position your face in the reticle. Zero photos stored; only an encrypted 128-D numeric template is retained.
+                  </p>
+                </div>
+
+                {/* Live Camera Viewport */}
+                <div className="relative w-full aspect-video bg-black rounded-2xl overflow-hidden border border-cyan-500/40 shadow-inner flex items-center justify-center">
+                  <video
+                    ref={videoRef}
+                    autoPlay
+                    playsInline
+                    muted
+                    className="w-full h-full object-cover transform -scale-x-100"
+                  />
+
+                  {/* Cyber Scanner HUD Overlay */}
+                  <div className="absolute inset-0 pointer-events-none flex flex-col items-center justify-between p-4">
+                    <div className="w-full flex justify-between text-[10px] font-mono text-cyan-400/80">
+                      <span>HUD::CALIBRATION</span>
+                      <span>LIVENESS::ACTIVE</span>
+                    </div>
+
+                    {/* Face Oval Reticle */}
+                    <div
+                      className={`w-36 h-48 sm:w-44 sm:h-56 rounded-full border-2 border-dashed transition-colors duration-300 flex items-center justify-center ${
+                        isScanningFace ? 'border-cyan-400 shadow-[0_0_20px_rgba(6,182,212,0.5)]' : 'border-cyan-500/40'
+                      }`}
+                    >
+                      {isScanningFace && (
+                        <div className="w-full h-0.5 bg-gradient-to-r from-transparent via-cyan-400 to-transparent animate-bounce" />
+                      )}
+                    </div>
+
+                    <div className="text-[11px] font-mono text-cyan-300 bg-slate-950/80 px-3 py-1 rounded-full border border-cyan-500/30">
+                      {livenessStatusText}
+                    </div>
+                  </div>
+                </div>
+
+                {cameraError && (
+                  <div className="p-3 rounded-xl bg-rose-950/60 border border-rose-700/60 text-rose-300 text-xs font-mono">
+                    {cameraError}
+                  </div>
+                )}
+
+                <button
+                  type="button"
+                  onClick={handleCaptureEnrollmentFace}
+                  disabled={isScanningFace || !isCameraActive}
+                  className="w-full py-3.5 rounded-xl font-mono text-xs font-bold tracking-wider uppercase bg-gradient-to-r from-cyan-600 to-cyan-500 hover:from-cyan-500 hover:to-cyan-400 text-slate-950 shadow-[0_0_25px_rgba(6,182,212,0.4)] transition-all flex items-center justify-center gap-2 disabled:opacity-50"
+                >
+                  {isScanningFace ? (
+                    <>
+                      <RefreshCw className="w-4 h-4 animate-spin" />
+                      <span>Calibrating &amp; Scanning...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Camera className="w-4 h-4" />
+                      <span>Capture &amp; Enroll Face</span>
+                    </>
+                  )}
+                </button>
               </div>
+            )}
+
+            {/* Step 2: Enroll Fingerprint */}
+            {enrollStep === 2 && (
+              <div className="space-y-5 text-center">
+                <div>
+                  <h3 className="text-sm font-mono font-bold text-white uppercase tracking-wider">
+                    Register Hardware Fingerprint
+                  </h3>
+                  <p className="text-xs text-slate-400 mt-1">
+                    Connect your browser's FIDO2 WebAuthn authenticator (Windows Hello Fingerprint, Touch ID, or Android Biometric).
+                  </p>
+                </div>
+
+                <div className="p-8 rounded-2xl bg-cyan-950/20 border border-cyan-500/30 flex flex-col items-center justify-center gap-4">
+                  <div className="relative p-5 rounded-full bg-cyan-950/80 border border-cyan-500/50 shadow-[0_0_30px_rgba(6,182,212,0.3)]">
+                    <Fingerprint className="w-12 h-12 text-cyan-400 animate-pulse" />
+                  </div>
+                  <div className="text-xs font-mono text-cyan-300">
+                    Raw fingerprint never leaves device security enclave
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleRegisterFingerprint}
+                  disabled={isSubmittingEnrollment}
+                  className="w-full py-3.5 rounded-xl font-mono text-xs font-bold tracking-wider uppercase bg-gradient-to-r from-cyan-600 to-cyan-500 hover:from-cyan-500 hover:to-cyan-400 text-slate-950 shadow-[0_0_25px_rgba(6,182,212,0.4)] transition-all flex items-center justify-center gap-2 disabled:opacity-50"
+                >
+                  {isSubmittingEnrollment ? (
+                    <>
+                      <RefreshCw className="w-4 h-4 animate-spin" />
+                      <span>Awaiting Fingerprint Sensor...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Fingerprint className="w-4 h-4" />
+                      <span>Touch Fingerprint Sensor to Enroll</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            )}
+
+            {/* Step 3: Emergency Offline Recovery Key */}
+            {enrollStep === 3 && (
+              <div className="space-y-5">
+                <div className="text-center">
+                  <div className="inline-flex p-2.5 rounded-xl bg-amber-950/60 border border-amber-600/50 text-amber-400 mb-2">
+                    <Key className="w-6 h-6" />
+                  </div>
+                  <h3 className="text-sm font-mono font-bold text-white uppercase tracking-wider">
+                    Emergency Offline Recovery Key
+                  </h3>
+                  <p className="text-xs text-slate-400 mt-1">
+                    If your camera or fingerprint sensor breaks, this key is the only backup to unlock your console.
+                  </p>
+                </div>
+
+                {/* Recovery Key Box */}
+                <div className="p-4 rounded-2xl bg-black/60 border border-amber-500/50 flex flex-col items-center gap-3">
+                  <div className="text-base sm:text-lg font-mono font-extrabold tracking-widest text-amber-300 select-all">
+                    {generatedRecoveryKey}
+                  </div>
+                  <div className="flex items-center gap-2 w-full">
+                    <button
+                      type="button"
+                      onClick={handleCopyRecoveryKey}
+                      className="flex-1 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-700 text-xs font-mono text-slate-200 flex items-center justify-center gap-1.5 transition"
+                    >
+                      {hasCopiedRecoveryKey ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5 text-cyan-400" />}
+                      <span>{hasCopiedRecoveryKey ? 'Copied' : 'Copy Key'}</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleDownloadRecoveryKey}
+                      className="flex-1 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-700 text-xs font-mono text-slate-200 flex items-center justify-center gap-1.5 transition"
+                    >
+                      <Download className="w-3.5 h-3.5 text-amber-400" />
+                      <span>Download .txt</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Consent Checkbox */}
+                <label className="flex items-start gap-2.5 p-3 rounded-xl bg-slate-950 border border-slate-800 cursor-pointer text-xs font-mono text-slate-300">
+                  <input
+                    type="checkbox"
+                    checked={confirmedOfflineSave}
+                    onChange={(e) => setConfirmedOfflineSave(e.target.checked)}
+                    className="mt-0.5 rounded border-slate-700 text-cyan-500 focus:ring-cyan-500 bg-slate-900"
+                  />
+                  <span>
+                    I confirm that I have recorded and saved this emergency recovery key offline in a safe location.
+                  </span>
+                </label>
+
+                <button
+                  type="button"
+                  onClick={handleCompleteEnrollment}
+                  disabled={!confirmedOfflineSave}
+                  className="w-full py-3.5 rounded-xl font-mono text-xs font-bold tracking-wider uppercase bg-gradient-to-r from-emerald-600 to-emerald-500 hover:from-emerald-500 hover:to-emerald-400 text-slate-950 shadow-[0_0_25px_rgba(16,185,129,0.4)] transition-all flex items-center justify-center gap-2 disabled:opacity-40"
+                >
+                  <CheckCircle2 className="w-4 h-4" />
+                  <span>Complete Setup &amp; Open Login</span>
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ================================================================== */}
+        {/* VIEW 2: SCREEN 1 - BIOMETRIC FACE VERIFICATION (CAMERA)            */}
+        {/* ================================================================== */}
+        {authStep === 'FACE' && (
+          <div className="space-y-4">
+            {/* Step Header */}
+            <div className="flex items-center justify-between pb-3 border-b border-slate-800 text-xs font-mono">
+              <span className="flex items-center gap-2 text-cyan-400 font-bold">
+                <Camera className="w-4 h-4 text-cyan-400" />
+                <span>STEP 1: FACE VERIFICATION</span>
+              </span>
+              <span className="text-[11px] text-slate-500">
+                {authStatus?.remainingAttempts !== undefined
+                  ? `${authStatus.remainingAttempts} attempts remaining`
+                  : 'Screen 1 of 2'}
+              </span>
+            </div>
+
+            {/* Video Live Scanner Reticle */}
+            <div className="relative w-full aspect-video bg-black rounded-2xl overflow-hidden border border-cyan-500/40 shadow-inner flex items-center justify-center">
+              <video
+                ref={videoRef}
+                autoPlay
+                playsInline
+                muted
+                className="w-full h-full object-cover transform -scale-x-100"
+              />
+
+              {/* HUD Targeting Graphic */}
+              <div className="absolute inset-0 pointer-events-none flex flex-col items-center justify-between p-4">
+                <div className="w-full flex justify-between text-[10px] font-mono text-cyan-400/80">
+                  <span>FACIAL::RECOGNITION</span>
+                  <span className="flex items-center gap-1">
+                    <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-ping" />
+                    LIVE
+                  </span>
+                </div>
+
+                {/* Center Oval Reticle */}
+                <div
+                  className={`w-36 h-48 sm:w-44 sm:h-56 rounded-full border-2 border-dashed transition-all duration-300 flex items-center justify-center ${
+                    isScanningFace
+                      ? 'border-cyan-400 shadow-[0_0_25px_rgba(6,182,212,0.6)]'
+                      : 'border-cyan-500/40'
+                  }`}
+                >
+                  {isScanningFace && (
+                    <div className="w-full h-0.5 bg-gradient-to-r from-transparent via-cyan-400 to-transparent animate-bounce" />
+                  )}
+                </div>
+
+                <div className="text-[11px] font-mono text-cyan-300 bg-slate-950/85 px-3 py-1 rounded-full border border-cyan-500/30">
+                  {livenessStatusText}
+                </div>
+              </div>
+            </div>
+
+            {cameraError && (
+              <div className="p-3 rounded-xl bg-rose-950/60 border border-rose-700/60 text-rose-300 text-xs font-mono">
+                {cameraError}
+              </div>
+            )}
+
+            <button
+              type="button"
+              onClick={handleVerifyFace}
+              disabled={isScanningFace || !isCameraActive || lockCountdownSec > 0}
+              className="w-full py-3.5 rounded-xl font-mono text-xs font-bold tracking-wider uppercase bg-gradient-to-r from-cyan-600 to-cyan-500 hover:from-cyan-500 hover:to-cyan-400 text-slate-950 shadow-[0_0_25px_rgba(6,182,212,0.4)] transition-all flex items-center justify-center gap-2 disabled:opacity-40"
+            >
+              {isScanningFace ? (
+                <>
+                  <RefreshCw className="w-4 h-4 animate-spin" />
+                  <span>Verifying Liveness &amp; Template...</span>
+                </>
+              ) : (
+                <>
+                  <Scan className="w-4 h-4" />
+                  <span>Start Biometric Face Scan</span>
+                </>
+              )}
+            </button>
+          </div>
+        )}
+
+        {/* ================================================================== */}
+        {/* VIEW 3: SCREEN 2 - BIOMETRIC FINGERPRINT VERIFICATION (WEBAUTHN)   */}
+        {/* Server enforces: Only rendered after Screen 1 passed!              */}
+        {/* ================================================================== */}
+        {authStep === 'FINGERPRINT' && (
+          <div className="space-y-5 text-center">
+            {/* Step Header */}
+            <div className="flex items-center justify-between pb-3 border-b border-slate-800 text-xs font-mono">
+              <span className="flex items-center gap-2 text-emerald-400 font-bold">
+                <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                <span>STEP 1 PASSED ({faceSimilarity ?? 95}% MATCH)</span>
+              </span>
+              <span className="text-[11px] text-cyan-400 font-bold">STEP 2 OF 2</span>
+            </div>
+
+            <div>
+              <h3 className="text-sm font-mono font-bold text-white uppercase tracking-wider">
+                Touch Biometric Fingerprint Sensor
+              </h3>
+              <p className="text-xs text-slate-400 mt-1">
+                Touch your fingerprint sensor, Touch ID, or Windows Hello platform authenticator.
+              </p>
+            </div>
+
+            {/* Glowing Fingerprint Graphic */}
+            <div className="p-8 rounded-2xl bg-cyan-950/20 border border-cyan-500/30 flex flex-col items-center justify-center gap-4 relative overflow-hidden">
+              <div className="absolute inset-0 bg-radial-gradient from-cyan-500/10 to-transparent pointer-events-none" />
+              
+              <div className="relative p-6 rounded-full bg-cyan-950/80 border border-cyan-500/50 shadow-[0_0_35px_rgba(6,182,212,0.4)]">
+                <Fingerprint className="w-14 h-14 text-cyan-400 animate-pulse" />
+              </div>
+
+              <div className="text-xs font-mono text-cyan-300">
+                {isVerifyingFingerprint ? 'Awaiting hardware sensor verification...' : 'Ready for fingerprint touch'}
+              </div>
+            </div>
+
+            {fingerprintError && (
+              <div className="p-3 rounded-xl bg-rose-950/60 border border-rose-700/60 text-rose-300 text-xs font-mono text-left">
+                {fingerprintError}
+              </div>
+            )}
+
+            <button
+              type="button"
+              onClick={handleVerifyFingerprint}
+              disabled={isVerifyingFingerprint || lockCountdownSec > 0}
+              className="w-full py-3.5 rounded-xl font-mono text-xs font-bold tracking-wider uppercase bg-gradient-to-r from-emerald-600 to-emerald-500 hover:from-emerald-500 hover:to-emerald-400 text-slate-950 shadow-[0_0_25px_rgba(16,185,129,0.4)] transition-all flex items-center justify-center gap-2 disabled:opacity-40"
+            >
+              {isVerifyingFingerprint ? (
+                <>
+                  <RefreshCw className="w-4 h-4 animate-spin" />
+                  <span>Scanning Fingerprint...</span>
+                </>
+              ) : (
+                <>
+                  <Fingerprint className="w-4 h-4" />
+                  <span>Retry Fingerprint Scan</span>
+                </>
+              )}
+            </button>
+          </div>
+        )}
+
+        {/* ================================================================== */}
+        {/* VIEW 4: EMERGENCY OFFLINE RECOVERY KEY MODAL / FORM                */}
+        {/* ================================================================== */}
+        {authStep === 'RECOVERY' && (
+          <form onSubmit={handleEmergencyRecover} className="space-y-4">
+            <div className="text-center">
+              <div className="inline-flex p-2.5 rounded-xl bg-amber-950/60 border border-amber-600/50 text-amber-400 mb-2">
+                <Key className="w-6 h-6" />
+              </div>
+              <h3 className="text-sm font-mono font-bold text-white uppercase tracking-wider">
+                Emergency Recovery Access
+              </h3>
+              <p className="text-xs text-slate-400 mt-1">
+                Enter your 24-character offline recovery key saved during enrollment.
+              </p>
+            </div>
+
+            <div>
+              <label className="block text-[11px] font-mono text-slate-400 uppercase tracking-wider mb-1.5">
+                Recovery Key (Format: EDR-XXXX-XXXX-XXXX-XXXX)
+              </label>
               <input
                 type="text"
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
-                placeholder="Enter username"
-                autoFocus
-                autoComplete="username"
-                className="w-full pl-10 pr-4 py-2.5 bg-slate-950/80 border border-slate-800 rounded-xl text-sm font-mono text-white placeholder-slate-600 focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500/50 transition-all"
+                value={recoveryInput}
+                onChange={(e) => setRecoveryInput(e.target.value.toUpperCase())}
+                placeholder="EDR-XXXX-XXXX-XXXX-XXXX"
+                className="w-full px-4 py-3 rounded-xl bg-slate-950 border border-slate-700 text-amber-300 font-mono text-sm tracking-widest placeholder:text-slate-600 focus:outline-none focus:border-amber-500 transition"
               />
             </div>
-          </div>
 
-          {/* Password Field */}
-          <div>
-            <label className="block text-xs font-mono font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
-              Admin Password
-            </label>
-            <div className="relative">
-              <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-500">
-                <Lock className="w-4 h-4 text-cyan-400/70" />
+            {recoveryError && (
+              <div className="p-3 rounded-xl bg-rose-950/60 border border-rose-700/60 text-rose-300 text-xs font-mono">
+                {recoveryError}
               </div>
-              <input
-                type={showPassword ? 'text' : 'password'}
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="Enter password"
-                autoComplete="current-password"
-                className="w-full pl-10 pr-11 py-2.5 bg-slate-950/80 border border-slate-800 rounded-xl text-sm font-mono text-white placeholder-slate-600 focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500/50 transition-all"
-              />
-              <button
-                type="button"
-                onClick={() => setShowPassword(!showPassword)}
-                className="absolute inset-y-0 right-0 pr-3.5 flex items-center text-slate-500 hover:text-slate-300 transition"
-                tabIndex={-1}
-                title={showPassword ? 'Hide password' : 'Show password'}
-              >
-                {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-              </button>
-            </div>
-          </div>
-
-          {/* Remember Session Checkbox */}
-          <div className="flex items-center justify-between text-xs pt-1">
-            <label className="flex items-center gap-2 text-slate-400 cursor-pointer select-none">
-              <input
-                type="checkbox"
-                checked={rememberMe}
-                onChange={(e) => setRememberMe(e.target.checked)}
-                className="rounded border-slate-700 bg-slate-950 text-cyan-500 focus:ring-cyan-500/30 w-3.5 h-3.5 accent-cyan-500"
-              />
-              <span className="font-mono text-[11px]">Keep me signed in</span>
-            </label>
-            <span className="text-[10px] font-mono text-cyan-400/60 uppercase">
-              Encrypted Session
-            </span>
-          </div>
-
-          {/* Submit Button */}
-          <button
-            type="submit"
-            disabled={isLoading}
-            className="w-full mt-2 py-3 px-4 rounded-xl bg-gradient-to-r from-cyan-600 to-cyan-500 hover:from-cyan-500 hover:to-cyan-400 text-slate-950 font-mono font-bold text-sm tracking-wider uppercase transition-all shadow-[0_0_20px_rgba(6,182,212,0.3)] hover:shadow-[0_0_30px_rgba(6,182,212,0.5)] active:scale-[0.99] flex items-center justify-center gap-2 disabled:opacity-50"
-          >
-            {isLoading ? (
-              <span className="inline-block w-4 h-4 border-2 border-slate-950 border-t-transparent rounded-full animate-spin"></span>
-            ) : (
-              <>
-                <LogIn className="w-4 h-4" />
-                <span>Sign In to EDR Console</span>
-              </>
             )}
-          </button>
-        </form>
 
-        {/* Security Footer Note */}
-        <div className="mt-6 pt-5 border-t border-slate-800/80 text-center">
-          <p className="text-[10px] font-mono text-slate-500 flex items-center justify-center gap-1.5">
-            <CheckCircle2 className="w-3 h-3 text-emerald-400" />
-            <span>Authorized Administrator Personnel Only</span>
-          </p>
-        </div>
+            <button
+              type="submit"
+              disabled={isSubmittingRecovery || !recoveryInput.trim()}
+              className="w-full py-3.5 rounded-xl font-mono text-xs font-bold tracking-wider uppercase bg-gradient-to-r from-amber-600 to-amber-500 hover:from-amber-500 hover:to-amber-400 text-slate-950 shadow-[0_0_25px_rgba(245,158,11,0.4)] transition-all flex items-center justify-center gap-2 disabled:opacity-40"
+            >
+              {isSubmittingRecovery ? (
+                <>
+                  <RefreshCw className="w-4 h-4 animate-spin" />
+                  <span>Verifying Key...</span>
+                </>
+              ) : (
+                <>
+                  <UnlockIcon className="w-4 h-4" />
+                  <span>Authenticate with Recovery Key</span>
+                </>
+              )}
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                setRecoveryError(null);
+                setAuthStep('FACE');
+              }}
+              className="w-full py-2 text-xs font-mono text-slate-400 hover:text-cyan-400 transition text-center"
+            >
+              &larr; Back to Biometric Scanner
+            </button>
+          </form>
+        )}
+
+        {/* Footer Navigation / Recovery Link */}
+        {authStep !== 'RECOVERY' && authStep !== 'ENROLLMENT' && (
+          <div className="mt-6 pt-4 border-t border-slate-800/80 flex items-center justify-between text-[11px] font-mono text-slate-400">
+            <button
+              type="button"
+              onClick={() => setAuthStep('RECOVERY')}
+              className="hover:text-amber-400 transition flex items-center gap-1.5"
+            >
+              <Key className="w-3.5 h-3.5 text-amber-400/80" />
+              <span>Use Offline Recovery Key</span>
+            </button>
+
+            <span className="text-[10px] text-slate-500">AES-256 Encrypted</span>
+          </div>
+        )}
       </div>
     </div>
   );
 };
+
+function UnlockIcon(props: any) {
+  return <Key {...props} />;
+}

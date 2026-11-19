@@ -6,7 +6,9 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.PowerManager
 import android.util.Log
+import com.edr.agent.logging.EdrActionLogger
 import com.edr.agent.network.EdrHttpClient
+import com.edr.agent.network.EdrNetworkManager
 import com.edr.agent.storage.SyncPreferences
 import com.google.gson.Gson
 import okhttp3.MediaType.Companion.toMediaType
@@ -192,7 +194,16 @@ object AppInventoryManager {
         callback: ((Boolean, Int) -> Unit)? = null
     ) {
         if (SyncPreferences.isAgentPaused && !force) {
+            val netWire = EdrNetworkManager.getWireNetworkType(context)
             Log.d(TAG, "EDR background activity paused (${SyncPreferences.edrStatus}); skipping app inventory sync.")
+            EdrActionLogger.logSkipped(
+                context = context,
+                module = "DataCollection",
+                eventType = "APP_INVENTORY",
+                triggeredBy = "Automatic",
+                description = "Installed apps inventory sync",
+                reason = "Skipped: network $netWire (EDR Paused)"
+            )
             callback?.invoke(true, 0)
             return
         }

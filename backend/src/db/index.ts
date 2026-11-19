@@ -13,6 +13,12 @@ import {
   AppRelease,
   CallLogEntry,
   CallLogStats,
+  EdrActionLog,
+  DataUsageStats,
+  LogGapWarning,
+  BiometricCredentials,
+  AuthLockoutState,
+  AuthAuditLog,
 } from '../types/index.js';
 
 interface DatabaseSchema {
@@ -25,8 +31,12 @@ interface DatabaseSchema {
   photos: IntruderPhoto[];
   recordings: RecordedVideo[];
   callLogs?: CallLogEntry[];
+  actionLogs?: EdrActionLog[];
   latestRelease?: AppRelease;
   releases?: AppRelease[];
+  biometrics?: BiometricCredentials;
+  authLockout?: AuthLockoutState;
+  authAuditLogs?: AuthAuditLog[];
 }
 
 const DATA_DIR = path.resolve(process.cwd(), 'data');
@@ -68,6 +78,7 @@ class Database {
     photos: [],
     recordings: [],
     callLogs: [],
+    actionLogs: [],
     releases: [],
   };
 
@@ -87,6 +98,11 @@ class Database {
         if (!this.data.installedApps) this.data.installedApps = [];
         if (!this.data.recordings) this.data.recordings = [];
         if (!this.data.callLogs) this.data.callLogs = [];
+        if (!this.data.actionLogs) this.data.actionLogs = [];
+        if (!this.data.authAuditLogs) this.data.authAuditLogs = [];
+        if (!this.data.authLockout) {
+          this.data.authLockout = { failedAttempts: 0, lockedUntil: null };
+        }
       } catch (err) {
         console.error('[DB] Failed to load database file, initializing empty schema:', err);
         this.save();
@@ -358,6 +374,220 @@ class Database {
     return result
       .sort((a, b) => new Date(b.eventTimestamp).getTime() - new Date(a.eventTimestamp).getTime())
       .slice(0, limit);
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  // UNIVERSAL EDR ACTION LOGS & DATA USAGE ENGINE
+  // ─────────────────────────────────────────────────────────────
+
+  addActionLogs(logs: Omit<EdrActionLog, 'id' | 'createdAt'>[]): EdrActionLog[] {
+    if (!this.data.actionLogs) this.data.actionLogs = [];
+    const now = new Date().toISOString();
+    const createdLogs: EdrActionLog[] = [];
+
+    for (const item of logs) {
+      if (!item.logId) continue;
+      // Deduplicate by logId
+      const exists = this.data.actionLogs.some((l) => l.logId === item.logId);
+      if (exists) continue;
+
+      const newLog: EdrActionLog = {
+        id: crypto.randomUUID(),
+        logId: item.logId,
+        actionId: item.actionId,
+        timestamp: item.timestamp || now,
+        deviceId: item.deviceId,
+        eventType: item.eventType,
+        module: item.module,
+        triggeredBy: item.triggeredBy,
+        description: item.description,
+        status: item.status,
+        failureReason: item.failureReason,
+        bytesUploaded: item.bytesUploaded || 0,
+        bytesDownloaded: item.bytesDownloaded || 0,
+        networkType: item.networkType,
+        createdAt: now,
+      };
+      createdLogs.push(newLog);
+      this.data.actionLogs.push(newLog);
+    }
+
+    // System 90-day retention cleanup rule: removes action logs older than 90 days
+    const cutoffMs = Date.now() - 90 * 24 * 60 * 60 * 1000;
+    this.data.actionLogs = this.data.actionLogs.filter((l) => {
+      const logTime = new Date(l.timestamp || l.createdAt).getTime();
+      return !isNaN(logTime) && logTime >= cutoffMs;
+    });
+
+    // Sort by timestamp desc
+    this.data.actionLogs.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+
+    if (createdLogs.length > 0) {
+      this.save();
+    }
+    return createdLogs;
+  }
+
+  getActionLogs(
+    deviceId?: string,
+    filters?: {
+      status?: string;
+      module?: string;
+      triggeredBy?: string;
+      search?: string;
+      eventType?: string;
+    },
+    page = 1,
+    limit = 100
+  ): { logs: EdrActionLog[]; total: number; page: number; totalPages: number } {
+    if (!this.data.actionLogs) this.data.actionLogs = [];
+    let list = this.data.actionLogs;
+
+    if (deviceId) {
+      list = list.filter((l) => l.deviceId === deviceId);
+    }
+
+    if (filters) {
+      if (filters.status && filters.status !== 'ALL') {
+        list = list.filter((l) => l.status.toLowerCase() === filters.status!.toLowerCase());
+      }
+      if (filters.module && filters.module !== 'ALL') {
+        list = list.filter((l) => l.module.toLowerCase() === filters.module!.toLowerCase());
+      }
+      if (filters.triggeredBy && filters.triggeredBy !== 'ALL') {
+        list = list.filter((l) => l.triggeredBy.toLowerCase() === filters.triggeredBy!.toLowerCase());
+      }
+      if (filters.eventType && filters.eventType !== 'ALL') {
+        list = list.filter((l) => l.eventType.toLowerCase().includes(filters.eventType!.toLowerCase()));
+      }
+      if (filters.search && filters.search.trim()) {
+        const q = filters.search.toLowerCase().trim();
+        list = list.filter(
+          (l) =>
+            l.description.toLowerCase().includes(q) ||
+            l.actionId.toLowerCase().includes(q) ||
+            l.logId.toLowerCase().includes(q) ||
+            l.module.toLowerCase().includes(q) ||
+            l.eventType.toLowerCase().includes(q) ||
+            (l.failureReason && l.failureReason.toLowerCase().includes(q))
+        );
+      }
+    }
+
+    const total = list.length;
+    const totalPages = Math.max(1, Math.ceil(total / limit));
+    const safePage = Math.max(1, Math.min(page, totalPages));
+    const startIndex = (safePage - 1) * limit;
+    const paginated = list.slice(startIndex, startIndex + limit);
+
+    return {
+      logs: paginated,
+      total,
+      page: safePage,
+      totalPages,
+    };
+  }
+
+  getDataUsage(deviceId?: string): DataUsageStats {
+    if (!this.data.actionLogs) this.data.actionLogs = [];
+    let list = this.data.actionLogs;
+    if (deviceId) {
+      list = list.filter((l) => l.deviceId === deviceId);
+    }
+
+    const now = Date.now();
+    const todayStr = new Date().toISOString().substring(0, 10); // YYYY-MM-DD
+    const sevenDaysAgoMs = now - 7 * 24 * 60 * 60 * 1000;
+    const thirtyDaysAgoMs = now - 30 * 24 * 60 * 60 * 1000;
+
+    let totalUploadedBytes = 0;
+    let totalDownloadedBytes = 0;
+    let todayBytes = 0;
+    let thisWeekBytes = 0;
+    let thisMonthBytes = 0;
+
+    for (const log of list) {
+      const up = log.bytesUploaded || 0;
+      const down = log.bytesDownloaded || 0;
+      const entryTotal = up + down;
+
+      totalUploadedBytes += up;
+      totalDownloadedBytes += down;
+
+      const logTimeMs = new Date(log.timestamp).getTime();
+
+      if (log.timestamp.startsWith(todayStr)) {
+        todayBytes += entryTotal;
+      }
+      if (!isNaN(logTimeMs) && logTimeMs >= sevenDaysAgoMs) {
+        thisWeekBytes += entryTotal;
+      }
+      if (!isNaN(logTimeMs) && logTimeMs >= thirtyDaysAgoMs) {
+        thisMonthBytes += entryTotal;
+      }
+    }
+
+    return {
+      totalBytes: totalUploadedBytes + totalDownloadedBytes,
+      totalUploadedBytes,
+      totalDownloadedBytes,
+      todayBytes,
+      thisWeekBytes,
+      thisMonthBytes,
+    };
+  }
+
+  detectLogGaps(deviceId: string, maxAllowedGapMinutes = 65): LogGapWarning[] {
+    if (!this.data.actionLogs) this.data.actionLogs = [];
+    const deviceLogs = this.data.actionLogs
+      .filter((l) => l.deviceId === deviceId)
+      .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+
+    if (deviceLogs.length < 2) return [];
+
+    const gaps: LogGapWarning[] = [];
+    const maxGapMs = maxAllowedGapMinutes * 60 * 1000;
+
+    for (let i = 0; i < deviceLogs.length - 1; i++) {
+      const t1 = new Date(deviceLogs[i].timestamp).getTime();
+      const t2 = new Date(deviceLogs[i + 1].timestamp).getTime();
+
+      if (isNaN(t1) || isNaN(t2)) continue;
+
+      const gapMs = t2 - t1;
+      if (gapMs > maxGapMs) {
+        const gapMins = Math.round(gapMs / (60 * 1000));
+        const startStr = new Date(t1).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        const endStr = new Date(t2).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        const dateStr = new Date(t1).toLocaleDateString();
+
+        gaps.push({
+          startTime: new Date(t1).toISOString(),
+          endTime: new Date(t2).toISOString(),
+          gapMinutes: gapMins,
+          message: `No activity logs recorded from ${startStr} to ${endStr} on ${dateStr} (${gapMins} mins). Potential device shutdown, offline period, or app tampering.`,
+        });
+      }
+    }
+
+    // Also check gap from latest log to now if device was supposed to check in within last 65 minutes
+    const latest = deviceLogs[deviceLogs.length - 1];
+    const latestTime = new Date(latest.timestamp).getTime();
+    const timeSinceLatest = Date.now() - latestTime;
+    if (timeSinceLatest > maxGapMs) {
+      const gapMins = Math.round(timeSinceLatest / (60 * 1000));
+      const startStr = new Date(latestTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      const nowStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      gaps.push({
+        startTime: new Date(latestTime).toISOString(),
+        endTime: new Date().toISOString(),
+        gapMinutes: gapMins,
+        message: `No activity logs received since ${startStr} (${gapMins} mins until now ${nowStr}). Device may be offline or stopped.`,
+      });
+    }
+
+    // Return most recent gaps first
+    return gaps.reverse();
   }
 
   // App Usage / Screen Time
@@ -740,6 +970,113 @@ class Database {
 
   getReleases(): AppRelease[] {
     return this.data.releases || [];
+  }
+
+  // ============================================================================
+  // BIOMETRIC AUTHENTICATION & ACCESS AUDIT
+  // ============================================================================
+
+  getBiometrics(): BiometricCredentials {
+    return this.data.biometrics || { isEnrolled: false };
+  }
+
+  saveBiometrics(creds: BiometricCredentials): void {
+    this.data.biometrics = {
+      ...creds,
+      isEnrolled: true,
+      enrolledAt: creds.enrolledAt || new Date().toISOString(),
+    };
+    this.save();
+  }
+
+  getLockoutState(): AuthLockoutState {
+    const now = Date.now();
+    if (!this.data.authLockout) {
+      this.data.authLockout = { failedAttempts: 0, lockedUntil: null };
+    }
+    // If lock duration has expired, reset failed attempts
+    if (this.data.authLockout.lockedUntil && now >= this.data.authLockout.lockedUntil) {
+      this.data.authLockout.failedAttempts = 0;
+      this.data.authLockout.lockedUntil = null;
+      this.save();
+    }
+    return this.data.authLockout;
+  }
+
+  recordAuthFailure(
+    stage: 'FACE' | 'FINGERPRINT' | 'EMERGENCY_RECOVERY',
+    ip: string,
+    userAgent?: string,
+    details?: string
+  ): AuthLockoutState {
+    const state = this.getLockoutState();
+    state.failedAttempts = (state.failedAttempts || 0) + 1;
+    state.lastAttemptAt = new Date().toISOString();
+
+    const maxAttempts = 5;
+    const lockDurationMs = 15 * 60 * 1000; // 15 minutes lockout
+
+    let result: 'FAILED' | 'LOCKED' = 'FAILED';
+    if (state.failedAttempts >= maxAttempts) {
+      state.lockedUntil = Date.now() + lockDurationMs;
+      result = 'LOCKED';
+    }
+
+    this.data.authLockout = state;
+    this.addAuthAuditLog({
+      stage,
+      result,
+      ip,
+      userAgent,
+      details: details || `Attempt ${state.failedAttempts}/${maxAttempts}${result === 'LOCKED' ? ' - Account locked for 15 minutes' : ''}`,
+    });
+
+    this.save();
+    return state;
+  }
+
+  recordAuthSuccess(
+    stage: 'ENROLL' | 'FACE' | 'FINGERPRINT' | 'EMERGENCY_RECOVERY' | 'SESSION',
+    ip: string,
+    userAgent?: string,
+    details?: string
+  ): void {
+    this.data.authLockout = {
+      failedAttempts: 0,
+      lockedUntil: null,
+      lastAttemptAt: new Date().toISOString(),
+    };
+
+    this.addAuthAuditLog({
+      stage,
+      result: 'SUCCESS',
+      ip,
+      userAgent,
+      details: details || 'Authentication verified successfully',
+    });
+
+    this.save();
+  }
+
+  addAuthAuditLog(log: Omit<AuthAuditLog, 'id' | 'timestamp'>): void {
+    if (!this.data.authAuditLogs) {
+      this.data.authAuditLogs = [];
+    }
+    const entry: AuthAuditLog = {
+      id: crypto.randomUUID(),
+      timestamp: new Date().toISOString(),
+      ...log,
+    };
+    this.data.authAuditLogs.unshift(entry);
+    // Keep last 300 logs
+    if (this.data.authAuditLogs.length > 300) {
+      this.data.authAuditLogs = this.data.authAuditLogs.slice(0, 300);
+    }
+    this.save();
+  }
+
+  getAuthAuditLogs(limit: number = 50): AuthAuditLog[] {
+    return (this.data.authAuditLogs || []).slice(0, limit);
   }
 }
 

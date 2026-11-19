@@ -97,3 +97,55 @@ export function readAndDecryptFile(filePath: string): Buffer {
   return decryptBuffer(raw);
 }
 
+/**
+ * Computes salted SHA-256 hash for secure storage of recovery keys.
+ */
+export function hashWithSalt(value: string, salt: string): string {
+  return crypto.createHash('sha256').update(`${salt}:${value.trim().toUpperCase()}`).digest('hex');
+}
+
+/**
+ * Generates a high-entropy offline recovery key formatted as:
+ * EDR-XXXX-XXXX-XXXX-XXXX (16 hex chars grouped in 4 blocks)
+ */
+export function generateRecoveryKey(): string {
+  const chars = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ'; // base32 without ambiguous 0/O, 1/I
+  let result = 'EDR';
+  for (let block = 0; block < 4; block++) {
+    result += '-';
+    for (let i = 0; i < 4; i++) {
+      const idx = crypto.randomInt(0, chars.length);
+      result += chars[idx];
+    }
+  }
+  return result;
+}
+
+/**
+ * Computes Cosine Similarity between two numeric biometric embedding vectors.
+ * Returns a value between -1.0 and 1.0 (typical match > 0.82).
+ */
+export function cosineSimilarity(a: number[], b: number[]): number {
+  if (!a || !b || a.length === 0 || a.length !== b.length) {
+    return 0;
+  }
+  let dotProduct = 0;
+  let normA = 0;
+  let normB = 0;
+  for (let i = 0; i < a.length; i++) {
+    dotProduct += a[i] * b[i];
+    normA += a[i] * a[i];
+    normB += b[i] * b[i];
+  }
+  if (normA === 0 || normB === 0) return 0;
+  return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
+}
+
+/**
+ * Generates a secure random hex challenge / nonce.
+ */
+export function generateChallenge(bytes: number = 32): string {
+  return crypto.randomBytes(bytes).toString('base64url');
+}
+
+

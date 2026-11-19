@@ -1,4 +1,4 @@
-import { Device, DevicePolicy, Command, LogEntry, AppUsage, InstalledApp, CommandType, IntruderPhoto, RecordedVideo, AppRelease, ProvisioningQrData, VaultOverviewData, VaultRecording, VaultPhoto, CallLogEntry, CallLogStats } from '../types';
+import { Device, DevicePolicy, Command, LogEntry, AppUsage, InstalledApp, CommandType, IntruderPhoto, RecordedVideo, AppRelease, ProvisioningQrData, VaultOverviewData, VaultRecording, VaultPhoto, CallLogEntry, CallLogStats, EdrActionLog, DataUsageStats, LogGapWarning, AuthStatus, FaceVerifyResult, FingerprintChallengeData, FingerprintVerifyResult, EmergencyRecoveryResult, AuthAuditLog } from '../types';
 
 const API_BASE = '/api';
 
@@ -418,6 +418,182 @@ export const api = {
   async triggerCallLogSync(deviceId: string): Promise<{ success: boolean; message: string }> {
     const res = await fetch(`${API_BASE}/call-logs/${deviceId}/sync`, { method: 'POST' });
     return await res.json();
+  },
+
+  // Universal Action Logs & Data Usage
+  async getActionLogs(
+    deviceId: string,
+    params?: {
+      page?: number;
+      limit?: number;
+      status?: string;
+      module?: string;
+      triggeredBy?: string;
+      eventType?: string;
+      search?: string;
+    }
+  ): Promise<{
+    success: boolean;
+    logs: EdrActionLog[];
+    total: number;
+    page: number;
+    totalPages: number;
+  }> {
+    const qs = new URLSearchParams();
+    if (params?.page) qs.set('page', params.page.toString());
+    if (params?.limit) qs.set('limit', params.limit.toString());
+    if (params?.status) qs.set('status', params.status);
+    if (params?.module) qs.set('module', params.module);
+    if (params?.triggeredBy) qs.set('triggeredBy', params.triggeredBy);
+    if (params?.eventType) qs.set('eventType', params.eventType);
+    if (params?.search) qs.set('search', params.search);
+    const qStr = qs.toString();
+    const res = await fetch(`${API_BASE}/devices/${deviceId}/action-logs${qStr ? `?${qStr}` : ''}`);
+    return await res.json();
+  },
+
+  async getDataUsage(deviceId: string): Promise<{
+    success: boolean;
+    deviceId: string;
+    dataUsage: DataUsageStats;
+  }> {
+    const res = await fetch(`${API_BASE}/devices/${deviceId}/data-usage`);
+    return await res.json();
+  },
+
+  async getLogGaps(deviceId: string, maxGapMinutes = 65): Promise<{
+    success: boolean;
+    deviceId: string;
+    gaps: LogGapWarning[];
+  }> {
+    const res = await fetch(`${API_BASE}/devices/${deviceId}/log-gaps?maxGap=${maxGapMinutes}`);
+    return await res.json();
+  },
+
+  // ==========================================================================
+  // BIOMETRIC AUTHENTICATION & SECURITY CONSOLE
+  // ==========================================================================
+
+  async getAuthStatus(): Promise<AuthStatus> {
+    const res = await fetch(`${API_BASE}/auth/status`);
+    const json = await res.json();
+    return json.data;
+  },
+
+  async enrollBiometrics(faceDescriptor: number[], webAuthnCredential: any): Promise<{
+    success: boolean;
+    emergencyRecoveryKey?: string;
+    message?: string;
+    error?: string;
+  }> {
+    const res = await fetch(`${API_BASE}/auth/enroll`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ faceDescriptor, webAuthnCredential }),
+    });
+    const json = await res.json();
+    if (!res.ok || !json.success) {
+      return { success: false, error: json.error || 'Enrollment failed' };
+    }
+    return {
+      success: true,
+      emergencyRecoveryKey: json.data?.emergencyRecoveryKey,
+      message: json.message,
+    };
+  },
+
+  async verifyFace(faceDescriptor: number[], livenessProof: any): Promise<FaceVerifyResult> {
+    const res = await fetch(`${API_BASE}/auth/face-verify`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ faceDescriptor, livenessProof }),
+    });
+    const json = await res.json();
+    if (!res.ok || !json.success) {
+      return {
+        success: false,
+        error: json.error || 'Face verification failed',
+        similarity: json.similarity,
+        remainingAttempts: json.remainingAttempts,
+        isLocked: json.isLocked,
+      };
+    }
+    return {
+      success: true,
+      message: json.message,
+      faceVerificationToken: json.data?.faceVerificationToken,
+      similarity: json.data?.similarity,
+    };
+  },
+
+  async getFingerprintChallenge(faceVerificationToken: string): Promise<{
+    success: boolean;
+    data?: FingerprintChallengeData;
+    error?: string;
+  }> {
+    const res = await fetch(`${API_BASE}/auth/fingerprint-challenge`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ faceVerificationToken }),
+    });
+    const json = await res.json();
+    if (!res.ok || !json.success) {
+      return { success: false, error: json.error || 'Failed to initialize fingerprint challenge' };
+    }
+    return { success: true, data: json.data };
+  },
+
+  async verifyFingerprint(faceVerificationToken: string, assertion: any): Promise<FingerprintVerifyResult> {
+    const res = await fetch(`${API_BASE}/auth/fingerprint-verify`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ faceVerificationToken, assertion }),
+    });
+    const json = await res.json();
+    if (!res.ok || !json.success) {
+      return {
+        success: false,
+        error: json.error || 'Fingerprint verification failed',
+        remainingAttempts: json.remainingAttempts,
+        isLocked: json.isLocked,
+      };
+    }
+    return {
+      success: true,
+      message: json.message,
+      token: json.data?.token,
+      expiresInSec: json.data?.expiresInSec,
+    };
+  },
+
+  async emergencyRecover(recoveryKey: string): Promise<EmergencyRecoveryResult> {
+    const res = await fetch(`${API_BASE}/auth/emergency-recover`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ recoveryKey }),
+    });
+    const json = await res.json();
+    if (!res.ok || !json.success) {
+      return { success: false, error: json.error || 'Invalid emergency recovery key' };
+    }
+    return {
+      success: true,
+      message: json.message,
+      token: json.data?.token,
+      expiresInSec: json.data?.expiresInSec,
+    };
+  },
+
+  async logout(): Promise<void> {
+    try {
+      await fetch(`${API_BASE}/auth/logout`, { method: 'POST' });
+    } catch {}
+  },
+
+  async getAuthAuditLogs(): Promise<AuthAuditLog[]> {
+    const res = await fetch(`${API_BASE}/auth/audit-logs`);
+    const json = await res.json();
+    return json.data || [];
   },
 };
 

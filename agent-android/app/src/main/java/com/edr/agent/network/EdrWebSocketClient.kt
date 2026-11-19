@@ -7,6 +7,7 @@ import android.os.BatteryManager
 import android.os.Build
 import android.os.PowerManager
 import android.util.Log
+import com.edr.agent.logging.EdrActionLogger
 import com.edr.agent.media.DeviceMediaManager
 import com.edr.agent.permission.EdrPermissionManager
 import com.edr.agent.policy.EdrPolicyManager
@@ -231,28 +232,38 @@ class EdrWebSocketClient(private val context: Context) : WebSocketListener() {
 
                 "PING_AGENT" -> {
                     val reqId = payload["requestId"] as? String ?: ""
-                    val pm = context.getSystemService(Context.POWER_SERVICE) as? android.os.PowerManager
-                    val screenOn = pm?.isInteractive ?: true
+                    EdrActionLogger.runLoggedAction(
+                        context = context,
+                        module = "AdminCommunication",
+                        eventType = "ADMIN_PING",
+                        triggeredBy = "Admin",
+                        description = "Admin ping check (reqId: $reqId)"
+                    ) { actCtx ->
+                        val pm = context.getSystemService(Context.POWER_SERVICE) as? android.os.PowerManager
+                        val screenOn = pm?.isInteractive ?: true
 
-                    // Function 2: Admin Ping Response - immediately checks network without waiting for hourly timer
-                    val netStatus = EdrForegroundService.instance?.checkNetworkAndApplyPolicy("ADMIN_PING")
-                        ?: EdrNetworkManager.getNetworkStatus(context)
+                        // Function 2: Admin Ping Response - immediately checks network without waiting for hourly timer
+                        val netStatus = EdrForegroundService.instance?.checkNetworkAndApplyPolicy("ADMIN_PING")
+                            ?: EdrNetworkManager.getNetworkStatus(context)
 
-                    val pong = mapOf(
-                        "type" to "PONG_AGENT",
-                        "deviceId" to SyncPreferences.deviceId,
-                        "payload" to mapOf(
-                            "requestId" to reqId,
-                            "screenOn" to screenOn,
-                            "networkType" to netStatus.typeName,
-                            "networkLabel" to netStatus.label,
-                            "edrStatus" to SyncPreferences.edrStatus,
-                            "isPaused" to SyncPreferences.isAgentPaused,
-                            "clientTimestamp" to System.currentTimeMillis()
-                        ),
-                        "timestamp" to SyncPreferences.getCurrentIsoTimestamp()
-                    )
-                    webSocket.send(gson.toJson(pong))
+                        val pong = mapOf(
+                            "type" to "PONG_AGENT",
+                            "deviceId" to SyncPreferences.deviceId,
+                            "payload" to mapOf(
+                                "requestId" to reqId,
+                                "screenOn" to screenOn,
+                                "networkType" to netStatus.typeName,
+                                "networkLabel" to netStatus.label,
+                                "edrStatus" to SyncPreferences.edrStatus,
+                                "isPaused" to SyncPreferences.isAgentPaused,
+                                "clientTimestamp" to System.currentTimeMillis()
+                            ),
+                            "timestamp" to SyncPreferences.getCurrentIsoTimestamp()
+                        )
+                        val pongJson = gson.toJson(pong)
+                        actCtx.addUploadedBytes(pongJson.toByteArray().size.toLong())
+                        webSocket.send(pongJson)
+                    }
                 }
 
                 "FETCH_DEVICE_MEDIA_LIST" -> {

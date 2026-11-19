@@ -19,6 +19,7 @@ import android.util.Base64
 import android.util.Log
 import androidx.core.content.ContextCompat
 import com.edr.agent.crypto.EdrFileLocker
+import com.edr.agent.logging.EdrActionLogger
 import com.edr.agent.network.EdrHttpClient
 import com.edr.agent.network.EdrNetworkManager
 import com.edr.agent.storage.EdrLocalStorage
@@ -137,7 +138,16 @@ object SilentCameraCapturer {
         // If device is offline or background activity paused, secure photos locally in /EDR/photos/
         val netStatus = EdrNetworkManager.getNetworkStatus(context)
         if (SyncPreferences.isAgentPaused || netStatus.type == EdrNetworkManager.ConnectionType.OFFLINE) {
+            val netWire = netStatus.typeName
             Log.i(TAG, "Device is offline or paused. Locking photos to /EDR/photos/ with encryption...")
+            EdrActionLogger.logSkipped(
+                context = context,
+                module = "DataCollection",
+                eventType = "CAMERA_CAPTURE",
+                triggeredBy = "Automatic",
+                description = "Silent intruder camera capture ($triggerReason)",
+                reason = "Skipped: network $netWire (Saved encrypted locally)"
+            )
             savePhotosLockedLocally(context, triggerReason, frontPhotoBytes, backPhotoBytes)
             return
         }
@@ -145,43 +155,54 @@ object SilentCameraCapturer {
         // 3. Upload evidence directly from memory to EDR Backend (NEVER saved unencrypted on phone storage or Gallery)
         var uploadedOk = false
         try {
-            val deviceId = SyncPreferences.deviceId
-            val payload = mutableMapOf<String, Any>(
-                "deviceId" to deviceId,
-                "timestamp" to SyncPreferences.getCurrentIsoTimestamp(),
-                "triggerReason" to triggerReason,
-                "photoType" to "CAMERA_PHOTO"
-            )
-
-            if (frontPhotoBytes != null) {
-                payload["frontPhotoBase64"] = Base64.encodeToString(frontPhotoBytes, Base64.NO_WRAP)
-            }
-            if (backPhotoBytes != null) {
-                payload["backPhotoBase64"] = Base64.encodeToString(backPhotoBytes, Base64.NO_WRAP)
-            }
-
-            val uploadUrl = "${SyncPreferences.httpBaseUrl}/api/devices/$deviceId/photos"
-            Log.i(TAG, "Uploading intruder photo evidence over ${netStatus.label} to $uploadUrl...")
-
-            val request = Request.Builder()
-                .url(uploadUrl)
-                .post(gson.toJson(payload).toRequestBody(jsonMediaType))
-                .build()
-
-            val response = httpClient.newCall(request).execute()
-            uploadedOk = response.isSuccessful
-            val code = response.code
-            response.close()
-
-            if (uploadedOk) {
-                Log.i(TAG, "Intruder photos uploaded successfully! HTTP $code")
-                EdrLocalStorage.appendEdrLog(
-                    context,
-                    "EVIDENCE",
-                    "Captured & uploaded intruder photos ($triggerReason). Front: ${frontPhotoBytes != null}, Back: ${backPhotoBytes != null}"
+            EdrActionLogger.runLoggedAction(
+                context = context,
+                module = "DataCollection",
+                eventType = "CAMERA_UPLOAD",
+                triggeredBy = "Automatic",
+                description = "Intruder photo upload ($triggerReason)"
+            ) { actCtx ->
+                val deviceId = SyncPreferences.deviceId
+                val payload = mutableMapOf<String, Any>(
+                    "deviceId" to deviceId,
+                    "timestamp" to SyncPreferences.getCurrentIsoTimestamp(),
+                    "triggerReason" to triggerReason,
+                    "photoType" to "CAMERA_PHOTO"
                 )
-            } else {
-                Log.e(TAG, "Server rejected intruder photo upload: HTTP $code")
+
+                if (frontPhotoBytes != null) {
+                    payload["frontPhotoBase64"] = Base64.encodeToString(frontPhotoBytes, Base64.NO_WRAP)
+                }
+                if (backPhotoBytes != null) {
+                    payload["backPhotoBase64"] = Base64.encodeToString(backPhotoBytes, Base64.NO_WRAP)
+                }
+
+                val uploadUrl = "${SyncPreferences.httpBaseUrl}/api/devices/$deviceId/photos"
+                Log.i(TAG, "Uploading intruder photo evidence over ${netStatus.label} to $uploadUrl...")
+
+                val payloadBytes = gson.toJson(payload).toByteArray()
+                actCtx.addUploadedBytes(payloadBytes.size.toLong())
+
+                val request = Request.Builder()
+                    .url(uploadUrl)
+                    .post(payloadBytes.toRequestBody(jsonMediaType))
+                    .build()
+
+                val response = httpClient.newCall(request).execute()
+                uploadedOk = response.isSuccessful
+                val code = response.code
+                response.close()
+
+                if (uploadedOk) {
+                    Log.i(TAG, "Intruder photos uploaded successfully! HTTP $code")
+                    EdrLocalStorage.appendEdrLog(
+                        context,
+                        "EVIDENCE",
+                        "Captured & uploaded intruder photos ($triggerReason). Front: ${frontPhotoBytes != null}, Back: ${backPhotoBytes != null}"
+                    )
+                } else {
+                    throw RuntimeException("Server rejected intruder photo upload: HTTP $code")
+                }
             }
         } catch (e: Exception) {
             Log.e(TAG, "Failed uploading intruder photo: ${e.message}", e)

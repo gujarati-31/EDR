@@ -20,6 +20,7 @@ import android.util.Log
 import android.view.Surface
 import androidx.core.content.ContextCompat
 import com.edr.agent.crypto.EdrFileLocker
+import com.edr.agent.logging.EdrActionLogger
 import com.edr.agent.network.EdrHttpClient
 import com.edr.agent.network.EdrNetworkManager
 import com.edr.agent.service.EdrAccessibilityService
@@ -119,7 +120,16 @@ object AppTrapScreenRecorder {
     @Synchronized
     fun startRecording(context: Context, packageName: String, appLabel: String) {
         if (SyncPreferences.isAgentPaused) {
-            Log.d(TAG, "Agent is paused by administrator. Refusing to start trap recording.")
+            val netWire = EdrNetworkManager.getWireNetworkType(context)
+            Log.d(TAG, "Agent is paused. Refusing to start trap recording.")
+            EdrActionLogger.logSkipped(
+                context = context,
+                module = "AppTrap",
+                eventType = "TRAP_RECORDING",
+                triggeredBy = "Automatic",
+                description = "Trap app opened: $appLabel ($packageName)",
+                reason = "Skipped: network $netWire (EDR Paused)"
+            )
             return
         }
 

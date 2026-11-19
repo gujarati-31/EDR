@@ -338,6 +338,21 @@ export class EDRWebSocketGateway {
         break;
       }
 
+      case 'ACTION_LOGS_BATCH': {
+        const id = deviceId || payload?.deviceId;
+        const rawLogs = payload?.logs || [];
+        if (Array.isArray(rawLogs) && rawLogs.length > 0) {
+          const added = db.addActionLogs(rawLogs);
+          if (added.length > 0) {
+            this.broadcastToDashboards('ACTION_LOGS_ADDED', {
+              deviceId: id,
+              logs: added,
+            });
+          }
+        }
+        break;
+      }
+
       case 'SECURITY_ALERT': {
         const id = deviceId || payload.deviceId;
         const log = db.addLogs([

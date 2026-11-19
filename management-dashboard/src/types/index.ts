@@ -160,6 +160,40 @@ export interface LogEntry {
   createdAt: string;
 }
 
+export interface EdrActionLog {
+  id?: string;
+  logId: string;
+  actionId: string;
+  timestamp: string;
+  deviceId: string;
+  eventType: string;
+  module: string;
+  triggeredBy: 'Admin' | 'Automatic' | 'Hourly check' | 'User';
+  description: string;
+  status: 'Started' | 'Success' | 'Failed' | 'Skipped';
+  failureReason?: string;
+  bytesUploaded: number;
+  bytesDownloaded: number;
+  networkType: string;
+  createdAt?: string;
+}
+
+export interface DataUsageStats {
+  totalBytes: number;
+  totalUploadedBytes: number;
+  totalDownloadedBytes: number;
+  todayBytes: number;
+  thisWeekBytes: number;
+  thisMonthBytes: number;
+}
+
+export interface LogGapWarning {
+  startTime: string;
+  endTime: string;
+  gapMinutes: number;
+  message: string;
+}
+
 export interface AppUsage {
   id: string;
   deviceId: string;
@@ -269,6 +303,60 @@ export interface CallLogStats {
   formattedAvgDuration: string;
   availableDates: string[];
 }
+
+export interface AuthStatus {
+  isEnrolled: boolean;
+  enrolledAt?: string;
+  isLocked: boolean;
+  lockExpiresInMs: number;
+  remainingAttempts: number;
+  maxAttempts: number;
+}
+
+export interface FaceVerifyResult {
+  success: boolean;
+  message?: string;
+  error?: string;
+  faceVerificationToken?: string;
+  similarity?: number;
+  remainingAttempts?: number;
+  isLocked?: boolean;
+}
+
+export interface FingerprintChallengeData {
+  challenge: string;
+  credentialId: string;
+  rpId: string;
+}
+
+export interface FingerprintVerifyResult {
+  success: boolean;
+  message?: string;
+  error?: string;
+  token?: string;
+  expiresInSec?: number;
+  remainingAttempts?: number;
+  isLocked?: boolean;
+}
+
+export interface EmergencyRecoveryResult {
+  success: boolean;
+  message?: string;
+  error?: string;
+  token?: string;
+  expiresInSec?: number;
+}
+
+export interface AuthAuditLog {
+  id: string;
+  timestamp: string;
+  ip: string;
+  userAgent?: string;
+  stage: 'ENROLL' | 'FACE' | 'FINGERPRINT' | 'EMERGENCY_RECOVERY' | 'SESSION';
+  result: 'SUCCESS' | 'FAILED' | 'LOCKED';
+  details: string;
+}
+
 
 
 
