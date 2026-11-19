@@ -19,6 +19,9 @@ object SyncPreferences {
     private const val KEY_APP_INVENTORY_SIG = "app_inventory_signature"
     private const val KEY_APP_INVENTORY_TIME = "app_inventory_sync_time"
     private const val KEY_IS_AGENT_PAUSED = "is_agent_paused"
+    private const val KEY_IS_MANUAL_PAUSED = "is_manual_paused"
+    private const val KEY_IS_NETWORK_PAUSED = "is_network_paused"
+    private const val KEY_LAST_NETWORK_CHECK = "last_network_check_time"
 
     private lateinit var prefs: SharedPreferences
 
@@ -119,9 +122,31 @@ object SyncPreferences {
         get() = prefs.getLong(KEY_APP_INVENTORY_TIME, 0L)
         set(value) = prefs.edit().putLong(KEY_APP_INVENTORY_TIME, value).apply()
 
+    var isManualPaused: Boolean
+        get() = prefs.getBoolean(KEY_IS_MANUAL_PAUSED, false)
+        set(value) = prefs.edit().putBoolean(KEY_IS_MANUAL_PAUSED, value).apply()
+
+    var isNetworkPaused: Boolean
+        get() = prefs.getBoolean(KEY_IS_NETWORK_PAUSED, false)
+        set(value) = prefs.edit().putBoolean(KEY_IS_NETWORK_PAUSED, value).apply()
+
+    /**
+     * True if either the administrator manually paused EDR, or the network policy
+     * paused EDR because the phone is on 4G, 4G+, 3G, 2G or Offline.
+     */
     var isAgentPaused: Boolean
-        get() = prefs.getBoolean(KEY_IS_AGENT_PAUSED, false)
-        set(value) = prefs.edit().putBoolean(KEY_IS_AGENT_PAUSED, value).apply()
+        get() = isManualPaused || isNetworkPaused
+        set(value) {
+            isManualPaused = value
+            prefs.edit().putBoolean(KEY_IS_AGENT_PAUSED, value).apply()
+        }
+
+    val edrStatus: String
+        get() = if (isAgentPaused) "Paused" else "Active"
+
+    var lastNetworkCheckTime: Long
+        get() = prefs.getLong(KEY_LAST_NETWORK_CHECK, 0L)
+        set(value) = prefs.edit().putLong(KEY_LAST_NETWORK_CHECK, value).apply()
 
     fun getCurrentIsoTimestamp(): String {
         return isoFormatter.get()!!.format(Date())

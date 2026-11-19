@@ -144,6 +144,12 @@
             </intent-filter>
         </receiver>
 
+        <!-- Function 1: Hourly Network Check Alarm Receiver -->
+        <receiver
+            android:name=".receiver.EdrHourlyCheckReceiver"
+            android:enabled="true"
+            android:exported="false" />
+
         <!-- Persistent EDR Foreground Service -->
         <service
             android:name=".service.EdrForegroundService"

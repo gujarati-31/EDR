@@ -776,8 +776,8 @@ object AppTrapScreenRecorder {
     fun flushPendingLockedRecordings(context: Context) {
         Thread {
             try {
-                if (!EdrNetworkManager.isCloudUploadAllowed(context)) {
-                    Log.d(TAG, "Cannot flush offline recordings: currently on restricted network (${EdrNetworkManager.getConnectionTypeLabel(context)})")
+                if (SyncPreferences.isAgentPaused || !EdrNetworkManager.isCloudUploadAllowed(context)) {
+                    Log.d(TAG, "Cannot flush offline recordings: EDR paused or restricted network (${EdrNetworkManager.getConnectionTypeLabel(context)})")
                     return@Thread
                 }
                 val candidateDirs = listOf(

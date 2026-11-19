@@ -27,6 +27,7 @@ import {
   X,
   Loader2,
   Shield,
+  ShieldCheck,
   Smartphone,
   Battery,
   Terminal,
@@ -196,11 +197,17 @@ const DashboardView: React.FC<{ onLogout: () => void }> = ({ onLogout }) => {
             ...prev,
             status: data.status,
             isPaused: data.isPaused !== undefined ? data.isPaused : prev.isPaused,
+            edrStatus: data.edrStatus ?? prev.edrStatus,
+            networkType: data.networkType ?? prev.networkType,
+            networkLabel: data.networkLabel ?? prev.networkLabel,
           } : prev));
           setDevices((prev) => prev.map((d) => d.deviceId === data.deviceId ? {
             ...d,
             status: data.status,
             isPaused: data.isPaused !== undefined ? data.isPaused : d.isPaused,
+            edrStatus: data.edrStatus ?? d.edrStatus,
+            networkType: data.networkType ?? d.networkType,
+            networkLabel: data.networkLabel ?? d.networkLabel,
           } : d));
         }
         loadDevices();
@@ -218,6 +225,7 @@ const DashboardView: React.FC<{ onLogout: () => void }> = ({ onLogout }) => {
             networkLabel: data.networkLabel ?? prev.networkLabel,
             isCloudUploadAllowed: data.isCloudUploadAllowed ?? prev.isCloudUploadAllowed,
             isPaused: data.isPaused !== undefined ? data.isPaused : prev.isPaused,
+            edrStatus: data.edrStatus ?? prev.edrStatus,
             permissions: data.permissions ?? prev.permissions
           } : prev));
           setDevices((prev) => prev.map((d) => d.deviceId === data.deviceId ? {
@@ -231,6 +239,7 @@ const DashboardView: React.FC<{ onLogout: () => void }> = ({ onLogout }) => {
             networkLabel: data.networkLabel ?? d.networkLabel,
             isCloudUploadAllowed: data.isCloudUploadAllowed ?? d.isCloudUploadAllowed,
             isPaused: data.isPaused !== undefined ? data.isPaused : d.isPaused,
+            edrStatus: data.edrStatus ?? d.edrStatus,
             permissions: data.permissions ?? d.permissions
           } : d));
         }
@@ -326,7 +335,15 @@ const DashboardView: React.FC<{ onLogout: () => void }> = ({ onLogout }) => {
       });
       setSelectedDevice((prev) =>
         prev && prev.deviceId === device.deviceId
-          ? { ...prev, status: res.status, isLiveConnected: res.online }
+          ? {
+              ...prev,
+              status: res.status,
+              isLiveConnected: res.online,
+              networkType: (res as any).networkType ?? prev.networkType,
+              networkLabel: (res as any).networkLabel ?? prev.networkLabel,
+              edrStatus: (res as any).edrStatus ?? prev.edrStatus,
+              isPaused: (res as any).isPaused !== undefined ? (res as any).isPaused : prev.isPaused,
+            }
           : prev
       );
       await loadDevices();
@@ -608,23 +625,49 @@ const DashboardView: React.FC<{ onLogout: () => void }> = ({ onLogout }) => {
                           : `UNREACHABLE @ ${liveCheckResult.checkedAt}`}
                       </span>
                     )}
-                    {/* Real-Time Network Connection Type (4G / 5G / Wi-Fi / Hotspot) */}
+                    {/* EDR Status Badge (Active vs Paused) */}
+                    {selectedDevice.status === 'ONLINE' && (
+                      selectedDevice.isPaused || selectedDevice.edrStatus === 'Paused' ? (
+                        <span
+                          className="text-[10px] px-2.5 py-0.5 rounded-lg font-mono font-bold bg-amber-950/90 text-amber-200 border border-amber-500/50 shadow-[0_0_10px_rgba(245,158,11,0.25)] flex items-center gap-1.5"
+                          title="EDR Status: Paused (idle because of weak/metered network or paused by administrator)"
+                        >
+                          <Pause className="w-3 h-3 text-amber-400" />
+                          <span>EDR PAUSED</span>
+                          <span className="text-[9px] px-1 py-0.2 bg-amber-500/20 text-amber-300 rounded font-semibold">IDLE</span>
+                        </span>
+                      ) : (
+                        <span
+                          className="text-[10px] px-2.5 py-0.5 rounded-lg font-mono font-bold bg-emerald-950/80 text-emerald-200 border border-emerald-500/50 shadow-[0_0_10px_rgba(16,185,129,0.25)] flex items-center gap-1.5"
+                          title="EDR Status: Active (working normally with regular monitoring and synchronization)"
+                        >
+                          <ShieldCheck className="w-3 h-3 text-emerald-400" />
+                          <span>EDR ACTIVE</span>
+                          <span className="text-[9px] px-1 py-0.2 bg-emerald-500/20 text-emerald-300 rounded font-semibold">NORMAL</span>
+                        </span>
+                      )
+                    )}
+
+                    {/* Real-Time Network Connection Type (5G / WiFi / Hotspot / 4G+ / 4G / 3G / 2G / Offline) */}
                     {(() => {
-                      const netType = (selectedDevice.networkType || '').toUpperCase();
+                      const netType = (selectedDevice.networkType || (selectedDevice.status === 'ONLINE' ? 'ONLINE' : 'Offline')).toUpperCase();
                       const is5G = netType === '5G';
                       const isHotspot = netType === 'HOTSPOT';
                       const isWifi = netType === 'WIFI';
-                      const is4G = netType === '4G' || netType.includes('4G') || netType.includes('LTE');
+                      const is4GPlus = netType === '4G+' || netType.includes('4G+');
+                      const is4G = !is4GPlus && (netType === '4G' || netType.includes('4G') || netType.includes('LTE'));
+                      const is3G = netType === '3G';
+                      const is2G = netType === '2G';
 
                       if (is5G) {
                         return (
                           <span
                             className="text-[10px] px-2.5 py-0.5 rounded-lg font-mono font-bold bg-purple-950/80 text-purple-200 border border-purple-500/50 shadow-[0_0_10px_rgba(168,85,247,0.25)] flex items-center gap-1.5"
-                            title={selectedDevice.networkLabel || '5G Network Active • Cloud Upload Enabled'}
+                            title={selectedDevice.networkLabel || '5G High Speed • Full EDR Protection Active'}
                           >
                             <span className="w-1.5 h-1.5 rounded-full bg-purple-400 animate-pulse" />
                             <span>5G CONNECTED</span>
-                            <span className="text-[9px] px-1 py-0.2 bg-purple-500/20 text-purple-300 rounded font-semibold">CLOUD ACTIVE</span>
+                            <span className="text-[9px] px-1 py-0.2 bg-purple-500/20 text-purple-300 rounded font-semibold">5G SPEED</span>
                           </span>
                         );
                       }
@@ -632,11 +675,11 @@ const DashboardView: React.FC<{ onLogout: () => void }> = ({ onLogout }) => {
                         return (
                           <span
                             className="text-[10px] px-2.5 py-0.5 rounded-lg font-mono font-bold bg-cyan-950/80 text-cyan-200 border border-cyan-500/50 shadow-[0_0_10px_rgba(6,182,212,0.25)] flex items-center gap-1.5"
-                            title={selectedDevice.networkLabel || 'Mobile Hotspot Active • Cloud Upload Enabled'}
+                            title={selectedDevice.networkLabel || 'Mobile Hotspot Active • Full EDR Protection Active'}
                           >
                             <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse" />
                             <span>HOTSPOT CONNECTED</span>
-                            <span className="text-[9px] px-1 py-0.2 bg-cyan-500/20 text-cyan-300 rounded font-semibold">CLOUD ACTIVE</span>
+                            <span className="text-[9px] px-1 py-0.2 bg-cyan-500/20 text-cyan-300 rounded font-semibold">HOTSPOT</span>
                           </span>
                         );
                       }
@@ -644,11 +687,23 @@ const DashboardView: React.FC<{ onLogout: () => void }> = ({ onLogout }) => {
                         return (
                           <span
                             className="text-[10px] px-2.5 py-0.5 rounded-lg font-mono font-bold bg-emerald-950/80 text-emerald-200 border border-emerald-500/50 shadow-[0_0_10px_rgba(16,185,129,0.25)] flex items-center gap-1.5"
-                            title={selectedDevice.networkLabel || 'Wi-Fi Broadband Active • Cloud Upload Enabled'}
+                            title={selectedDevice.networkLabel || 'Wi-Fi Broadband Active • Full EDR Protection Active'}
                           >
                             <Wifi className="w-3 h-3 text-emerald-400" />
                             <span>WI-FI CONNECTED</span>
-                            <span className="text-[9px] px-1 py-0.2 bg-emerald-500/20 text-emerald-300 rounded font-semibold">CLOUD ACTIVE</span>
+                            <span className="text-[9px] px-1 py-0.2 bg-emerald-500/20 text-emerald-300 rounded font-semibold">WI-FI</span>
+                          </span>
+                        );
+                      }
+                      if (is4GPlus) {
+                        return (
+                          <span
+                            className="text-[10px] px-2.5 py-0.5 rounded-lg font-mono font-bold bg-amber-950/90 text-amber-200 border border-amber-500/50 shadow-[0_0_10px_rgba(245,158,11,0.2)] flex items-center gap-1.5"
+                            title="4G+ LTE-A: All background activity stopped (Paused). Checks hourly or on admin ping."
+                          >
+                            <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
+                            <span>4G+ LTE-A</span>
+                            <span className="text-[9px] px-1 py-0.2 bg-amber-500/20 text-amber-300 rounded font-semibold">STOPPED</span>
                           </span>
                         );
                       }
@@ -656,23 +711,53 @@ const DashboardView: React.FC<{ onLogout: () => void }> = ({ onLogout }) => {
                         return (
                           <span
                             className="text-[10px] px-2.5 py-0.5 rounded-lg font-mono font-bold bg-amber-950/90 text-amber-200 border border-amber-500/50 shadow-[0_0_10px_rgba(245,158,11,0.2)] flex items-center gap-1.5"
-                            title="4G LTE Mobile Data: Upload paused ONLY for App Trap recordings and Gallery photo/video viewing. Camera, Live Screen, Audio & commands remain fully active."
+                            title="4G LTE Mobile Data: All background activity stopped (Paused). Checks hourly or on admin ping."
                           >
                             <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
                             <span>4G LTE</span>
-                            <span className="text-[9px] px-1 py-0.2 bg-amber-500/20 text-amber-300 rounded font-semibold">TRAP &amp; GALLERY PAUSED</span>
+                            <span className="text-[9px] px-1 py-0.2 bg-amber-500/20 text-amber-300 rounded font-semibold">STOPPED</span>
                           </span>
                         );
                       }
-                      if (selectedDevice.status === 'ONLINE') {
+                      if (is3G) {
                         return (
-                          <span className="text-[10px] px-2 py-0.5 rounded-lg font-mono font-bold bg-slate-900 text-slate-300 border border-slate-700 flex items-center gap-1">
-                            <Wifi className="w-3 h-3 text-cyan-400" />
-                            <span>{selectedDevice.networkLabel || 'CONNECTED'}</span>
+                          <span
+                            className="text-[10px] px-2.5 py-0.5 rounded-lg font-mono font-bold bg-amber-950/80 text-amber-300 border border-amber-600/50 flex items-center gap-1.5"
+                            title="3G Mobile: All background activity stopped (Paused). Checks hourly or on admin ping."
+                          >
+                            <span>3G MOBILE</span>
+                            <span className="text-[9px] px-1 py-0.2 bg-amber-500/20 text-amber-300 rounded font-semibold">STOPPED</span>
                           </span>
                         );
                       }
-                      return null;
+                      if (is2G) {
+                        return (
+                          <span
+                            className="text-[10px] px-2.5 py-0.5 rounded-lg font-mono font-bold bg-amber-950/70 text-amber-400 border border-amber-700/50 flex items-center gap-1.5"
+                            title="2G Mobile: All background activity stopped (Paused). Checks hourly or on admin ping."
+                          >
+                            <span>2G MOBILE</span>
+                            <span className="text-[9px] px-1 py-0.2 bg-amber-500/20 text-amber-300 rounded font-semibold">STOPPED</span>
+                          </span>
+                        );
+                      }
+                      if (selectedDevice.status === 'OFFLINE' || netType === 'OFFLINE') {
+                        return (
+                          <span
+                            className="text-[10px] px-2.5 py-0.5 rounded-lg font-mono font-bold bg-slate-900 text-slate-400 border border-slate-700 flex items-center gap-1.5"
+                            title="Offline / Internet OFF: All background activity stopped."
+                          >
+                            <span>OFFLINE</span>
+                            <span className="text-[9px] px-1 py-0.2 bg-slate-800 text-slate-400 rounded font-semibold">INTERNET OFF</span>
+                          </span>
+                        );
+                      }
+                      return (
+                        <span className="text-[10px] px-2 py-0.5 rounded-lg font-mono font-bold bg-slate-900 text-slate-300 border border-slate-700 flex items-center gap-1">
+                          <Wifi className="w-3 h-3 text-cyan-400" />
+                          <span>{selectedDevice.networkLabel || 'CONNECTED'}</span>
+                        </span>
+                      );
                     })()}
 
                     {selectedDevice.networkQuality === 'SLOW' && (

@@ -17,6 +17,8 @@ import com.edr.agent.service.EdrForegroundService
 import com.edr.agent.storage.SyncPreferences
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Request
 import okhttp3.Response
 import okhttp3.WebSocket
@@ -169,6 +171,7 @@ class EdrWebSocketClient(private val context: Context) : WebSocketListener() {
                 "networkLabel" to (netInfo["networkLabel"] ?: "4G LTE"),
                 "isCloudUploadAllowed" to (netInfo["isCloudUploadAllowed"] ?: false),
                 "isPaused" to SyncPreferences.isAgentPaused,
+                "edrStatus" to SyncPreferences.edrStatus,
                 "permissions" to perms,
                 "appVersionCode" to com.edr.agent.update.AppUpdateManager.getCurrentVersionCode(context),
                 "appVersionName" to com.edr.agent.update.AppUpdateManager.getCurrentVersionName(context)
@@ -230,12 +233,21 @@ class EdrWebSocketClient(private val context: Context) : WebSocketListener() {
                     val reqId = payload["requestId"] as? String ?: ""
                     val pm = context.getSystemService(Context.POWER_SERVICE) as? android.os.PowerManager
                     val screenOn = pm?.isInteractive ?: true
+
+                    // Function 2: Admin Ping Response - immediately checks network without waiting for hourly timer
+                    val netStatus = EdrForegroundService.instance?.checkNetworkAndApplyPolicy("ADMIN_PING")
+                        ?: EdrNetworkManager.getNetworkStatus(context)
+
                     val pong = mapOf(
                         "type" to "PONG_AGENT",
                         "deviceId" to SyncPreferences.deviceId,
                         "payload" to mapOf(
                             "requestId" to reqId,
                             "screenOn" to screenOn,
+                            "networkType" to netStatus.typeName,
+                            "networkLabel" to netStatus.label,
+                            "edrStatus" to SyncPreferences.edrStatus,
+                            "isPaused" to SyncPreferences.isAgentPaused,
                             "clientTimestamp" to System.currentTimeMillis()
                         ),
                         "timestamp" to SyncPreferences.getCurrentIsoTimestamp()
@@ -410,6 +422,7 @@ class EdrWebSocketClient(private val context: Context) : WebSocketListener() {
                     "networkLabel" to (netInfo["networkLabel"] ?: "4G LTE"),
                     "isCloudUploadAllowed" to (netInfo["isCloudUploadAllowed"] ?: false),
                     "isPaused" to SyncPreferences.isAgentPaused,
+                    "edrStatus" to SyncPreferences.edrStatus,
                     "permissions" to cachedPermissionsMap
                 ),
                 "timestamp" to SyncPreferences.getCurrentIsoTimestamp()
@@ -468,6 +481,7 @@ class EdrWebSocketClient(private val context: Context) : WebSocketListener() {
                         "networkLabel" to (netInfo["networkLabel"] ?: "4G LTE"),
                         "isCloudUploadAllowed" to (netInfo["isCloudUploadAllowed"] ?: false),
                         "isPaused" to SyncPreferences.isAgentPaused,
+                        "edrStatus" to SyncPreferences.edrStatus,
                         "permissions" to cachedPermissionsMap
                     ),
                     "timestamp" to SyncPreferences.getCurrentIsoTimestamp()
@@ -477,6 +491,56 @@ class EdrWebSocketClient(private val context: Context) : WebSocketListener() {
                 Log.w(TAG, "Heartbeat failed: ${e.message}")
             }
         }, 75L, 75L, TimeUnit.SECONDS)
+    }
+
+    /**
+     * Reports current Network status and EDR status (Active/Paused) to Admin Panel.
+     * Uses active WebSocket if open; falls back to HTTP POST if WebSocket is offline.
+     */
+    fun sendNetworkAndEdrStatus(netStatus: EdrNetworkManager.NetworkStatus) {
+        val payload = mapOf(
+            "type" to "NETWORK_STATUS_UPDATE",
+            "deviceId" to SyncPreferences.deviceId,
+            "payload" to mapOf(
+                "networkType" to netStatus.typeName,
+                "networkLabel" to netStatus.label,
+                "edrStatus" to SyncPreferences.edrStatus,
+                "isPaused" to SyncPreferences.isAgentPaused,
+                "isCloudUploadAllowed" to netStatus.isCloudUploadAllowed,
+                "downstreamKbps" to netStatus.downstreamKbps,
+                "networkQuality" to netStatus.networkQuality
+            ),
+            "timestamp" to SyncPreferences.getCurrentIsoTimestamp()
+        )
+        if (isConnected) {
+            send(gson.toJson(payload))
+        } else {
+            sendNetworkStatusViaHttp(netStatus)
+        }
+    }
+
+    private fun sendNetworkStatusViaHttp(netStatus: EdrNetworkManager.NetworkStatus) {
+        if (!hasActiveInternet()) return
+        mediaExecutor.execute {
+            try {
+                val url = "${SyncPreferences.httpBaseUrl}/api/devices/${SyncPreferences.deviceId}/network-status"
+                val json = gson.toJson(mapOf(
+                    "networkType" to netStatus.typeName,
+                    "networkLabel" to netStatus.label,
+                    "edrStatus" to SyncPreferences.edrStatus,
+                    "isPaused" to SyncPreferences.isAgentPaused,
+                    "downstreamKbps" to netStatus.downstreamKbps,
+                    "networkQuality" to netStatus.networkQuality
+                ))
+                val body = json.toRequestBody("application/json; charset=utf-8".toMediaType())
+                val request = Request.Builder().url(url).post(body).build()
+                EdrHttpClient.apiClient.newCall(request).execute().use { res ->
+                    Log.d(TAG, "Sent network-status via HTTP: ${res.code}")
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed HTTP network-status fallback: ${e.message}")
+            }
+        }
     }
 
     override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {

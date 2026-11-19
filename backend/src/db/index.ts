@@ -181,7 +181,8 @@ class Database {
     networkType?: string,
     networkLabel?: string,
     isCloudUploadAllowed?: boolean,
-    isPaused?: boolean
+    isPaused?: boolean,
+    edrStatus?: 'Active' | 'Paused'
   ) {
     const device = this.data.devices.find((d) => d.deviceId === deviceId || d.id === deviceId);
     if (device) {
@@ -211,6 +212,11 @@ class Database {
       if (isPaused !== undefined) {
         device.isPaused = isPaused;
       }
+      if (edrStatus !== undefined) {
+        device.edrStatus = edrStatus;
+      } else if (device.isPaused !== undefined) {
+        device.edrStatus = device.isPaused ? 'Paused' : 'Active';
+      }
       this.save();
     }
   }
@@ -219,6 +225,7 @@ class Database {
     const device = this.data.devices.find((d) => d.deviceId === deviceId || d.id === deviceId);
     if (device) {
       device.isPaused = isPaused;
+      device.edrStatus = isPaused ? 'Paused' : 'Active';
       if (isPaused) {
         device.pausedAt = new Date().toISOString();
       } else {

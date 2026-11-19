@@ -23,13 +23,15 @@ object EdrNetworkManager {
 
     private const val TAG = "EdrNetworkManager"
 
-    enum class ConnectionType(val wireName: String, val displayName: String, val allowsCloudUpload: Boolean) {
-        WIFI("WIFI", "Wi-Fi", true),
-        HOTSPOT("HOTSPOT", "Hotspot", true),
-        FIVE_G("5G", "5G Mobile", true),
-        FOUR_G("4G", "4G LTE", true),
-        THREE_G_OR_LESS("3G", "3G/2G Mobile", true),
-        NO_INTERNET("NO_INTERNET", "Offline", false)
+    enum class ConnectionType(val wireName: String, val displayName: String, val shouldWorkNormally: Boolean) {
+        FIVE_G("5G", "5G", true),
+        WIFI("WiFi", "WiFi", true),
+        HOTSPOT("Hotspot", "Hotspot", true),
+        FOUR_G_PLUS("4G+", "4G+", false),
+        FOUR_G("4G", "4G", false),
+        THREE_G("3G", "3G", false),
+        TWO_G("2G", "2G", false),
+        OFFLINE("Offline", "Offline", false)
     }
 
     data class NetworkStatus(
@@ -37,10 +39,18 @@ object EdrNetworkManager {
         val typeName: String,
         val label: String,
         val isCloudUploadAllowed: Boolean,
+        val shouldWorkNormally: Boolean,
         val downstreamKbps: Int,
         val networkQuality: String,
         val ssid: String? = null
     )
+
+    /**
+     * Checks whether EDR should work normally or stop all background activity.
+     * 5G, WiFi, Hotspot -> true (Work normally)
+     * 4G, 4G+, 3G, 2G, Offline -> false (Stop all background activity)
+     */
+    fun shouldWorkNormally(type: ConnectionType): Boolean = type.shouldWorkNormally
 
     /**
      * Inspects current network capabilities, carrier telephony state, and gateway topology
@@ -54,10 +64,11 @@ object EdrNetworkManager {
 
             if (caps == null || !caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)) {
                 return NetworkStatus(
-                    type = ConnectionType.NO_INTERNET,
-                    typeName = ConnectionType.NO_INTERNET.wireName,
-                    label = "No Internet Connection",
+                    type = ConnectionType.OFFLINE,
+                    typeName = ConnectionType.OFFLINE.wireName,
+                    label = "Offline (Internet OFF)",
                     isCloudUploadAllowed = false,
+                    shouldWorkNormally = false,
                     downstreamKbps = 0,
                     networkQuality = "SLOW"
                 )
@@ -74,9 +85,9 @@ object EdrNetworkManager {
 
                 val connType = if (isHotspot) ConnectionType.HOTSPOT else ConnectionType.WIFI
                 val label = if (isHotspot) {
-                    if (!ssid.isNullOrEmpty()) "Mobile Hotspot ($ssid)" else "Mobile Hotspot"
+                    if (!ssid.isNullOrEmpty()) "Hotspot ($ssid)" else "Hotspot"
                 } else {
-                    if (!ssid.isNullOrEmpty()) "Wi-Fi ($ssid)" else "Wi-Fi Connected"
+                    if (!ssid.isNullOrEmpty()) "WiFi ($ssid)" else "WiFi Connected"
                 }
 
                 return NetworkStatus(
@@ -84,38 +95,44 @@ object EdrNetworkManager {
                     typeName = connType.wireName,
                     label = label,
                     isCloudUploadAllowed = true,
+                    shouldWorkNormally = true,
                     downstreamKbps = downstreamKbps,
                     networkQuality = quality,
                     ssid = ssid
                 )
             }
 
-            // 2. Check Cellular (5G vs 4G vs 3G)
+            // 2. Check Cellular (5G vs 4G+ vs 4G vs 3G vs 2G)
             if (caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)) {
                 val cellType = inspectCellularTechnology(context, caps)
                 val label = when (cellType) {
-                    ConnectionType.FIVE_G -> "5G High Speed (Uploads Enabled)"
-                    ConnectionType.FOUR_G -> "4G LTE (Uploads Enabled)"
-                    else -> "Cellular Network (Uploads Enabled)"
+                    ConnectionType.FIVE_G -> "5G Mobile (High Speed)"
+                    ConnectionType.FOUR_G_PLUS -> "4G+ LTE-A (Background Paused)"
+                    ConnectionType.FOUR_G -> "4G LTE (Background Paused)"
+                    ConnectionType.THREE_G -> "3G Mobile (Background Paused)"
+                    ConnectionType.TWO_G -> "2G Mobile (Background Paused)"
+                    else -> "${cellType.displayName} (Background Paused)"
                 }
 
                 return NetworkStatus(
                     type = cellType,
                     typeName = cellType.wireName,
                     label = label,
-                    isCloudUploadAllowed = cellType.allowsCloudUpload,
+                    isCloudUploadAllowed = cellType.shouldWorkNormally,
+                    shouldWorkNormally = cellType.shouldWorkNormally,
                     downstreamKbps = downstreamKbps,
                     networkQuality = quality
                 )
             }
 
-            // 3. Ethernet / Other
+            // 3. Ethernet LAN
             if (caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)) {
                 return NetworkStatus(
                     type = ConnectionType.WIFI,
-                    typeName = "ETHERNET",
+                    typeName = ConnectionType.WIFI.wireName,
                     label = "Ethernet LAN",
                     isCloudUploadAllowed = true,
+                    shouldWorkNormally = true,
                     downstreamKbps = downstreamKbps,
                     networkQuality = "FAST"
                 )
@@ -125,18 +142,20 @@ object EdrNetworkManager {
             return NetworkStatus(
                 type = ConnectionType.FOUR_G,
                 typeName = "4G",
-                label = "Cellular Network (Uploads Paused)",
+                label = "4G Mobile (Background Paused)",
                 isCloudUploadAllowed = false,
+                shouldWorkNormally = false,
                 downstreamKbps = downstreamKbps,
                 networkQuality = quality
             )
         } catch (e: Exception) {
             Log.w(TAG, "Error determining network status: ${e.message}")
             return NetworkStatus(
-                type = ConnectionType.FOUR_G,
-                typeName = "4G",
-                label = "Network (Uploads Paused)",
+                type = ConnectionType.OFFLINE,
+                typeName = "Offline",
+                label = "Offline",
                 isCloudUploadAllowed = false,
+                shouldWorkNormally = false,
                 downstreamKbps = 0,
                 networkQuality = "SLOW"
             )
@@ -240,16 +259,50 @@ object EdrNetworkManager {
                 return ConnectionType.FIVE_G
             }
 
-            // 3. 4G LTE check (NETWORK_TYPE_LTE = 13)
+            // 3. 4G+ / LTE-Advanced (Carrier Aggregation or high speed LTE 35-80 Mbps)
+            val isLte = dataNetType == TelephonyManager.NETWORK_TYPE_LTE ||
+                dataNetType == TelephonyManager.NETWORK_TYPE_UNKNOWN
+            if (isLte && caps.linkDownstreamBandwidthKbps in 35_000 until 80_000) {
+                return ConnectionType.FOUR_G_PLUS
+            }
+
+            // 4. 4G LTE check
             if (dataNetType == TelephonyManager.NETWORK_TYPE_LTE ||
-                dataNetType == TelephonyManager.NETWORK_TYPE_UNKNOWN ||
-                caps.linkDownstreamBandwidthKbps > 5000
+                (isLte && caps.linkDownstreamBandwidthKbps > 5_000)
             ) {
                 return ConnectionType.FOUR_G
             }
 
             // 4. Slower legacy networks (3G / 2G)
-            return ConnectionType.THREE_G_OR_LESS
+            val is3gType = dataNetType in listOf(
+                TelephonyManager.NETWORK_TYPE_UMTS,
+                TelephonyManager.NETWORK_TYPE_EVDO_0,
+                TelephonyManager.NETWORK_TYPE_EVDO_A,
+                TelephonyManager.NETWORK_TYPE_HSDPA,
+                TelephonyManager.NETWORK_TYPE_HSUPA,
+                TelephonyManager.NETWORK_TYPE_HSPA,
+                TelephonyManager.NETWORK_TYPE_EVDO_B,
+                TelephonyManager.NETWORK_TYPE_EHRPD,
+                TelephonyManager.NETWORK_TYPE_HSPAP,
+                TelephonyManager.NETWORK_TYPE_TD_SCDMA
+            )
+            if (is3gType || caps.linkDownstreamBandwidthKbps in 400..5_000) {
+                return ConnectionType.THREE_G
+            }
+
+            val is2gType = dataNetType in listOf(
+                TelephonyManager.NETWORK_TYPE_GPRS,
+                TelephonyManager.NETWORK_TYPE_EDGE,
+                TelephonyManager.NETWORK_TYPE_CDMA,
+                TelephonyManager.NETWORK_TYPE_1xRTT,
+                TelephonyManager.NETWORK_TYPE_IDEN,
+                TelephonyManager.NETWORK_TYPE_GSM
+            )
+            if (is2gType || caps.linkDownstreamBandwidthKbps < 400) {
+                return ConnectionType.TWO_G
+            }
+
+            return ConnectionType.FOUR_G
         } catch (e: Exception) {
             return ConnectionType.FOUR_G
         }

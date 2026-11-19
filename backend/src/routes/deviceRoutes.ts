@@ -1208,14 +1208,21 @@ export function createDeviceRouter(gateway: EDRWebSocketGateway) {
     if (result.alive) {
       const screenLabel =
         result.screenOn === undefined ? '' : result.screenOn ? ' • Screen ON' : ' • Screen OFF';
+      const netLabel = result.networkType || updatedDevice?.networkType ? ` • ${result.networkType || updatedDevice?.networkType}` : '';
+      const edrLabel = result.edrStatus || updatedDevice?.edrStatus ? ` • EDR ${result.edrStatus || updatedDevice?.edrStatus}` : '';
+
       return res.json({
         success: true,
         online: true,
         status: 'ONLINE',
         rttMs: result.rttMs,
         screenOn: result.screenOn,
+        networkType: result.networkType || updatedDevice?.networkType,
+        networkLabel: result.networkLabel || updatedDevice?.networkLabel,
+        edrStatus: result.edrStatus || updatedDevice?.edrStatus,
+        isPaused: result.isPaused ?? updatedDevice?.isPaused,
         device: updatedDevice,
-        message: `${device.deviceName} is ACTUALLY ONLINE (${result.rttMs} ms${screenLabel})`,
+        message: `${device.deviceName} is ACTUALLY ONLINE (${result.rttMs} ms${screenLabel}${netLabel}${edrLabel})`,
       });
     }
 
@@ -1228,6 +1235,47 @@ export function createDeviceRouter(gateway: EDRWebSocketGateway) {
       device: updatedDevice,
       message: `${device.deviceName} is OFFLINE / UNREACHABLE (${result.reason === 'PING_TIMEOUT' ? 'did not answer live ping within 5s' : 'no active phone connection'})`,
     });
+  });
+
+  // Fallback HTTP route to record network & EDR status updates from device
+  router.post('/:deviceId/network-status', (req, res) => {
+    const { deviceId } = req.params;
+    const { networkType, networkLabel, edrStatus, isPaused, downstreamKbps, networkQuality } = req.body;
+    const device = db.getDeviceById(deviceId);
+    if (!device) {
+      return res.status(404).json({ success: false, message: 'Device not found' });
+    }
+    const finalEdrStatus: 'Active' | 'Paused' = edrStatus || (isPaused ? 'Paused' : 'Active');
+    db.updateDeviceStatus(
+      deviceId,
+      'ONLINE',
+      undefined,
+      networkQuality,
+      downstreamKbps,
+      undefined,
+      networkType,
+      networkLabel,
+      undefined,
+      isPaused,
+      finalEdrStatus
+    );
+    gateway.broadcastToDashboards('DEVICE_STATUS_CHANGED', {
+      deviceId,
+      status: 'ONLINE',
+      networkType,
+      networkLabel,
+      edrStatus: finalEdrStatus,
+      isPaused,
+    });
+    gateway.broadcastToDashboards('DEVICE_HEARTBEAT', {
+      deviceId,
+      networkType,
+      networkLabel,
+      edrStatus: finalEdrStatus,
+      isPaused,
+      timestamp: new Date().toISOString(),
+    });
+    res.json({ success: true, message: 'Network status recorded', edrStatus: finalEdrStatus });
   });
 
   return router;

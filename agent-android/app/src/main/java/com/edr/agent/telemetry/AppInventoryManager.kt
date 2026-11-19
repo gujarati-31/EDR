@@ -191,6 +191,11 @@ object AppInventoryManager {
         force: Boolean = true,
         callback: ((Boolean, Int) -> Unit)? = null
     ) {
+        if (SyncPreferences.isAgentPaused && !force) {
+            Log.d(TAG, "EDR background activity paused (${SyncPreferences.edrStatus}); skipping app inventory sync.")
+            callback?.invoke(true, 0)
+            return
+        }
         if (!force && !hasInventoryChanged(context)) {
             Log.d(TAG, "App inventory unchanged since last sync; skipping APK scan/upload to save battery.")
             callback?.invoke(true, 0)

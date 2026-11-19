@@ -280,45 +280,83 @@ export const DeviceList: React.FC<DeviceListProps> = ({
                       {device.isUninstalled ? 'UNINSTALLED' : isOnline ? (isDirectLive ? 'ONLINE' : 'SYNCING') : 'OFFLINE'}
                     </span>
 
-                    {/* Agent Paused Badge */}
-                    {device.isPaused && (
-                      <span
-                        className="px-1.5 py-0.5 rounded text-[9px] font-mono font-bold bg-amber-950/90 text-amber-300 border border-amber-500/50 shadow-[0_0_8px_rgba(245,158,11,0.25)] flex items-center gap-1"
-                        title="EDR Agent protection paused by administrator"
-                      >
-                        <Pause className="w-2.5 h-2.5" />
-                        <span>PAUSED</span>
-                      </span>
+                    {/* EDR Status Badge (Active vs Paused) */}
+                    {isOnline && (
+                      device.isPaused || device.edrStatus === 'Paused' ? (
+                        <span
+                          className="px-1.5 py-0.5 rounded text-[9px] font-mono font-bold bg-amber-950/90 text-amber-300 border border-amber-500/50 shadow-[0_0_8px_rgba(245,158,11,0.25)] flex items-center gap-1"
+                          title="EDR Status: Paused (weak network or idle)"
+                        >
+                          <Pause className="w-2.5 h-2.5" />
+                          <span>PAUSED</span>
+                        </span>
+                      ) : (
+                        <span
+                          className="px-1.5 py-0.5 rounded text-[9px] font-mono font-bold bg-emerald-950/80 text-emerald-300 border border-emerald-500/40 shadow-[0_0_8px_rgba(16,185,129,0.2)] flex items-center gap-1"
+                          title="EDR Status: Active (working normally)"
+                        >
+                          <ShieldCheck className="w-2.5 h-2.5 text-emerald-400" />
+                          <span>ACTIVE</span>
+                        </span>
+                      )
                     )}
 
-                    {/* Network Type Badge */}
-                    {isOnline && (() => {
-                      const net = (device.networkType || '').toUpperCase();
+                    {/* Network Type Badge (5G / WiFi / Hotspot / 4G+ / 4G / 3G / 2G / Offline) */}
+                    {(() => {
+                      const net = (device.networkType || (isOnline ? 'ONLINE' : 'Offline')).toUpperCase();
                       if (net === '5G') {
                         return (
-                          <span className="px-1.5 py-0.5 rounded text-[9px] font-mono font-bold bg-purple-950/80 text-purple-300 border border-purple-500/40 shadow-[0_0_8px_rgba(168,85,247,0.2)]" title="5G High Speed Cellular • Uploads Active">
+                          <span className="px-1.5 py-0.5 rounded text-[9px] font-mono font-bold bg-purple-950/80 text-purple-300 border border-purple-500/40 shadow-[0_0_8px_rgba(168,85,247,0.2)]" title="5G High Speed • Normal Activity">
                             5G
                           </span>
                         );
                       }
                       if (net === 'HOTSPOT') {
                         return (
-                          <span className="px-1.5 py-0.5 rounded text-[9px] font-mono font-bold bg-cyan-950/80 text-cyan-300 border border-cyan-500/40 shadow-[0_0_8px_rgba(6,182,212,0.2)]" title="Mobile Hotspot Connected • Uploads Active">
+                          <span className="px-1.5 py-0.5 rounded text-[9px] font-mono font-bold bg-cyan-950/80 text-cyan-300 border border-cyan-500/40 shadow-[0_0_8px_rgba(6,182,212,0.2)]" title="Hotspot • Normal Activity">
                             HOTSPOT
                           </span>
                         );
                       }
                       if (net === 'WIFI') {
                         return (
-                          <span className="px-1.5 py-0.5 rounded text-[9px] font-mono font-bold bg-emerald-950/80 text-emerald-300 border border-emerald-500/40 shadow-[0_0_8px_rgba(16,185,129,0.2)]" title="Wi-Fi Broadband Connected • Uploads Active">
-                            WI-FI
+                          <span className="px-1.5 py-0.5 rounded text-[9px] font-mono font-bold bg-emerald-950/80 text-emerald-300 border border-emerald-500/40 shadow-[0_0_8px_rgba(16,185,129,0.2)]" title="Wi-Fi • Normal Activity">
+                            WIFI
+                          </span>
+                        );
+                      }
+                      if (net === '4G+' || net.includes('4G+')) {
+                        return (
+                          <span className="px-1.5 py-0.5 rounded text-[9px] font-mono font-bold bg-amber-950/90 text-amber-300 border border-amber-500/40" title="4G+ LTE-A • Background Paused">
+                            4G+
                           </span>
                         );
                       }
                       if (net === '4G' || net.includes('4G') || net.includes('LTE')) {
                         return (
-                          <span className="px-1.5 py-0.5 rounded text-[9px] font-mono font-bold bg-amber-950/90 text-amber-300 border border-amber-500/40" title="4G LTE Mobile Data • Cloud Upload Paused (Locked locally)">
-                            4G LTE
+                          <span className="px-1.5 py-0.5 rounded text-[9px] font-mono font-bold bg-amber-950/90 text-amber-300 border border-amber-500/40" title="4G Mobile • Background Paused">
+                            4G
+                          </span>
+                        );
+                      }
+                      if (net === '3G') {
+                        return (
+                          <span className="px-1.5 py-0.5 rounded text-[9px] font-mono font-bold bg-amber-950/80 text-amber-300 border border-amber-600/40" title="3G Mobile • Background Paused">
+                            3G
+                          </span>
+                        );
+                      }
+                      if (net === '2G') {
+                        return (
+                          <span className="px-1.5 py-0.5 rounded text-[9px] font-mono font-bold bg-amber-950/70 text-amber-400 border border-amber-700/40" title="2G Mobile • Background Paused">
+                            2G
+                          </span>
+                        );
+                      }
+                      if (!isOnline || net === 'OFFLINE') {
+                        return (
+                          <span className="px-1.5 py-0.5 rounded text-[9px] font-mono font-bold bg-slate-900 text-slate-400 border border-slate-700" title="Offline / Internet OFF">
+                            OFFLINE
                           </span>
                         );
                       }

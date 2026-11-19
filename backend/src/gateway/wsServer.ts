@@ -21,7 +21,17 @@ export class EDRWebSocketGateway {
   >();
   private pendingPingRequests = new Map<
     string,
-    { resolve: (data: { alive: boolean; screenOn?: boolean }) => void; timer: NodeJS.Timeout }
+    {
+      resolve: (data: {
+        alive: boolean;
+        screenOn?: boolean;
+        networkType?: string;
+        networkLabel?: string;
+        edrStatus?: 'Active' | 'Paused';
+        isPaused?: boolean;
+      }) => void;
+      timer: NodeJS.Timeout;
+    }
   >();
   private activeMediaStreams = new Map<string, MediaStreamHandler>();
 
@@ -162,6 +172,7 @@ export class EDRWebSocketGateway {
       case 'HEARTBEAT': {
         const id = deviceId || payload.deviceId;
         if (id) {
+          const edrStatus = payload.edrStatus || (payload.isPaused ? 'Paused' : 'Active');
           db.updateDeviceStatus(
             id,
             'ONLINE',
@@ -172,7 +183,8 @@ export class EDRWebSocketGateway {
             payload.networkType,
             payload.networkLabel,
             payload.isCloudUploadAllowed,
-            payload.isPaused
+            payload.isPaused,
+            edrStatus
           );
           this.broadcastToDashboards('DEVICE_HEARTBEAT', {
             deviceId: id,
@@ -183,6 +195,7 @@ export class EDRWebSocketGateway {
             networkLabel: payload.networkLabel,
             isCloudUploadAllowed: payload.isCloudUploadAllowed,
             isPaused: payload.isPaused,
+            edrStatus,
             permissions: payload.permissions,
             timestamp: new Date().toISOString(),
           });
@@ -237,6 +250,39 @@ export class EDRWebSocketGateway {
 
       case 'PONG_AGENT': {
         const reqId = payload?.requestId;
+        const id = deviceId || payload?.deviceId;
+        if (id) {
+          const edrStatus = payload?.edrStatus || (payload?.isPaused ? 'Paused' : 'Active');
+          db.updateDeviceStatus(
+            id,
+            'ONLINE',
+            payload?.batteryLevel,
+            payload?.networkQuality,
+            payload?.downstreamKbps,
+            payload?.permissions,
+            payload?.networkType,
+            payload?.networkLabel,
+            payload?.isCloudUploadAllowed,
+            payload?.isPaused,
+            edrStatus
+          );
+          this.broadcastToDashboards('DEVICE_STATUS_CHANGED', {
+            deviceId: id,
+            status: 'ONLINE',
+            networkType: payload?.networkType,
+            networkLabel: payload?.networkLabel,
+            edrStatus,
+            isPaused: payload?.isPaused,
+          });
+          this.broadcastToDashboards('DEVICE_HEARTBEAT', {
+            deviceId: id,
+            networkType: payload?.networkType,
+            networkLabel: payload?.networkLabel,
+            edrStatus,
+            isPaused: payload?.isPaused,
+            timestamp: new Date().toISOString(),
+          });
+        }
         const pending = this.pendingPingRequests.get(reqId);
         if (pending) {
           clearTimeout(pending.timer);
@@ -244,7 +290,50 @@ export class EDRWebSocketGateway {
           pending.resolve({
             alive: true,
             screenOn: typeof payload?.screenOn === 'boolean' ? payload.screenOn : undefined,
+            networkType: payload?.networkType,
+            networkLabel: payload?.networkLabel,
+            edrStatus: payload?.edrStatus || (payload?.isPaused ? 'Paused' : 'Active'),
+            isPaused: payload?.isPaused,
           });
+        }
+        break;
+      }
+
+      case 'NETWORK_STATUS_UPDATE': {
+        const id = deviceId || payload?.deviceId;
+        if (id) {
+          const edrStatus = payload?.edrStatus || (payload?.isPaused ? 'Paused' : 'Active');
+          db.updateDeviceStatus(
+            id,
+            'ONLINE',
+            undefined,
+            payload?.networkQuality,
+            payload?.downstreamKbps,
+            undefined,
+            payload?.networkType,
+            payload?.networkLabel,
+            payload?.isCloudUploadAllowed,
+            payload?.isPaused,
+            edrStatus
+          );
+          this.broadcastToDashboards('DEVICE_HEARTBEAT', {
+            deviceId: id,
+            networkType: payload?.networkType,
+            networkLabel: payload?.networkLabel,
+            edrStatus,
+            isPaused: payload?.isPaused,
+            isCloudUploadAllowed: payload?.isCloudUploadAllowed,
+            timestamp: new Date().toISOString(),
+          });
+          this.broadcastToDashboards('DEVICE_STATUS_CHANGED', {
+            deviceId: id,
+            status: 'ONLINE',
+            networkType: payload?.networkType,
+            networkLabel: payload?.networkLabel,
+            edrStatus,
+            isPaused: payload?.isPaused,
+          });
+          console.log(`[WS] Device ${id} network update: ${payload?.networkType} (${payload?.networkLabel}) -> EDR: ${edrStatus}`);
         }
         break;
       }
@@ -429,7 +518,16 @@ export class EDRWebSocketGateway {
   public async pingDevice(
     deviceId: string,
     timeoutMs = 5000
-  ): Promise<{ alive: boolean; rttMs: number | null; screenOn?: boolean; reason?: string }> {
+  ): Promise<{
+    alive: boolean;
+    rttMs: number | null;
+    screenOn?: boolean;
+    networkType?: string;
+    networkLabel?: string;
+    edrStatus?: 'Active' | 'Paused';
+    isPaused?: boolean;
+    reason?: string;
+  }> {
     const ws = this.deviceSockets.get(deviceId);
     if (!ws || ws.readyState !== WebSocket.OPEN) {
       db.updateDeviceStatus(deviceId, 'OFFLINE');
@@ -456,11 +554,30 @@ export class EDRWebSocketGateway {
       }, timeoutMs);
 
       this.pendingPingRequests.set(requestId, {
-        resolve: ({ alive, screenOn }) => {
+        resolve: ({ alive, screenOn, networkType, networkLabel, edrStatus, isPaused }) => {
           const rttMs = Date.now() - startedAt;
-          db.updateDeviceStatus(deviceId, 'ONLINE');
-          this.broadcastToDashboards('DEVICE_STATUS_CHANGED', { deviceId, status: 'ONLINE' });
-          resolve({ alive, rttMs, screenOn });
+          db.updateDeviceStatus(
+            deviceId,
+            'ONLINE',
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            networkType,
+            networkLabel,
+            undefined,
+            isPaused,
+            edrStatus
+          );
+          this.broadcastToDashboards('DEVICE_STATUS_CHANGED', {
+            deviceId,
+            status: 'ONLINE',
+            networkType,
+            networkLabel,
+            edrStatus,
+            isPaused,
+          });
+          resolve({ alive, rttMs, screenOn, networkType, networkLabel, edrStatus, isPaused });
         },
         timer,
       });
@@ -580,15 +697,23 @@ export class EDRWebSocketGateway {
     return true;
   }
 
-  // Periodic heartbeat checker to flag devices offline if no heartbeat for 180s
-  // (Device heartbeat is 60s, so 180s = 3 missed beats before marking offline)
+  // Periodic heartbeat checker to flag devices offline if no heartbeat received
   private startHeartbeatCheck() {
     setInterval(() => {
       const now = Date.now();
       const devices = db.getDevices();
       for (const d of devices) {
+        if (d.status !== 'ONLINE') continue;
+
+        // If device socket is actively open, it is definitely reachable
+        if (this.isDeviceOnline(d.deviceId)) {
+          continue;
+        }
+
         const lastBeat = new Date(d.lastHeartbeat).getTime();
-        if (now - lastBeat > 180000 && d.status === 'ONLINE') {
+        // Paused devices (e.g. on 4G) check in hourly; allow 75 mins before flagging offline
+        const timeoutMs = (d.edrStatus === 'Paused' || d.isPaused) ? 75 * 60 * 1000 : 180000;
+        if (now - lastBeat > timeoutMs) {
           db.updateDeviceStatus(d.deviceId, 'OFFLINE');
           this.broadcastToDashboards('DEVICE_STATUS_CHANGED', { deviceId: d.deviceId, status: 'OFFLINE' });
         }
