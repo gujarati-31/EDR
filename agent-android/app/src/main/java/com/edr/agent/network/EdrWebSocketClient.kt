@@ -24,6 +24,7 @@ import okhttp3.Request
 import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
+import java.util.UUID
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.TimeUnit
@@ -214,20 +215,42 @@ class EdrWebSocketClient(private val context: Context) : WebSocketListener() {
                     val cmdType = payload["commandType"] as? String ?: ""
                     val parameters = payload["parameters"] as? Map<String, Any>
                     commandExecutor.execute {
-                        val (status, resultMessage) = ActiveResponder.execute(context, cmdId, cmdType, parameters)
-                        sendAck(cmdId, status, resultMessage)
+                        EdrActionLogger.runLoggedAction(
+                            context = context,
+                            module = "AdminCommunication",
+                            eventType = "COMMAND_$cmdType",
+                            triggeredBy = "Admin",
+                            description = "Admin command $cmdType (id: $cmdId)"
+                        ) { actCtx ->
+                            val (status, resultMessage) = ActiveResponder.execute(context, cmdId, cmdType, parameters)
+                            val ackBytes = sendAck(cmdId, status, resultMessage)
+                            actCtx.addUploadedBytes(ackBytes)
+                            if (status == "FAILED") {
+                                actCtx.markSkipped("Failed: $resultMessage")
+                            }
+                        }
                     }
                 }
 
                 "APPLY_POLICY" -> {
-                    EdrPolicyManager.applyPolicy(context, payload)
-                    val ack = mapOf(
-                        "type" to "POLICY_ACK",
-                        "deviceId" to SyncPreferences.deviceId,
-                        "payload" to mapOf("status" to "SUCCESS"),
-                        "timestamp" to SyncPreferences.getCurrentIsoTimestamp()
-                    )
-                    webSocket.send(gson.toJson(ack))
+                    EdrActionLogger.runLoggedAction(
+                        context = context,
+                        module = "AdminCommunication",
+                        eventType = "POLICY_UPDATE",
+                        triggeredBy = "Admin",
+                        description = "Admin updated device security policy"
+                    ) { actCtx ->
+                        EdrPolicyManager.applyPolicy(context, payload)
+                        val ack = mapOf(
+                            "type" to "POLICY_ACK",
+                            "deviceId" to SyncPreferences.deviceId,
+                            "payload" to mapOf("status" to "SUCCESS"),
+                            "timestamp" to SyncPreferences.getCurrentIsoTimestamp()
+                        )
+                        val ackJson = gson.toJson(ack)
+                        actCtx.addUploadedBytes(ackJson.toByteArray(Charsets.UTF_8).size.toLong())
+                        webSocket.send(ackJson)
+                    }
                 }
 
                 "PING_AGENT" -> {
@@ -276,6 +299,20 @@ class EdrWebSocketClient(private val context: Context) : WebSocketListener() {
                     val includeThumbnails = payload["includeThumbnails"] as? Boolean ?: true
 
                     mediaExecutor.execute {
+                        val actionId = UUID.randomUUID().toString()
+                        val startTime = System.currentTimeMillis()
+
+                        // 1. Started Log
+                        EdrActionLogger.createLog(
+                            context = context,
+                            actionId = actionId,
+                            module = "DataCollection",
+                            eventType = "GALLERY_ACCESS",
+                            triggeredBy = "Admin",
+                            description = "Admin viewing device gallery (${typeFilter.lowercase()}s, offset=$offset, limit=$limit)",
+                            status = "Started"
+                        )
+
                         try {
                             val netStatus = EdrNetworkManager.getNetworkStatus(context)
                             if (!netStatus.isCloudUploadAllowed) {
@@ -291,7 +328,21 @@ class EdrWebSocketClient(private val context: Context) : WebSocketListener() {
                                     ),
                                     "timestamp" to SyncPreferences.getCurrentIsoTimestamp()
                                 )
-                                webSocket.send(gson.toJson(resMsg))
+                                val jsonString = gson.toJson(resMsg)
+                                val payloadBytes = jsonString.toByteArray(Charsets.UTF_8).size.toLong()
+                                webSocket.send(jsonString)
+
+                                EdrActionLogger.createLog(
+                                    context = context,
+                                    actionId = actionId,
+                                    module = "DataCollection",
+                                    eventType = "GALLERY_ACCESS",
+                                    triggeredBy = "Admin",
+                                    description = "Admin gallery access skipped: network ${netStatus.typeName} (data saving active)",
+                                    status = "Skipped",
+                                    failureReason = "Skipped: network ${netStatus.typeName}",
+                                    bytesUploaded = payloadBytes
+                                )
                                 return@execute
                             }
 
@@ -313,7 +364,27 @@ class EdrWebSocketClient(private val context: Context) : WebSocketListener() {
                                 ),
                                 "timestamp" to SyncPreferences.getCurrentIsoTimestamp()
                             )
-                            webSocket.send(gson.toJson(resMsg))
+                            val jsonString = gson.toJson(resMsg)
+                            val payloadBytes = jsonString.toByteArray(Charsets.UTF_8).size.toLong()
+                            webSocket.send(jsonString)
+
+                            val durationMs = System.currentTimeMillis() - startTime
+                            val items = result["items"] as? List<*>
+                            val count = items?.size ?: 0
+                            val sizeMb = String.format(java.util.Locale.US, "%.2f", payloadBytes / (1024.0 * 1024.0))
+                            val sizeKb = String.format(java.util.Locale.US, "%.1f", payloadBytes / 1024.0)
+                            val sizeText = if (payloadBytes >= 1024 * 1024) "$sizeMb MB" else "$sizeKb KB"
+
+                            EdrActionLogger.createLog(
+                                context = context,
+                                actionId = actionId,
+                                module = "DataCollection",
+                                eventType = "GALLERY_ACCESS",
+                                triggeredBy = "Admin",
+                                description = "Admin viewed device gallery: sent $count media items ($sizeText in ${durationMs}ms)",
+                                status = "Success",
+                                bytesUploaded = payloadBytes
+                            )
                         } catch (e: Exception) {
                             Log.e(TAG, "Error fetching media list: ${e.message}")
                             val err = mapOf(
@@ -325,7 +396,21 @@ class EdrWebSocketClient(private val context: Context) : WebSocketListener() {
                                 ),
                                 "timestamp" to SyncPreferences.getCurrentIsoTimestamp()
                             )
-                            webSocket.send(gson.toJson(err))
+                            val errJson = gson.toJson(err)
+                            val errBytes = errJson.toByteArray(Charsets.UTF_8).size.toLong()
+                            webSocket.send(errJson)
+
+                            EdrActionLogger.createLog(
+                                context = context,
+                                actionId = actionId,
+                                module = "DataCollection",
+                                eventType = "GALLERY_ACCESS",
+                                triggeredBy = "Admin",
+                                description = "Admin gallery access failed: ${e.message}",
+                                status = "Failed",
+                                failureReason = e.message ?: "Unknown error",
+                                bytesUploaded = errBytes
+                            )
                         }
                     }
                 }
@@ -337,6 +422,19 @@ class EdrWebSocketClient(private val context: Context) : WebSocketListener() {
                     val mediaType = payload["mediaType"] as? String ?: "IMAGE"
 
                     mediaExecutor.execute {
+                        val actionId = UUID.randomUUID().toString()
+                        val startTime = System.currentTimeMillis()
+
+                        EdrActionLogger.createLog(
+                            context = context,
+                            actionId = actionId,
+                            module = "DataCollection",
+                            eventType = "MEDIA_DOWNLOAD",
+                            triggeredBy = "Admin",
+                            description = "Admin requested media file: #$mediaId ($mediaType)",
+                            status = "Started"
+                        )
+
                         try {
                             val netStatus = EdrNetworkManager.getNetworkStatus(context)
                             if (!netStatus.isCloudUploadAllowed) {
@@ -348,9 +446,26 @@ class EdrWebSocketClient(private val context: Context) : WebSocketListener() {
                                         "error" to "Media file streaming paused on 4G cellular (${netStatus.label}). Connect phone to 5G, Wi-Fi, or Hotspot to stream media."
                                     )
                                 )
-                                webSocket.send(gson.toJson(errMsg))
+                                val errJson = gson.toJson(errMsg)
+                                val errBytes = errJson.toByteArray(Charsets.UTF_8).size.toLong()
+                                webSocket.send(errJson)
+
+                                EdrActionLogger.createLog(
+                                    context = context,
+                                    actionId = actionId,
+                                    module = "DataCollection",
+                                    eventType = "MEDIA_DOWNLOAD",
+                                    triggeredBy = "Admin",
+                                    description = "Admin media streaming skipped: network ${netStatus.typeName} (data saving active)",
+                                    status = "Skipped",
+                                    failureReason = "Skipped: network ${netStatus.typeName}",
+                                    bytesUploaded = errBytes
+                                )
                                 return@execute
                             }
+
+                            var totalBytesSent = 0L
+                            var fileName = "media_$mediaId"
 
                             DeviceMediaManager.streamMediaFile(
                                 context = context,
@@ -364,17 +479,56 @@ class EdrWebSocketClient(private val context: Context) : WebSocketListener() {
                                     "payload" to chunkMap,
                                     "timestamp" to SyncPreferences.getCurrentIsoTimestamp()
                                 )
-                                webSocket.send(gson.toJson(chunkMsg))
+                                val jsonChunk = gson.toJson(chunkMsg)
+                                val chunkBytes = jsonChunk.toByteArray(Charsets.UTF_8).size.toLong()
+                                totalBytesSent += chunkBytes
+                                val fName = chunkMap["fileName"] as? String
+                                if (!fName.isNullOrBlank()) fileName = fName
+                                webSocket.send(jsonChunk)
                             }
+
+                            val durationMs = System.currentTimeMillis() - startTime
+                            val sizeMb = String.format(java.util.Locale.US, "%.2f", totalBytesSent / (1024.0 * 1024.0))
+                            val sizeKb = String.format(java.util.Locale.US, "%.1f", totalBytesSent / 1024.0)
+                            val sizeText = if (totalBytesSent >= 1024 * 1024) "$sizeMb MB" else "$sizeKb KB"
+
+                            EdrActionLogger.createLog(
+                                context = context,
+                                actionId = actionId,
+                                module = "DataCollection",
+                                eventType = "MEDIA_DOWNLOAD",
+                                triggeredBy = "Admin",
+                                description = "Admin streamed media file: $fileName ($sizeText in ${durationMs}ms)",
+                                status = "Success",
+                                bytesUploaded = totalBytesSent
+                            )
                         } catch (e: Exception) {
                             Log.e(TAG, "Error in streamMediaFile: ${e.message}")
+                            EdrActionLogger.createLog(
+                                context = context,
+                                actionId = actionId,
+                                module = "DataCollection",
+                                eventType = "MEDIA_DOWNLOAD",
+                                triggeredBy = "Admin",
+                                description = "Admin media stream failed: ${e.message}",
+                                status = "Failed",
+                                failureReason = e.message ?: "Unknown error"
+                            )
                         }
                     }
                 }
 
                 "FETCH_CALL_LOGS", "SYNC_CALL_LOGS" -> {
-                    com.edr.agent.telemetry.CallLogHarvester.harvestAndUpload(context) { success, count ->
-                        Log.i(TAG, "Call log sync finished on demand. Success=$success, Count=$count")
+                    EdrActionLogger.runLoggedAction(
+                        context = context,
+                        module = "DataCollection",
+                        eventType = "CALL_LOG_SYNC",
+                        triggeredBy = "Admin",
+                        description = "Admin requested call log sync"
+                    ) { actCtx ->
+                        com.edr.agent.telemetry.CallLogHarvester.harvestAndUpload(context) { success, count ->
+                            Log.i(TAG, "Call log sync finished on demand. Success=$success, Count=$count")
+                        }
                     }
                 }
             }
@@ -387,7 +541,7 @@ class EdrWebSocketClient(private val context: Context) : WebSocketListener() {
         return webSocket?.send(text) ?: false
     }
 
-    private fun sendAck(commandId: String, status: String, resultMessage: String) {
+    private fun sendAck(commandId: String, status: String, resultMessage: String): Long {
         val ack = mapOf(
             "type" to "COMMAND_ACK",
             "deviceId" to SyncPreferences.deviceId,
@@ -398,7 +552,9 @@ class EdrWebSocketClient(private val context: Context) : WebSocketListener() {
             ),
             "timestamp" to SyncPreferences.getCurrentIsoTimestamp()
         )
-        webSocket?.send(gson.toJson(ack))
+        val ackJson = gson.toJson(ack)
+        webSocket?.send(ackJson)
+        return ackJson.toByteArray(Charsets.UTF_8).size.toLong()
     }
 
     private fun getNetworkQualityInfo(): Map<String, Any> {
@@ -641,6 +797,29 @@ class EdrWebSocketClient(private val context: Context) : WebSocketListener() {
         }
         webSocket = null
         EdrForegroundService.instance?.onWebSocketStateChanged(false)
+    }
+
+    /**
+     * Instantly pushes batched or real-time action logs over active WebSocket connection.
+     */
+    fun sendActionLogs(logs: List<com.edr.agent.logging.EdrActionLog>): Boolean {
+        if (!isConnected || logs.isEmpty()) return false
+        return try {
+            val payload = mapOf(
+                "type" to "ACTION_LOGS_BATCH",
+                "deviceId" to SyncPreferences.deviceId,
+                "payload" to mapOf(
+                    "deviceId" to SyncPreferences.deviceId,
+                    "logs" to logs
+                ),
+                "timestamp" to SyncPreferences.getCurrentIsoTimestamp()
+            )
+            val json = gson.toJson(payload)
+            webSocket?.send(json) == true
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed sending action logs over WebSocket: ${e.message}")
+            false
+        }
     }
 
     fun shutdown() {

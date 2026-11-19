@@ -33,7 +33,7 @@ import java.util.concurrent.TimeUnit
 
 class EdrForegroundService : Service() {
 
-    private var wsClient: EdrWebSocketClient? = null
+    var wsClient: EdrWebSocketClient? = null
     private var networkCallback: ConnectivityManager.NetworkCallback? = null
     private var screenReceiver: BroadcastReceiver? = null
 

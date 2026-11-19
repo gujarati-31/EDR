@@ -28,10 +28,12 @@ interface ActionLogViewerProps {
   deviceName?: string;
   isOnline: boolean;
   legacyLogs?: LogEntry[];
+  refreshTrigger?: number;
 }
 
 export const ActionLogViewer: React.FC<ActionLogViewerProps> = ({
   deviceId,
+  refreshTrigger,
 }) => {
   const [logs, setLogs] = useState<EdrActionLog[]>([]);
   const [dataUsage, setDataUsage] = useState<DataUsageStats | null>(null);
@@ -101,7 +103,7 @@ export const ActionLogViewer: React.FC<ActionLogViewerProps> = ({
 
   useEffect(() => {
     loadData();
-  }, [loadData]);
+  }, [loadData, refreshTrigger]);
 
   // Auto-refresh timer every 8s
   useEffect(() => {

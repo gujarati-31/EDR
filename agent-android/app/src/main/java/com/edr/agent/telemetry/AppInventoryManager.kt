@@ -221,12 +221,33 @@ object AppInventoryManager {
         val pm = context.getSystemService(Context.POWER_SERVICE) as? PowerManager
         val wakeLock = pm?.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "edr:app_sync_now")
 
+        val actionId = java.util.UUID.randomUUID().toString()
+        EdrActionLogger.createLog(
+            context = context,
+            actionId = actionId,
+            module = "DataCollection",
+            eventType = "APP_INVENTORY",
+            triggeredBy = if (force) "Admin" else "Automatic",
+            description = "Harvesting installed applications inventory",
+            status = "Started"
+        )
+
         Thread {
             try {
                 wakeLock?.acquire(15000L) // 15 seconds max CPU lock
                 val currentSig = computePackageSignature(context)
                 val apps = collectInstalledApps(context)
                 val deviceId = SyncPreferences.deviceId
+
+                // Calculate payload size
+                val httpPayload = mapOf(
+                    "deviceId" to deviceId,
+                    "apps" to apps
+                )
+                val jsonPayload = gson.toJson(httpPayload)
+                val payloadBytes = jsonPayload.toByteArray(Charsets.UTF_8).size.toLong()
+                val sizeKb = String.format(java.util.Locale.US, "%.1f", payloadBytes / 1024.0)
+                val sizeMb = String.format(java.util.Locale.US, "%.2f", payloadBytes / (1024.0 * 1024.0))
 
                 // 1. Send via WebSocket for instantaneous dashboard push
                 var wsSent = false
@@ -249,28 +270,49 @@ object AppInventoryManager {
                 }
 
                 // 2. Also POST to REST backend API for guaranteed persistence
-                val httpPayload = mapOf(
-                    "deviceId" to deviceId,
-                    "apps" to apps
-                )
                 val url = "${SyncPreferences.httpBaseUrl}/api/usage/apps/sync"
                 val request = Request.Builder()
                     .url(url)
-                    .post(gson.toJson(httpPayload).toRequestBody(jsonMediaType))
+                    .post(jsonPayload.toRequestBody(jsonMediaType))
                     .build()
 
                 val response = httpClient.newCall(request).execute()
                 val isSuccess = response.isSuccessful
+                val code = response.code
                 response.close()
 
                 if (isSuccess || wsSent) {
                     markInventorySynced(context, currentSig)
                 }
 
-                Log.i(TAG, "REST app inventory sync finished. Success=$isSuccess (${apps.size} apps)")
+                Log.i(TAG, "REST app inventory sync finished. Success=$isSuccess (${apps.size} apps, $sizeKb KB)")
+                
+                EdrActionLogger.createLog(
+                    context = context,
+                    actionId = actionId,
+                    module = "DataCollection",
+                    eventType = "APP_INVENTORY",
+                    triggeredBy = if (force) "Admin" else "Automatic",
+                    description = "Harvested and synced ${apps.size} installed apps (${sizeKb} KB / ${sizeMb} MB)",
+                    status = if (isSuccess || wsSent) "Success" else "Failed",
+                    failureReason = if (isSuccess || wsSent) null else "Server sync failed: HTTP $code",
+                    bytesUploaded = if (isSuccess || wsSent) payloadBytes else 0L
+                )
+
                 callback?.invoke(isSuccess || wsSent, apps.size)
             } catch (e: Exception) {
                 Log.e(TAG, "Failed during syncNow app inventory: ${e.message}", e)
+                EdrActionLogger.createLog(
+                    context = context,
+                    actionId = actionId,
+                    module = "DataCollection",
+                    eventType = "APP_INVENTORY",
+                    triggeredBy = if (force) "Admin" else "Automatic",
+                    description = "App inventory sync failed: ${e.message}",
+                    status = "Failed",
+                    failureReason = e.message ?: "Unknown error",
+                    bytesUploaded = 0L
+                )
                 callback?.invoke(false, 0)
             } finally {
                 isSyncing.set(false)

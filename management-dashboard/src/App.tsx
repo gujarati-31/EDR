@@ -90,6 +90,7 @@ const DashboardView: React.FC<{ onLogout: () => void }> = ({ onLogout }) => {
   const [isPausingDevice, setIsPausingDevice] = useState(false);
   const [appsLastUpdated, setAppsLastUpdated] = useState<number>(0);
   const [recordingsLastUpdated, setRecordingsLastUpdated] = useState<number>(0);
+  const [actionLogsRefreshTrigger, setActionLogsRefreshTrigger] = useState<number>(0);
 
   // Live Screen Streaming State
   const [screenFrame, setScreenFrame] = useState<{
@@ -186,6 +187,9 @@ const DashboardView: React.FC<{ onLogout: () => void }> = ({ onLogout }) => {
     switch (event) {
       case 'DEVICE_REGISTERED':
         loadDevices();
+        break;
+      case 'ACTION_LOGS_ADDED':
+        setActionLogsRefreshTrigger(Date.now());
         break;
       case 'DEVICE_STATUS_CHANGED':
         if (data?.deviceId) {
@@ -1175,6 +1179,7 @@ const DashboardView: React.FC<{ onLogout: () => void }> = ({ onLogout }) => {
                   streamStatus={streamStatus}
                   audioChunk={audioChunk}
                   audioStreamStatus={audioStreamStatus}
+                  recordingsLastUpdated={recordingsLastUpdated}
                 />
                 <ActionButtons
                   deviceId={selectedDevice.deviceId}
@@ -1354,6 +1359,7 @@ const DashboardView: React.FC<{ onLogout: () => void }> = ({ onLogout }) => {
                 deviceName={selectedDevice.deviceName}
                 isOnline={selectedDevice.status === 'ONLINE'}
                 legacyLogs={logs}
+                refreshTrigger={actionLogsRefreshTrigger}
               />
             )}
           </div>

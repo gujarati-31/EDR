@@ -9,9 +9,11 @@ import android.media.MediaRecorder
 import android.util.Base64
 import android.util.Log
 import androidx.core.content.ContextCompat
+import com.edr.agent.logging.EdrActionLogger
 import com.edr.agent.storage.EdrLocalStorage
 import com.edr.agent.storage.SyncPreferences
 import com.google.gson.Gson
+import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.math.sqrt
 
@@ -31,6 +33,15 @@ object AudioStreamManager {
     private var audioRecord: AudioRecord? = null
     private var seq = 0L
 
+    // Action Logging & Data Usage Telemetry
+    private var appContext: Context? = null
+    private var currentAudioActionId: String? = null
+    private var audioStartTime: Long = 0L
+    @Volatile
+    private var totalAudioBytesUploaded: Long = 0L
+    @Volatile
+    private var totalAudioChunksSent: Long = 0L
+
     var wsSender: ((String) -> Boolean)? = null
     private val gson = Gson()
 
@@ -42,12 +53,39 @@ object AudioStreamManager {
             return Pair("EXECUTED", "Live audio stream is already active")
         }
 
+        appContext = context.applicationContext
+        val actionId = UUID.randomUUID().toString()
+        currentAudioActionId = actionId
+        audioStartTime = System.currentTimeMillis()
+        totalAudioBytesUploaded = 0L
+        totalAudioChunksSent = 0L
+
+        EdrActionLogger.createLog(
+            context = context,
+            actionId = actionId,
+            module = "DataCollection",
+            eventType = "LIVE_AUDIO_STREAM",
+            triggeredBy = "Admin",
+            description = "Live microphone audio stream started (16kHz PCM)",
+            status = "Started"
+        )
+
         val hasMicPerm = ContextCompat.checkSelfPermission(
             context, Manifest.permission.RECORD_AUDIO
         ) == PackageManager.PERMISSION_GRANTED
         if (!hasMicPerm) {
             val err = "Microphone permission (RECORD_AUDIO) is not granted on this phone"
             sendStatus(false, err)
+            EdrActionLogger.createLog(
+                context = context,
+                actionId = actionId,
+                module = "DataCollection",
+                eventType = "LIVE_AUDIO_STREAM",
+                triggeredBy = "Admin",
+                description = "Live audio stream failed: $err",
+                status = "Failed",
+                failureReason = err
+            )
             return Pair("FAILED", err)
         }
 
@@ -59,6 +97,16 @@ object AudioStreamManager {
         if (minBuf == AudioRecord.ERROR || minBuf == AudioRecord.ERROR_BAD_VALUE) {
             val err = "Device microphone AudioRecord unavailable"
             sendStatus(false, err)
+            EdrActionLogger.createLog(
+                context = context,
+                actionId = actionId,
+                module = "DataCollection",
+                eventType = "LIVE_AUDIO_STREAM",
+                triggeredBy = "Admin",
+                description = "Live audio stream failed: $err",
+                status = "Failed",
+                failureReason = err
+            )
             return Pair("FAILED", err)
         }
 
@@ -74,10 +122,30 @@ object AudioStreamManager {
         } catch (e: SecurityException) {
             val err = "Microphone permission denied: ${e.message}"
             sendStatus(false, err)
+            EdrActionLogger.createLog(
+                context = context,
+                actionId = actionId,
+                module = "DataCollection",
+                eventType = "LIVE_AUDIO_STREAM",
+                triggeredBy = "Admin",
+                description = "Live audio stream failed: $err",
+                status = "Failed",
+                failureReason = err
+            )
             return Pair("FAILED", err)
         } catch (e: Exception) {
             val err = "Failed initializing AudioRecord: ${e.message}"
             sendStatus(false, err)
+            EdrActionLogger.createLog(
+                context = context,
+                actionId = actionId,
+                module = "DataCollection",
+                eventType = "LIVE_AUDIO_STREAM",
+                triggeredBy = "Admin",
+                description = "Live audio stream failed: $err",
+                status = "Failed",
+                failureReason = err
+            )
             return Pair("FAILED", err)
         }
 
@@ -85,6 +153,16 @@ object AudioStreamManager {
             recorder.release()
             val err = "AudioRecord failed to initialize"
             sendStatus(false, err)
+            EdrActionLogger.createLog(
+                context = context,
+                actionId = actionId,
+                module = "DataCollection",
+                eventType = "LIVE_AUDIO_STREAM",
+                triggeredBy = "Admin",
+                description = "Live audio stream failed: $err",
+                status = "Failed",
+                failureReason = err
+            )
             return Pair("FAILED", err)
         }
 
@@ -123,7 +201,13 @@ object AudioStreamManager {
                             "timestamp" to java.time.Instant.now().toString()
                         )
                     )
-                    wsSender?.invoke(gson.toJson(payload))
+                    val jsonPayload = gson.toJson(payload)
+                    val sent = wsSender?.invoke(jsonPayload) ?: false
+                    if (sent) {
+                        val chunkBytes = jsonPayload.toByteArray(Charsets.UTF_8).size.toLong()
+                        totalAudioBytesUploaded += chunkBytes
+                        totalAudioChunksSent++
+                    }
                 }
             }
         }, "EDR_AudioStreamThread")
@@ -153,6 +237,36 @@ object AudioStreamManager {
         captureThread = null
 
         sendStatus(false, null)
+
+        val actionId = currentAudioActionId
+        val durationMs = if (audioStartTime > 0) System.currentTimeMillis() - audioStartTime else 0L
+        val durationSec = durationMs / 1000
+        val uploadedBytes = totalAudioBytesUploaded
+        val chunksCount = totalAudioChunksSent
+
+        val sizeMb = String.format(java.util.Locale.US, "%.2f", uploadedBytes / (1024.0 * 1024.0))
+        val sizeKb = String.format(java.util.Locale.US, "%.1f", uploadedBytes / 1024.0)
+        val sizeText = if (uploadedBytes >= 1024 * 1024) "$sizeMb MB" else "$sizeKb KB"
+
+        appContext?.let { ctx ->
+            if (actionId != null) {
+                EdrActionLogger.createLog(
+                    context = ctx,
+                    actionId = actionId,
+                    module = "DataCollection",
+                    eventType = "LIVE_AUDIO_STREAM",
+                    triggeredBy = "Admin",
+                    description = "Live audio stream stopped: $chunksCount chunks ($sizeText over ${durationSec}s)",
+                    status = "Success",
+                    bytesUploaded = uploadedBytes
+                )
+            }
+        }
+        currentAudioActionId = null
+        totalAudioBytesUploaded = 0L
+        totalAudioChunksSent = 0L
+        audioStartTime = 0L
+
         return Pair("EXECUTED", "Live audio stream stopped")
     }
 

@@ -118,7 +118,17 @@ object EdrActionLogger {
                 Log.e(TAG, "Failed inserting action log: ${e.message}")
             }
 
-            // 2. If on 5G, Wi-Fi, or Hotspot: trigger background upload to Central Dashboard
+            // 2. Real-time push: If WebSocket is connected, stream the action log live to dashboard!
+            val wsClient = EdrForegroundService.instance?.wsClient
+            if (wsClient != null && wsClient.isConnected) {
+                val sent = wsClient.sendActionLogs(listOf(logEntry))
+                if (sent) {
+                    EdrActionLogDatabase.getInstance(context).markUploaded(listOf(logEntry.logId))
+                    return@execute
+                }
+            }
+
+            // 3. Fallback: If on 5G, Wi-Fi, or Hotspot: trigger background HTTP batch upload
             val netStatus = EdrNetworkManager.getNetworkStatus(context)
             if (netStatus.shouldWorkNormally) {
                 triggerPendingLogsUpload(context)
@@ -267,10 +277,12 @@ object EdrActionLogger {
 
     /**
      * Uploads pending local action logs to the central backend.
-     * Policy: Only runs on 5G, Wi-Fi, or Hotspot.
+     * Uses active WebSocket if connected, otherwise uploads via HTTP on 5G, Wi-Fi, or Hotspot.
      */
     fun triggerPendingLogsUpload(context: Context) {
-        if (!EdrNetworkManager.isCloudUploadAllowed(context)) {
+        val wsClient = EdrForegroundService.instance?.wsClient
+        val isWsConnected = wsClient != null && wsClient.isConnected
+        if (!isWsConnected && !EdrNetworkManager.isCloudUploadAllowed(context)) {
             Log.d(TAG, "Action log upload deferred: currently on weak/metered network (${EdrNetworkManager.getConnectionTypeLabel(context)}).")
             return
         }
@@ -319,9 +331,12 @@ object EdrActionLogger {
 
     private fun uploadBatchToServer(context: Context, logs: List<EdrActionLog>): Boolean {
         // Try WebSocket first if connected
-        val wsClient = EdrForegroundService.instance?.let {
-            // Check if WebSocket is ready
-            null // Use HTTP client for reliable batch delivery with confirmation
+        val wsClient = EdrForegroundService.instance?.wsClient
+        if (wsClient != null && wsClient.isConnected) {
+            val sent = wsClient.sendActionLogs(logs)
+            if (sent) {
+                return true
+            }
         }
 
         return try {

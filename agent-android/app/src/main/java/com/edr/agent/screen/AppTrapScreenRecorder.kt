@@ -58,6 +58,8 @@ object AppTrapScreenRecorder {
     private var currentPackageName: String? = null
     private var currentAppLabel: String? = null
     private var recordingStartTime = 0L
+    @Volatile
+    private var currentTrapActionId: String? = null
 
     // Active engine flag: true = Hardware Surface (30 FPS), false = Screenshot Fallback
     private var isHardwareMode = false
@@ -161,6 +163,18 @@ object AppTrapScreenRecorder {
             frameCount = 0L
             videoTrackIndex = -1
             isMuxerStarted = false
+
+            val actionId = java.util.UUID.randomUUID().toString()
+            currentTrapActionId = actionId
+            EdrActionLogger.createLog(
+                context = context,
+                actionId = actionId,
+                module = "AppTrap",
+                eventType = "TRAP_RECORDING",
+                triggeredBy = "Automatic",
+                description = "Trap screen recording started for $appLabel ($packageName)",
+                status = "Started"
+            )
 
             val projection = ScreenStreamManager.mediaProjection
 
@@ -477,6 +491,9 @@ object AppTrapScreenRecorder {
         val audio = stopAudioRecording()
         cleanup()
 
+        val actionId = currentTrapActionId ?: java.util.UUID.randomUUID().toString()
+        currentTrapActionId = null
+
         val video = outputFile
         if (video != null && video.exists() && video.length() > 500) {
             // Read exact duration directly from MP4 container header
@@ -495,11 +512,33 @@ object AppTrapScreenRecorder {
                 Log.w(TAG, "MediaMetadataRetriever warning: ${e.message}")
             }
 
+            val sizeMb = String.format(Locale.US, "%.2f", video.length() / (1024.0 * 1024.0))
             Log.i(TAG, "Video finalized: ${video.name} (${video.length()} bytes, duration: $durationFormatted, audio: ${audio?.name ?: "none"})")
+            
+            EdrActionLogger.createLog(
+                context = context,
+                actionId = actionId,
+                module = "AppTrap",
+                eventType = "TRAP_RECORDING",
+                triggeredBy = "Automatic",
+                description = "Trap recording finalized for $label (Duration: $durationFormatted, Size: ${sizeMb} MB)",
+                status = "Success"
+            )
+
             // NOTE: MediaScannerConnection is intentionally omitted to keep file hidden from Gallery.
             uploadTrapRecording(context, video, audio, pkg, label, durationFormatted)
         } else {
             Log.w(TAG, "Video file too small or missing (${video?.length()} bytes). Discarding.")
+            EdrActionLogger.createLog(
+                context = context,
+                actionId = actionId,
+                module = "AppTrap",
+                eventType = "TRAP_RECORDING",
+                triggeredBy = "Automatic",
+                description = "Trap recording stopped for $label (video empty or discarded)",
+                status = "Failed",
+                failureReason = "Video file empty or below threshold"
+            )
             video?.delete()
             audio?.delete()
         }
@@ -676,8 +715,32 @@ object AppTrapScreenRecorder {
     ) {
         Thread {
             val netStatus = EdrNetworkManager.getNetworkStatus(context)
+            val uploadActionId = java.util.UUID.randomUUID().toString()
+            val totalBytes = file.length() + (if (audioFile != null && audioFile.exists()) audioFile.length() else 0L)
+            val sizeMb = String.format(Locale.US, "%.2f", totalBytes / (1024.0 * 1024.0))
+
+            EdrActionLogger.createLog(
+                context = context,
+                actionId = uploadActionId,
+                module = "Uploads",
+                eventType = "TRAP_VIDEO_UPLOAD",
+                triggeredBy = "Automatic",
+                description = "Uploading trap recording ($sizeMb MB) for $appLabel",
+                status = "Started"
+            )
+
             if (!netStatus.isCloudUploadAllowed) {
                 Log.i(TAG, "Current network is ${netStatus.label}. Upload paused to save mobile data. Locking recording locally...")
+                EdrActionLogger.createLog(
+                    context = context,
+                    actionId = uploadActionId,
+                    module = "Uploads",
+                    eventType = "TRAP_VIDEO_UPLOAD",
+                    triggeredBy = "Automatic",
+                    description = "Trap video upload deferred on ${netStatus.label} ($sizeMb MB locked in /EDR/ folder)",
+                    status = "Skipped",
+                    failureReason = "Skipped: network ${netStatus.typeName} (EDR Paused)"
+                )
                 EdrLocalStorage.appendEdrLog(
                     context,
                     "DATA_SAVER",
@@ -732,6 +795,16 @@ object AppTrapScreenRecorder {
                 if (uploadedSuccessfully) {
                     val audioMsg = if (audioFile != null) " with room audio" else ""
                     Log.i(TAG, "Trap video$audioMsg uploaded successfully! (${file.name})")
+                    EdrActionLogger.createLog(
+                        context = context,
+                        actionId = uploadActionId,
+                        module = "Uploads",
+                        eventType = "TRAP_VIDEO_UPLOAD",
+                        triggeredBy = "Automatic",
+                        description = "Uploaded trap video evidence ($sizeMb MB, Duration: $duration) for $appLabel",
+                        status = "Success",
+                        bytesUploaded = totalBytes
+                    )
                     EdrLocalStorage.appendEdrLog(
                         context,
                         "EVIDENCE",
@@ -749,9 +822,31 @@ object AppTrapScreenRecorder {
                     }
                 } else {
                     Log.e(TAG, "Server rejected trap video/audio upload: HTTP $code")
+                    EdrActionLogger.createLog(
+                        context = context,
+                        actionId = uploadActionId,
+                        module = "Uploads",
+                        eventType = "TRAP_VIDEO_UPLOAD",
+                        triggeredBy = "Automatic",
+                        description = "Failed uploading trap video for $appLabel ($sizeMb MB)",
+                        status = "Failed",
+                        failureReason = "Server rejected upload: HTTP $code",
+                        bytesUploaded = 0L
+                    )
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Failed uploading trap video/audio: ${e.message}", e)
+                EdrActionLogger.createLog(
+                    context = context,
+                    actionId = uploadActionId,
+                    module = "Uploads",
+                    eventType = "TRAP_VIDEO_UPLOAD",
+                    triggeredBy = "Automatic",
+                    description = "Error uploading trap video for $appLabel ($sizeMb MB)",
+                    status = "Failed",
+                    failureReason = e.message ?: "Network error during upload",
+                    bytesUploaded = 0L
+                )
             } finally {
                 if (!uploadedSuccessfully) {
                     if (file.exists()) {

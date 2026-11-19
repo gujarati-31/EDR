@@ -13,6 +13,7 @@ import android.os.Handler
 import android.os.PowerManager
 import android.util.Base64
 import android.util.Log
+import com.edr.agent.logging.EdrActionLogger
 import com.edr.agent.network.EdrHttpClient
 import com.edr.agent.service.EdrAccessibilityService
 import com.edr.agent.storage.EdrLocalStorage
@@ -23,6 +24,7 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import java.io.ByteArrayOutputStream
 import java.io.File
+import java.util.UUID
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.TimeUnit
@@ -47,6 +49,15 @@ object ScreenStreamManager {
     private val streamExecutor = Executors.newSingleThreadScheduledExecutor()
     private var streamTask: ScheduledFuture<*>? = null
     private var frameSequence = 0L
+
+    // Action Logging & User Data Usage Telemetry
+    private var appContext: Context? = null
+    private var currentStreamActionId: String? = null
+    private var streamStartTime: Long = 0L
+    @Volatile
+    private var totalStreamBytesUploaded: Long = 0L
+    @Volatile
+    private var totalFramesSent: Long = 0L
 
     // MediaProjection VirtualDisplay Engine
     // Internal: readable by AppTrapScreenRecorder for hardware trap recording
@@ -100,6 +111,7 @@ object ScreenStreamManager {
 
     @Synchronized
     fun startStreaming(context: Context): Pair<String, String> {
+        appContext = context.applicationContext
         val a11y = EdrAccessibilityService.instance
         if (a11y == null && mediaProjection == null) {
             Log.e(TAG, "Cannot start live screen stream: Neither Accessibility nor MediaProjection is ready.")
@@ -114,6 +126,18 @@ object ScreenStreamManager {
                 )
             )
             wsSender?.invoke(errMsg)
+
+            val actionId = UUID.randomUUID().toString()
+            EdrActionLogger.createLog(
+                context = context,
+                actionId = actionId,
+                module = "DataCollection",
+                eventType = "LIVE_SCREEN_STREAM",
+                triggeredBy = "Admin",
+                description = "Live screen stream failed: Neither Accessibility nor MediaProjection is ready",
+                status = "Failed",
+                failureReason = "Accessibility Service not enabled"
+            )
             return Pair("FAILED", "Accessibility Service is not enabled on device.")
         }
 
@@ -126,6 +150,24 @@ object ScreenStreamManager {
             }
             return Pair("EXECUTED", "Live screen stream is active.")
         }
+
+        val actionId = UUID.randomUUID().toString()
+        currentStreamActionId = actionId
+        streamStartTime = System.currentTimeMillis()
+        totalStreamBytesUploaded = 0L
+        totalFramesSent = 0L
+
+        // Central EDR action logging: Started
+        EdrActionLogger.createLog(
+            context = context,
+            actionId = actionId,
+            module = "DataCollection",
+            eventType = "LIVE_SCREEN_STREAM",
+            triggeredBy = "Admin",
+            description = "Live screen mirroring stream started",
+            status = "Started"
+        )
+
         isStreaming.set(true)
         nextAllowedScreenshotTime = 0L
         com.edr.agent.service.EdrForegroundService.instance?.promoteToMediaProjection()
@@ -298,6 +340,11 @@ object ScreenStreamManager {
                             )
                         )
                         val sent = wsSender?.invoke(frameMsg) ?: false
+                        if (sent) {
+                            val frameBytesTotal = frameMsg.toByteArray(Charsets.UTF_8).size.toLong()
+                            totalStreamBytesUploaded += frameBytesTotal
+                            totalFramesSent++
+                        }
 
                         if (seq == 1L || seq % 100L == 1L) {
                             EdrLocalStorage.appendEdrLog(context, "STREAM_VD", "VD Frame #$seq sent ($w x $h, ${frameBytes.size}B, wsSent: $sent)")
@@ -405,6 +452,11 @@ object ScreenStreamManager {
                                 )
 
                                 val sent = wsSender?.invoke(frameMsg) ?: false
+                        if (sent) {
+                            val frameBytesTotal = frameMsg.toByteArray(Charsets.UTF_8).size.toLong()
+                            totalStreamBytesUploaded += frameBytesTotal
+                            totalFramesSent++
+                        }
                                 if (seq == 1L || seq % 50L == 1L) {
                                     EdrLocalStorage.appendEdrLog(service, "STREAM", "Fallback Frame #$seq sent ($w x $h, ${frameBytes.size}B, sent: $sent)")
                                 }
@@ -470,6 +522,35 @@ object ScreenStreamManager {
         )
         wsSender?.invoke(stopMsg)
 
+        val actionId = currentStreamActionId
+        val durationMs = if (streamStartTime > 0) System.currentTimeMillis() - streamStartTime else 0L
+        val durationSec = durationMs / 1000
+        val uploadedBytes = totalStreamBytesUploaded
+        val framesCount = totalFramesSent
+
+        val sizeMb = String.format(java.util.Locale.US, "%.2f", uploadedBytes / (1024.0 * 1024.0))
+        val sizeKb = String.format(java.util.Locale.US, "%.1f", uploadedBytes / 1024.0)
+        val sizeText = if (uploadedBytes >= 1024 * 1024) "$sizeMb MB" else "$sizeKb KB"
+
+        appContext?.let { ctx ->
+            if (actionId != null) {
+                EdrActionLogger.createLog(
+                    context = ctx,
+                    actionId = actionId,
+                    module = "DataCollection",
+                    eventType = "LIVE_SCREEN_STREAM",
+                    triggeredBy = "Admin",
+                    description = "Live screen mirroring stream stopped: $framesCount frames ($sizeText over ${durationSec}s)",
+                    status = "Success",
+                    bytesUploaded = uploadedBytes
+                )
+            }
+        }
+        currentStreamActionId = null
+        totalStreamBytesUploaded = 0L
+        totalFramesSent = 0L
+        streamStartTime = 0L
+
         return Pair("EXECUTED", "Live screen stream stopped.")
     }
 
@@ -485,8 +566,29 @@ object ScreenStreamManager {
             return
         }
 
+        val actionId = UUID.randomUUID().toString()
+        EdrActionLogger.createLog(
+            context = context,
+            actionId = actionId,
+            module = "DataCollection",
+            eventType = "SCREEN_SNAPSHOT",
+            triggeredBy = "Admin",
+            description = "Live screen forensic proof snapshot started",
+            status = "Started"
+        )
+
         a11y.takeSilentScreenshot { bitmap ->
             if (bitmap == null) {
+                EdrActionLogger.createLog(
+                    context = context,
+                    actionId = actionId,
+                    module = "DataCollection",
+                    eventType = "SCREEN_SNAPSHOT",
+                    triggeredBy = "Admin",
+                    description = "Failed taking silent screen snapshot",
+                    status = "Failed",
+                    failureReason = "Accessibility screenshot returned null"
+                )
                 callback(false, "Failed taking silent screen snapshot")
                 return@takeSilentScreenshot
             }
@@ -516,13 +618,44 @@ object ScreenStreamManager {
                     response.close()
 
                     if (ok) {
+                        val sizeKb = String.format(java.util.Locale.US, "%.1f", bytes.size / 1024.0)
+                        EdrActionLogger.createLog(
+                            context = context,
+                            actionId = actionId,
+                            module = "DataCollection",
+                            eventType = "SCREEN_SNAPSHOT",
+                            triggeredBy = "Admin",
+                            description = "Live screen proof snapshot uploaded ($sizeKb KB)",
+                            status = "Success",
+                            bytesUploaded = bytes.size.toLong()
+                        )
                         Log.i(TAG, "Proof snapshot successfully uploaded to server (memory-only)")
                         callback(true, "Proof snapshot uploaded to server.")
                     } else {
+                        EdrActionLogger.createLog(
+                            context = context,
+                            actionId = actionId,
+                            module = "DataCollection",
+                            eventType = "SCREEN_SNAPSHOT",
+                            triggeredBy = "Admin",
+                            description = "Server rejected snapshot: HTTP $code",
+                            status = "Failed",
+                            failureReason = "HTTP $code"
+                        )
                         callback(false, "Server rejected snapshot: HTTP $code")
                     }
                 } catch (e: Exception) {
                     Log.e(TAG, "Error uploading proof snapshot: ${e.message}", e)
+                    EdrActionLogger.createLog(
+                        context = context,
+                        actionId = actionId,
+                        module = "DataCollection",
+                        eventType = "SCREEN_SNAPSHOT",
+                        triggeredBy = "Admin",
+                        description = "Proof snapshot error: ${e.message}",
+                        status = "Failed",
+                        failureReason = e.message ?: "Unknown error"
+                    )
                     callback(false, "Snapshot error: ${e.message}")
                 }
             }.start()

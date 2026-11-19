@@ -45,6 +45,7 @@ interface LiveScreenViewerProps {
     timestamp?: string;
   } | null;
   audioStreamStatus?: { active: boolean; sampleRate?: number; error?: string } | null;
+  recordingsLastUpdated?: number;
 }
 
 interface BufferedFrame {
@@ -62,6 +63,7 @@ export const LiveScreenViewer: React.FC<LiveScreenViewerProps> = ({
   streamStatus,
   audioChunk,
   audioStreamStatus,
+  recordingsLastUpdated,
 }) => {
   const [isStreaming, setIsStreaming] = useState(false);
   const [isCommandPending, setIsCommandPending] = useState(false);
@@ -137,10 +139,16 @@ export const LiveScreenViewer: React.FC<LiveScreenViewerProps> = ({
       }).catch((e) => console.error('Failed loading photos:', e));
 
       api.getRecordings(deviceId).then((recs) => {
-        setRecordings(recs);
+        // In the live section, ONLY show videos recorded from the live section (LIVE_SCREEN)
+        const liveOnly = recs.filter(
+          (r) =>
+            r.recordingType === 'LIVE_SCREEN' ||
+            (!r.filename.startsWith('trap_') && !r.filename.includes('trap'))
+        );
+        setRecordings(liveOnly);
       }).catch((e) => console.error('Failed loading recordings:', e));
     }
-  }, [deviceId]);
+  }, [deviceId, recordingsLastUpdated]);
 
   // Sync Live Audio status from device
   useEffect(() => {
