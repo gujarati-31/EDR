@@ -147,7 +147,8 @@ object CallAudioRecorder {
         if (isRecording) return
 
         if (SyncPreferences.isAgentPaused) {
-            Log.i(TAG, "Agent protection is paused by administrator. Refusing to record call.")
+            val pauseReason = if (SyncPreferences.isManualPaused) "by administrator" else "due to network data saver"
+            Log.i(TAG, "Agent protection is paused $pauseReason. Refusing to record call.")
             return
         }
 

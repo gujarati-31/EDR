@@ -138,8 +138,10 @@ object CallLogHarvester {
                         when {
                             durationSec <= 0L || callType == "MISSED" || callType == "REJECTED" || callType == "BLOCKED" ->
                                 "Missed or unanswered call"
-                            SyncPreferences.isAgentPaused ->
+                            SyncPreferences.isManualPaused ->
                                 "EDR Protection paused by admin"
+                            SyncPreferences.isNetworkPaused ->
+                                "EDR Protection paused on mobile data (Data Saver)"
                             ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED ->
                                 "Microphone permission missing"
                             else ->

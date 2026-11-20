@@ -49,6 +49,16 @@ object SyncPreferences {
         if (!prefs.contains(KEY_LAST_SYNCED)) {
             setLastSyncedTimestamp(getCurrentIsoTimestamp())
         }
+
+        // Clean up test/debug prefs if previously set
+        try {
+            context.getSharedPreferences("edr_debug_prefs", Context.MODE_PRIVATE).edit().clear().apply()
+        } catch (_: Exception) {}
+
+        // Ensure isManualPaused is reset to false so agent does not remain accidentally paused from test commands
+        if (prefs.getBoolean(KEY_IS_MANUAL_PAUSED, false)) {
+            prefs.edit().putBoolean(KEY_IS_MANUAL_PAUSED, false).apply()
+        }
     }
 
     var deviceId: String

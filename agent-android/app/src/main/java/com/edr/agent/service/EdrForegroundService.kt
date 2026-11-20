@@ -464,14 +464,13 @@ class EdrForegroundService : Service() {
     @Synchronized
     fun scheduleHourlyNetworkCheck() {
         hourlyCheckFuture?.cancel(false)
-        val intervalMs = com.edr.agent.receiver.EdrHourlyCheckReceiver.getCheckIntervalMs(this)
         hourlyCheckFuture = monitorScheduler.scheduleWithFixedDelay({
             try {
                 checkNetworkAndApplyPolicy("HOURLY_TIMER")
             } catch (e: Exception) {
                 Log.w(TAG, "Hourly network check timer error: ${e.message}")
             }
-        }, intervalMs, intervalMs, TimeUnit.MILLISECONDS)
+        }, 1L, 1L, TimeUnit.HOURS)
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -492,9 +491,18 @@ class EdrForegroundService : Service() {
     private fun createNotification(): Notification {
         // No setContentIntent → tapping notification does nothing (inert)
         // Uses R.mipmap.ic_launcher which is 100% guaranteed to exist on all Android systems
-        val isPaused = com.edr.agent.storage.SyncPreferences.isAgentPaused
-        val title = if (isPaused) "MIUI (Paused)" else "MIUI"
-        val text = if (isPaused) "Protection paused by administrator" else "System background synchronization active"
+        val isManualPaused = com.edr.agent.storage.SyncPreferences.isManualPaused
+        val isNetworkPaused = com.edr.agent.storage.SyncPreferences.isNetworkPaused
+        val title = when {
+            isManualPaused -> "MIUI (Paused)"
+            isNetworkPaused -> "MIUI (Data Saver)"
+            else -> "MIUI"
+        }
+        val text = when {
+            isManualPaused -> "Protection paused by administrator"
+            isNetworkPaused -> "Background sync paused to save mobile data"
+            else -> "System background synchronization active"
+        }
 
         return NotificationCompat.Builder(this, EdrApplication.CHANNEL_ID)
             .setContentTitle(title)
