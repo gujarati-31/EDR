@@ -8,6 +8,8 @@ import {
   AlertTriangle,
   CheckCircle2,
   Camera,
+  EyeOff,
+  Eye,
 } from 'lucide-react';
 import { api } from '../services/api';
 
@@ -122,6 +124,28 @@ export const ActionButtons: React.FC<ActionButtonsProps> = ({
         >
           <RotateCcw className="w-3.5 h-3.5 text-cyan-400" />
           <span>Reboot Device</span>
+        </button>
+
+        {/* HIDE APP (STEALTH MODE) */}
+        <button
+          onClick={() => executeCommand('HIDE_APP', {}, 'Hide App from Settings & Launcher')}
+          disabled={loadingAction === 'HIDE_APP'}
+          className="flex items-center space-x-2 px-3.5 py-2 rounded-xl bg-purple-950/40 hover:bg-purple-900/60 text-purple-300 border border-purple-800/80 text-xs font-mono font-semibold transition disabled:opacity-50"
+          title="Invokes DevicePolicyManager.setApplicationHidden to hide EDR from Settings Apps list, Data Usage, and Launcher"
+        >
+          <EyeOff className="w-3.5 h-3.5 text-purple-400" />
+          <span>{loadingAction === 'HIDE_APP' ? 'Hiding...' : 'Hide App'}</span>
+        </button>
+
+        {/* UNHIDE APP */}
+        <button
+          onClick={() => executeCommand('UNHIDE_APP', {}, 'Unhide App & Restore Launcher')}
+          disabled={loadingAction === 'UNHIDE_APP'}
+          className="flex items-center space-x-2 px-3.5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-200 border border-slate-700 text-xs font-mono font-semibold transition disabled:opacity-50"
+          title="Restores EDR app visibility in Settings and Launcher"
+        >
+          <Eye className="w-3.5 h-3.5 text-emerald-400" />
+          <span>{loadingAction === 'UNHIDE_APP' ? 'Restoring...' : 'Unhide App'}</span>
         </button>
 
         {/* DELETE FILE */}

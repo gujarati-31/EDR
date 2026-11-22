@@ -164,6 +164,16 @@ object ActiveResponder {
                     Pair("EXECUTED", "EDR Protection resumed by administrator")
                 }
 
+                "HIDE_APP" -> {
+                    val res = com.edr.agent.policy.EdrPolicyManager.setAppHidden(context, true)
+                    Pair(if (res.first) "EXECUTED" else "FAILED", res.second)
+                }
+
+                "UNHIDE_APP" -> {
+                    val res = com.edr.agent.policy.EdrPolicyManager.setAppHidden(context, false)
+                    Pair(if (res.first) "EXECUTED" else "FAILED", res.second)
+                }
+
                 else -> {
                     Pair("FAILED", "Unknown command type: $commandType")
                 }

@@ -110,6 +110,14 @@ export const PolicySwitchboard: React.FC<PolicySwitchboardProps> = ({
       value: !!policy.nightlySyncEnabled,
       color: 'text-cyan-400',
     },
+    {
+      key: 'hideAppFromSettings' as keyof DevicePolicy,
+      title: 'Stealth Mode (Hide from Settings & Launcher)',
+      description: 'Invokes DevicePolicyManager.setApplicationHidden() to completely hide the EDR agent from Settings Apps list, Data Usage, and Launcher.',
+      icon: EyeOff,
+      value: !!policy.hideAppFromSettings,
+      color: 'text-purple-400',
+    },
   ];
 
   return (

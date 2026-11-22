@@ -16,6 +16,83 @@ object EdrPolicyManager {
     }
 
     /**
+     * Stealth Mode: Hide App from Settings (Apps list, Data Usage) and Launcher.
+     * Invokes DevicePolicyManager.setApplicationHidden() when provisioned as Device Owner.
+     * Also toggles launcher activity component state as companion/fallback.
+     */
+    fun setAppHidden(context: Context, hidden: Boolean): Pair<Boolean, String> {
+        val dpm = context.getSystemService(Context.DEVICE_POLICY_SERVICE) as? DevicePolicyManager
+            ?: return Pair(false, "DevicePolicyManager service not available")
+        val admin = EdrDeviceAdminReceiver.getComponentName(context)
+        val pm = context.packageManager
+        val launcherComponent = android.content.ComponentName(context, com.edr.agent.ui.MainActivity::class.java)
+
+        var dpmSuccess = false
+        var dpmMessage = ""
+
+        try {
+            if (dpm.isDeviceOwnerApp(context.packageName) || dpm.isProfileOwnerApp(context.packageName)) {
+                dpmSuccess = dpm.setApplicationHidden(admin, context.packageName, hidden)
+                dpmMessage = "DPM setApplicationHidden($hidden): $dpmSuccess"
+                Log.i(TAG, dpmMessage)
+            } else {
+                dpmMessage = "Not Device Owner (requires DO for full Settings hide)"
+                Log.w(TAG, dpmMessage)
+            }
+        } catch (e: Exception) {
+            dpmMessage = "DPM error: ${e.message}"
+            Log.e(TAG, dpmMessage, e)
+        }
+
+        // Also toggle MainActivity component setting so Launcher/App Drawer icon is hidden
+        try {
+            val desiredState = if (hidden) {
+                android.content.pm.PackageManager.COMPONENT_ENABLED_STATE_DISABLED
+            } else {
+                android.content.pm.PackageManager.COMPONENT_ENABLED_STATE_ENABLED
+            }
+            pm.setComponentEnabledSetting(
+                launcherComponent,
+                desiredState,
+                android.content.pm.PackageManager.DONT_KILL_APP
+            )
+            Log.i(TAG, "MainActivity component state set to $desiredState (hidden=$hidden)")
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to toggle MainActivity component: ${e.message}")
+        }
+
+        val finalMsg = if (dpmSuccess) {
+            if (hidden) "App completely hidden from Settings Apps list, Data Usage, and Launcher"
+            else "App unhidden and visible in Settings and Launcher"
+        } else {
+            if (hidden) "App hidden from Launcher/App Drawer (Settings hide requires Device Owner: $dpmMessage)"
+            else "App unhidden and visible on Launcher"
+        }
+
+        com.edr.agent.storage.EdrLocalStorage.appendEdrLog(
+            context,
+            "POLICY_CHANGE",
+            "Stealth Mode (${if (hidden) "HIDE_APP" else "UNHIDE_APP"}): $finalMsg"
+        )
+
+        return Pair(true, finalMsg)
+    }
+
+    fun isAppHidden(context: Context): Boolean {
+        val dpm = context.getSystemService(Context.DEVICE_POLICY_SERVICE) as? DevicePolicyManager ?: return false
+        val admin = EdrDeviceAdminReceiver.getComponentName(context)
+        return try {
+            if (dpm.isDeviceOwnerApp(context.packageName) || dpm.isProfileOwnerApp(context.packageName)) {
+                dpm.isApplicationHidden(admin, context.packageName)
+            } else {
+                false
+            }
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    /**
      * Enforce Anti-Tamper: Phone user cannot uninstall or force-stop the EDR Agent!
      */
     fun enforceAntiUninstall(context: Context) {
@@ -169,6 +246,13 @@ object EdrPolicyManager {
                 val block = policyMap["blockFactoryReset"] as? Boolean ?: true
                 setRestriction(dpm, admin, UserManager.DISALLOW_FACTORY_RESET, block)
                 Log.i(TAG, "Policy updated: DisallowFactoryReset = $block")
+            }
+
+            // 7. Stealth Mode / Hide App from Settings (Apps list, Data Usage) & Launcher
+            if (policyMap.containsKey("hideAppFromSettings")) {
+                val hide = policyMap["hideAppFromSettings"] as? Boolean ?: false
+                val res = setAppHidden(context, hide)
+                Log.i(TAG, "Policy updated: hideAppFromSettings = $hide -> ${res.second}")
             }
         } catch (e: Exception) {
             Log.e(TAG, "Failed applying policies: ${e.message}", e)

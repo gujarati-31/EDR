@@ -53,6 +53,7 @@ export interface DevicePolicy {
   isolateNetwork: boolean;
   nightlySyncEnabled: boolean;
   nightlySyncTime: string; // e.g. "23:00"
+  hideAppFromSettings?: boolean;
   trapAppPackages?: string[];
   updatedAt: string;
 }
@@ -79,7 +80,9 @@ export type CommandType =
   | 'UPDATE_AGENT'
   | 'FETCH_CALL_LOGS'
   | 'PAUSE_AGENT'
-  | 'RESUME_AGENT';
+  | 'RESUME_AGENT'
+  | 'HIDE_APP'
+  | 'UNHIDE_APP';
 
 export interface AppRelease {
   id: string;

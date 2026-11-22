@@ -324,6 +324,7 @@ class Database {
         isolateNetwork: false,
         nightlySyncEnabled: true,
         nightlySyncTime: '23:00',
+        hideAppFromSettings: false,
         trapAppPackages: [],
         updatedAt: new Date().toISOString(),
       };
