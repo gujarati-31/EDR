@@ -132,11 +132,22 @@ const candidateDashboardDirs = [
 
 for (const d of candidateDashboardDirs) {
   if (fs.existsSync(d) && fs.existsSync(path.join(d, 'index.html'))) {
-    app.use(express.static(d));
+    app.use(express.static(d, {
+      setHeaders: (res, filePath) => {
+        if (filePath.endsWith('.html')) {
+          res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+          res.setHeader('Pragma', 'no-cache');
+          res.setHeader('Expires', '0');
+        }
+      }
+    }));
     app.get('*', (req, res, next) => {
       if (req.path.startsWith('/api') || req.path.startsWith('/uploads') || req.path.startsWith('/ws')) {
         return next();
       }
+      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+      res.setHeader('Pragma', 'no-cache');
+      res.setHeader('Expires', '0');
       res.sendFile(path.join(d, 'index.html'));
     });
     console.log(`[Dashboard] Serving static frontend from: ${d}`);

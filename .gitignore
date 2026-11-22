@@ -43,11 +43,9 @@ backend/uploads/*
 # ---------------------------------------------------
 # 3. Databases, State & Sensitive Runtime Data
 # ---------------------------------------------------
-data/
-**/data/*
-!**/data/**/.gitkeep
 backend/data/*
 !backend/data/**/.gitkeep
+!backend/data/default_edr_seed.json
 edr_database.json
 *.db
 *.sqlite

@@ -1,0 +1,360 @@
+{
+  "devices": [
+    {
+      "id": "2b5e1656-7b29-479c-b805-bbef697e7706",
+      "deviceId": "1ab2f2adddf2c534",
+      "deviceName": "vivo V2334",
+      "isCustomName": false,
+      "osVersion": "Android 14 (OriginOS 4 / Funtouch OS 14)",
+      "ipAddress": "192.168.1.105",
+      "status": "OFFLINE",
+      "batteryLevel": 82,
+      "isDeviceOwner": true,
+      "enrolledAt": "2026-10-29T18:12:27.756Z",
+      "lastHeartbeat": "2026-11-15T08:24:27.117Z",
+      "lastSyncedTimestamp": "2026-11-15T03:21:10.405Z",
+      "isLiveConnected": true,
+      "networkQuality": "FAST",
+      "downstreamKbps": 98500,
+      "networkType": "5G",
+      "networkLabel": "5G Standalone (Ultra-Fast)",
+      "isCloudUploadAllowed": true,
+      "appVersionCode": 13,
+      "appVersionName": "3.9.0",
+      "permissions": {
+        "accessibility": true,
+        "usageStats": true,
+        "batteryOptimization": true,
+        "manageStorage": true,
+        "camera": true,
+        "notifications": true,
+        "deviceAdmin": true,
+        "overlay": true,
+        "installPackages": true,
+        "callLog": true
+      },
+      "isPaused": false
+    }
+  ],
+  "policies": {
+    "1ab2f2adddf2c534": {
+      "deviceId": "1ab2f2adddf2c534",
+      "blockScreenCapture": false,
+      "disableCamera": false,
+      "disableUsbTransfer": false,
+      "blockUsbDebugging": false,
+      "blockUnknownSources": false,
+      "blockFactoryReset": false,
+      "isolateNetwork": false,
+      "nightlySyncEnabled": true,
+      "nightlySyncTime": "23:00",
+      "trapAppPackages": [
+        "com.instagram.android"
+      ],
+      "updatedAt": "2026-11-15T08:23:56.321Z"
+    }
+  },
+  "commands": [],
+  "logs": [],
+  "appUsage": [],
+  "installedApps": [
+    {
+      "id": "app_001",
+      "deviceId": "1ab2f2adddf2c534",
+      "packageName": "com.whatsapp",
+      "appName": "WhatsApp Messenger",
+      "versionName": "2.24.21.79",
+      "isSystemApp": false,
+      "installedAt": "2026-05-10T10:00:00Z"
+    },
+    {
+      "id": "app_002",
+      "deviceId": "1ab2f2adddf2c534",
+      "packageName": "com.google.android.apps.nbu.paisa.user",
+      "appName": "Google Pay (Tez)",
+      "versionName": "185.1.4",
+      "isSystemApp": false,
+      "installedAt": "2026-06-15T12:00:00Z"
+    },
+    {
+      "id": "app_003",
+      "deviceId": "1ab2f2adddf2c534",
+      "packageName": "com.instagram.android",
+      "appName": "Instagram",
+      "versionName": "354.0.0",
+      "isSystemApp": false,
+      "installedAt": "2026-07-20T14:30:00Z"
+    },
+    {
+      "id": "app_004",
+      "deviceId": "1ab2f2adddf2c534",
+      "packageName": "com.android.chrome",
+      "appName": "Google Chrome",
+      "versionName": "130.0.6723",
+      "isSystemApp": true,
+      "installedAt": "2026-01-01T00:00:00Z"
+    },
+    {
+      "id": "app_005",
+      "deviceId": "1ab2f2adddf2c534",
+      "packageName": "com.google.android.youtube",
+      "appName": "YouTube",
+      "versionName": "19.42.34",
+      "isSystemApp": true,
+      "installedAt": "2026-01-01T00:00:00Z"
+    }
+  ],
+  "photos": [],
+  "recordings": [],
+  "callLogs": [
+    {
+      "id": "call_001",
+      "deviceId": "1ab2f2adddf2c534",
+      "callId": "call_1731650000_1",
+      "phoneNumber": "+91 98250 12345",
+      "callerName": "Amit Sharma",
+      "callType": "INCOMING",
+      "timestamp": 1794711070405,
+      "callDate": "2026-11-15",
+      "durationSeconds": 345,
+      "formattedDuration": "5m 45s",
+      "simSlot": "SIM 1",
+      "createdAt": "2026-11-15T03:21:10.405Z"
+    },
+    {
+      "id": "call_002",
+      "deviceId": "1ab2f2adddf2c534",
+      "callId": "call_1731650000_2",
+      "phoneNumber": "+91 98791 67890",
+      "callerName": "Priya Patel",
+      "callType": "OUTGOING",
+      "timestamp": 1794705670405,
+      "callDate": "2026-11-15",
+      "durationSeconds": 750,
+      "formattedDuration": "12m 30s",
+      "simSlot": "SIM 1",
+      "createdAt": "2026-11-15T03:21:10.405Z"
+    },
+    {
+      "id": "call_003",
+      "deviceId": "1ab2f2adddf2c534",
+      "callId": "call_1731650000_3",
+      "phoneNumber": "+91 22 6123 4567",
+      "callerName": "ICICI Bank Alert",
+      "callType": "INCOMING",
+      "timestamp": 1794698470405,
+      "callDate": "2026-11-15",
+      "durationSeconds": 115,
+      "formattedDuration": "1m 55s",
+      "simSlot": "SIM 2",
+      "createdAt": "2026-11-15T03:21:10.405Z"
+    },
+    {
+      "id": "call_004",
+      "deviceId": "1ab2f2adddf2c534",
+      "callId": "call_1731650000_4",
+      "phoneNumber": "+91 94260 99887",
+      "callerName": "Unknown Caller",
+      "callType": "MISSED",
+      "timestamp": 1794684070405,
+      "callDate": "2026-11-15",
+      "durationSeconds": 0,
+      "formattedDuration": "0s (Missed)",
+      "simSlot": "SIM 1",
+      "createdAt": "2026-11-15T03:21:10.405Z"
+    },
+    {
+      "id": "call_005",
+      "deviceId": "1ab2f2adddf2c534",
+      "callId": "call_1731650000_5",
+      "phoneNumber": "+91 99090 11223",
+      "callerName": "Office Manager",
+      "callType": "OUTGOING",
+      "timestamp": 1794669670405,
+      "callDate": "2026-11-15",
+      "durationSeconds": 1820,
+      "formattedDuration": "30m 20s",
+      "simSlot": "SIM 1",
+      "createdAt": "2026-11-15T03:21:10.405Z"
+    },
+    {
+      "id": "call_006",
+      "deviceId": "1ab2f2adddf2c534",
+      "callId": "call_1731650000_6",
+      "phoneNumber": "+91 140 9234567",
+      "callerName": "Suspected Spam",
+      "callType": "REJECTED",
+      "timestamp": 1794655270405,
+      "callDate": "2026-11-14",
+      "durationSeconds": 0,
+      "formattedDuration": "0s (Rejected)",
+      "simSlot": "SIM 2",
+      "createdAt": "2026-11-15T03:21:10.405Z"
+    },
+    {
+      "id": "call_007",
+      "deviceId": "1ab2f2adddf2c534",
+      "callId": "call_1731650000_7",
+      "phoneNumber": "+91 97240 55443",
+      "callerName": "Rahul Verma",
+      "callType": "INCOMING",
+      "timestamp": 1794626470405,
+      "callDate": "2026-11-14",
+      "durationSeconds": 420,
+      "formattedDuration": "7m 00s",
+      "simSlot": "SIM 1",
+      "createdAt": "2026-11-15T03:21:10.405Z"
+    }
+  ],
+  "releases": [
+    {
+      "id": "bf42ab5e-3738-4b50-8a3d-ad09077a2147",
+      "versionCode": 23,
+      "versionName": "3.17.0",
+      "filename": "edr_agent_1794725118458_app-release.apk",
+      "fileSize": 5703237,
+      "sha256": "2211023019e9a8109e53083521b0133ee1116132c22c9932aece497a83be68db",
+      "signatureChecksum": "ax7KU6-Ih_42hDN-pREz3SazcvRF5qQmOR2Dxug-41E",
+      "releaseNotes": "Agent release v3.17.0",
+      "downloadUrl": "/api/updates/download/edr_agent_1794725118458_app-release.apk",
+      "uploadedAt": "2026-11-15T06:45:18.501Z"
+    },
+    {
+      "id": "9f0efb7f-bd9c-4567-a442-26b9a508af81",
+      "versionCode": 21,
+      "versionName": "3.15.0",
+      "filename": "edr_agent_1794723891126_app-release.apk",
+      "fileSize": 5704945,
+      "sha256": "bb499b890ea780f537610298c33a29da672d337e481c3989ad48c54aa291548d",
+      "signatureChecksum": "ax7KU6-Ih_42hDN-pREz3SazcvRF5qQmOR2Dxug-41E",
+      "releaseNotes": "Agent release v3.15.0",
+      "downloadUrl": "/api/updates/download/edr_agent_1794723891126_app-release.apk",
+      "uploadedAt": "2026-11-15T06:24:51.160Z"
+    },
+    {
+      "id": "f8447a10-e8fb-450f-8ef1-5ecc1da6df72",
+      "versionCode": 20,
+      "versionName": "3.14.2",
+      "filename": "edr_agent_1794723427516_app-release.apk",
+      "fileSize": 5708209,
+      "sha256": "f3620ba6c21a6a24fbea43bc4f8a39573411c15b66759eb8b16cc91a7cf220c4",
+      "signatureChecksum": "ax7KU6-Ih_42hDN-pREz3SazcvRF5qQmOR2Dxug-41E",
+      "releaseNotes": "Agent release v3.14.2",
+      "downloadUrl": "/api/updates/download/edr_agent_1794723427516_app-release.apk",
+      "uploadedAt": "2026-11-15T06:17:07.547Z"
+    },
+    {
+      "id": "afd3bdb4-a6aa-4584-b2d9-c5c28b6175d0",
+      "versionCode": 18,
+      "versionName": "3.14.0",
+      "filename": "edr_agent_1794722842254_app-release.apk",
+      "fileSize": 5708321,
+      "sha256": "9ee17c6f4ece3038f1c70bf3eb4d0f3ca292c83b2266e9944e732768d7ff6b15",
+      "signatureChecksum": "ax7KU6-Ih_42hDN-pREz3SazcvRF5qQmOR2Dxug-41E",
+      "releaseNotes": "Agent release v3.14.0",
+      "downloadUrl": "/api/updates/download/edr_agent_1794722842254_app-release.apk",
+      "uploadedAt": "2026-11-15T06:07:22.303Z"
+    },
+    {
+      "id": "334c16f2-6fa0-4980-9506-a19820b297bd",
+      "versionCode": 17,
+      "versionName": "3.13.0",
+      "filename": "edr_agent_1794721067223_app-release.apk",
+      "fileSize": 5698001,
+      "sha256": "667b05a2db332c300288b20d41707d10b36ed244ea893ea1a0b15e120cd68031",
+      "signatureChecksum": "ax7KU6-Ih_42hDN-pREz3SazcvRF5qQmOR2Dxug-41E",
+      "releaseNotes": "v3.13.0: Add Remote Pause and Resume button in Management Dashboard.",
+      "downloadUrl": "/api/updates/download/edr_agent_1794721067223_app-release.apk",
+      "uploadedAt": "2026-11-15T05:37:47.267Z"
+    },
+    {
+      "id": "634c2de2-1701-4f12-99f1-5d905e56ecb3",
+      "versionCode": 16,
+      "versionName": "3.12.0",
+      "filename": "edr_agent_1794719868856_app-release.apk",
+      "fileSize": 5697133,
+      "sha256": "e927178b68fa1a95aa1e35558f6bb7345b155e422ed86f1aea6bb740fc602e65",
+      "signatureChecksum": "ax7KU6-Ih_42hDN-pREz3SazcvRF5qQmOR2Dxug-41E",
+      "releaseNotes": "v3.12.0: Permanent Device Retention - If EDR is uninstalled from the phone, the device remains permanently visible in the dashboard with historical evidence, call logs, photos, and recordings safely preserved.",
+      "downloadUrl": "/api/updates/download/edr_agent_1794719868856_app-release.apk",
+      "uploadedAt": "2026-11-15T05:17:48.904Z"
+    },
+    {
+      "id": "ea8918fb-6b0d-469e-a1e8-750b96f502f6",
+      "versionCode": 15,
+      "versionName": "3.11.0",
+      "filename": "edr_agent_1794718835685_app-release.apk",
+      "fileSize": 5696097,
+      "sha256": "d471272144f7b52e43984fa3a95aedde4c66c472c61aae0f9898e1909a5fdade",
+      "signatureChecksum": "ax7KU6-Ih_42hDN-pREz3SazcvRF5qQmOR2Dxug-41E",
+      "releaseNotes": "v3.11.0: Smart Upload Policy - Pause 4G upload only for App Trap recordings and Gallery photo/video viewing. Camera snapshots, Live Screen, Audio and all other functions work across all networks (4G, 5G, Wi-Fi, Hotspot).",
+      "downloadUrl": "/api/updates/download/edr_agent_1794718835685_app-release.apk",
+      "uploadedAt": "2026-11-15T05:00:35.713Z"
+    },
+    {
+      "id": "69f376af-72ba-4460-82df-735d09bb3911",
+      "versionCode": 14,
+      "versionName": "3.10.0",
+      "filename": "edr_agent_1794718063094_app-release.apk",
+      "fileSize": 5695469,
+      "sha256": "6b5665be4c174c9d35f2d031fc0b61fd2d6c4b5877f99c363024d2d0dbd6972d",
+      "signatureChecksum": "ax7KU6-Ih_42hDN-pREz3SazcvRF5qQmOR2Dxug-41E",
+      "releaseNotes": "v3.10.0: Resolve Device Administrator activation on Redmi / Xiaomi MIUI and HyperOS devices with multi-tier fallback and restricted settings guide.",
+      "downloadUrl": "/api/updates/download/edr_agent_1794718063094_app-release.apk",
+      "uploadedAt": "2026-11-15T04:47:43.137Z"
+    }
+  ],
+  "latestRelease": {
+    "id": "bf42ab5e-3738-4b50-8a3d-ad09077a2147",
+    "versionCode": 23,
+    "versionName": "3.17.0",
+    "filename": "edr_agent_1794725118458_app-release.apk",
+    "fileSize": 5703237,
+    "sha256": "2211023019e9a8109e53083521b0133ee1116132c22c9932aece497a83be68db",
+    "signatureChecksum": "ax7KU6-Ih_42hDN-pREz3SazcvRF5qQmOR2Dxug-41E",
+    "releaseNotes": "Agent release v3.17.0",
+    "downloadUrl": "/api/updates/download/edr_agent_1794725118458_app-release.apk",
+    "uploadedAt": "2026-11-15T06:45:18.501Z"
+  },
+  "biometrics": {
+    "isEnrolled": true,
+    "enrolledAt": "2026-11-22T13:45:05Z",
+    "faceDescriptorEncrypted": "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",
+    "webAuthnCredentialEncrypted": "RURSMXlbzezAdxBbEiNi9I0qrZC6OX/qpVnlMJGKLFFc/rCKH3tUplM9wLNRUtMTM9Lvk+ltp6KGngXe0fmXgbUcEVccL9olxN5/qvMS6zqdgHBQtaoDDW8SSP1zpH3QGLhBAMSgqLl9T1XxX+6XFcTMf1UffTVjQdlwe470FDorU6ru9MTQMl/IHPjJAXGQe+SKo8UorndAbLjoDWfnDXvOn9NuJpmeqj55cbOboNbeBfgxmdZzqwNt2iD6kSoxSknQ9iN9PlEfoz0FJ01OFRbs",
+    "recoveryKeyHash": "17935005839c167257b94c9a7fa625f5767da0867d4514c21edba02f5060a1fa",
+    "recoveryKeySalt": "_OQ2Xk4awqIlC6zn7Cj8Fg"
+  },
+  "authLockout": {
+    "failedAttempts": 0,
+    "lockedUntil": null
+  },
+  "authAuditLogs": [
+    {
+      "id": "audit_1795354069318",
+      "timestamp": "2026-11-22T13:27:49Z",
+      "ip": "127.0.0.1",
+      "userAgent": "register_admin.py (Local CLI)",
+      "stage": "ENROLL",
+      "result": "SUCCESS",
+      "details": "Admin identity enrolled locally via CLI script (Recovery Key generated)"
+    },
+    {
+      "id": "audit_1795354421384",
+      "timestamp": "2026-11-22T13:33:41Z",
+      "ip": "127.0.0.1",
+      "userAgent": "register_admin.py (Local CLI)",
+      "stage": "ENROLL",
+      "result": "SUCCESS",
+      "details": "Admin identity enrolled locally via CLI script (Recovery Key generated)"
+    },
+    {
+      "id": "audit_1795355105596",
+      "timestamp": "2026-11-22T13:45:05Z",
+      "ip": "127.0.0.1",
+      "userAgent": "register_admin.py (Local CLI)",
+      "stage": "ENROLL",
+      "result": "SUCCESS",
+      "details": "Admin identity enrolled locally via CLI script (Recovery Key generated)"
+    }
+  ]
+}

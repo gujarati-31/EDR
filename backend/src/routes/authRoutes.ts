@@ -87,8 +87,8 @@ export function createAuthRouter(): Router {
       }
 
       const biometrics = db.getBiometrics();
-      // Allow enrollment if not yet enrolled, or if an authenticated admin is re-enrolling
-      if (biometrics.isEnrolled) {
+      // Allow enrollment if not yet enrolled, if authorized via local CLI script, or if an authenticated admin is re-enrolling
+      if (biometrics.isEnrolled && !isCliAuthorized) {
         const authHeader = req.headers.authorization;
         if (!authHeader || !authHeader.startsWith('Bearer ')) {
           return res.status(403).json({

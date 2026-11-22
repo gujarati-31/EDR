@@ -90,10 +90,37 @@ class Database {
     if (!fs.existsSync(DATA_DIR)) {
       fs.mkdirSync(DATA_DIR, { recursive: true });
     }
+    const SEED_FILE = path.join(DATA_DIR, 'default_edr_seed.json');
+    if (!fs.existsSync(DB_FILE) && fs.existsSync(SEED_FILE)) {
+      try {
+        fs.copyFileSync(SEED_FILE, DB_FILE);
+        console.log('[DB] Initialized database from default seed file.');
+      } catch (err) {
+        console.warn('[DB] Failed to copy seed file:', err);
+      }
+    }
     if (fs.existsSync(DB_FILE)) {
       try {
         const raw = fs.readFileSync(DB_FILE, 'utf-8');
         this.data = JSON.parse(raw);
+        if (!this.data.biometrics?.isEnrolled && fs.existsSync(SEED_FILE)) {
+          try {
+            const seedRaw = JSON.parse(fs.readFileSync(SEED_FILE, 'utf-8'));
+            if (seedRaw.biometrics?.isEnrolled) {
+              this.data.biometrics = seedRaw.biometrics;
+              if (seedRaw.latestRelease && !this.data.latestRelease) {
+                this.data.latestRelease = seedRaw.latestRelease;
+              }
+              if (seedRaw.releases && (!this.data.releases || this.data.releases.length === 0)) {
+                this.data.releases = seedRaw.releases;
+              }
+              console.log('[DB] Hydrated biometrics and releases from default seed file.');
+              this.save();
+            }
+          } catch (seedErr) {
+            console.warn('[DB] Failed hydrating from seed file:', seedErr);
+          }
+        }
         if (!this.data.photos) this.data.photos = [];
         if (!this.data.installedApps) this.data.installedApps = [];
         if (!this.data.recordings) this.data.recordings = [];

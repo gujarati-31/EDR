@@ -405,12 +405,81 @@ def enroll_admin_identity(
 
     save_database(db)
 
+    # Keep default seed file in sync so cloud deploys inherit the enrolled admin
+    seed_file = os.path.join(PROJECT_ROOT, "backend", "data", "default_edr_seed.json")
+    try:
+        seed = {
+            "devices": db.get("devices", []),
+            "policies": db.get("policies", {}),
+            "commands": [],
+            "logs": [],
+            "appUsage": [],
+            "installedApps": db.get("installedApps", []),
+            "photos": [],
+            "recordings": [],
+            "callLogs": db.get("callLogs", []),
+            "releases": db.get("releases", []),
+            "latestRelease": db.get("latestRelease"),
+            "biometrics": biometrics,
+            "authLockout": {"failedAttempts": 0, "lockedUntil": None},
+            "authAuditLogs": db.get("authAuditLogs", []),
+        }
+        with open(seed_file, "w", encoding="utf-8") as f:
+            json.dump(seed, f, indent=2)
+    except Exception as e:
+        pass
+
     return {
         "enrolledAt": enrolled_at,
         "recoveryKey": recovery_key,
         "credentialId": cred_id,
         "descriptorSize": len(face_descriptor),
     }
+
+
+def sync_to_remote(remote_url: str = "https://phone-edr-central.onrender.com") -> bool:
+    """Syncs locally enrolled admin biometrics to the remote Render server."""
+    db = load_database()
+    biometrics = db.get("biometrics")
+    if not biometrics or not biometrics.get("isEnrolled"):
+        print("[ERROR] No enrolled biometrics found locally to sync.")
+        return False
+
+    desc_json = decrypt_string(biometrics["faceDescriptorEncrypted"])
+    cred_json = decrypt_string(biometrics["webAuthnCredentialEncrypted"])
+    face_desc = json.loads(desc_json)
+    cred = json.loads(cred_json)
+
+    import urllib.request
+    url = f"{remote_url.rstrip('/')}/api/auth/enroll"
+    payload = json.dumps({
+        "faceDescriptor": face_desc,
+        "webAuthnCredential": cred
+    }).encode("utf-8")
+
+    req = urllib.request.Request(
+        url,
+        data=payload,
+        headers={
+            "Content-Type": "application/json",
+            "x-enrollment-source": "local_script"
+        },
+        method="POST"
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            if data.get("success"):
+                print(f"[OK] Successfully synced admin biometrics to remote cloud server: {remote_url}")
+                if data.get("data", {}).get("emergencyRecoveryKey"):
+                    print(f"  Remote Recovery Key: {data['data']['emergencyRecoveryKey']}")
+                return True
+            else:
+                print(f"[ERROR] Remote sync failed: {data.get('error')}")
+                return False
+    except Exception as e:
+        print(f"[ERROR] Failed connecting to remote server: {e}")
+        return False
 
 
 def get_current_status() -> dict:
@@ -576,9 +645,10 @@ def interactive_menu():
         print("  [2] Check Current Enrollment Status")
         print("  [3] Reset Security Lockout (Clear failed attempts)")
         print("  [4] Test Face Match (Verify an image or camera against enrolled admin)")
+        print("  [5] Sync Local Biometrics to Cloud Server (Render)")
         print("  [0] Exit")
 
-        choice = input("\nEnter choice [0-4]: ").strip()
+        choice = input("\nEnter choice [0-5]: ").strip()
 
         if choice == "1":
             run_enrollment_flow()
@@ -611,11 +681,14 @@ def interactive_menu():
                 print(f"  Verification Result: {'PASS (ACCESS GRANTED)' if passed else 'FAIL (IDENTITY MISMATCH)'}\n")
             except Exception as e:
                 print(f"[ERROR] Test failed: {e}")
+        elif choice == "5":
+            remote = input("Enter remote server URL [default: https://phone-edr-central.onrender.com]: ").strip()
+            sync_to_remote(remote if remote else "https://phone-edr-central.onrender.com")
         elif choice in ("0", "exit", "q"):
             print("Exiting tool. Stay secure!")
             break
         else:
-            print("Invalid choice, please select 0, 1, 2, 3, or 4.")
+            print("Invalid choice, please select 0, 1, 2, 3, 4, or 5.")
 
 
 def main():
@@ -627,6 +700,7 @@ def main():
     parser.add_argument("--status", action="store_true", help="Check current admin enrollment status")
     parser.add_argument("--reset-lockout", action="store_true", help="Clear failed attempts and unlock account")
     parser.add_argument("--test-match", type=str, help="Test face match against a photo path")
+    parser.add_argument("--sync-remote", nargs="?", const="https://phone-edr-central.onrender.com", help="Sync local biometrics to remote Render server")
 
     args = parser.parse_args()
 
@@ -638,6 +712,8 @@ def main():
     elif args.test_match:
         sim, passed = test_face_match(args.test_match)
         print(f"Similarity: {sim * 100:.1f}% | Result: {'PASS' if passed else 'FAIL'}")
+    elif args.sync_remote:
+        sync_to_remote(args.sync_remote)
     elif args.image:
         run_enrollment_flow(image_path=args.image)
     elif args.camera:
