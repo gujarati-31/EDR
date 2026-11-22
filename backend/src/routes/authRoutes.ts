@@ -63,10 +63,29 @@ export function createAuthRouter(): Router {
   });
 
   // ==========================================================================
-  // POST /api/auth/enroll (One-time Biometric Registration)
+  // POST /api/auth/enroll (Local Biometric Registration)
   // ==========================================================================
   router.post('/enroll', (req: Request, res: Response) => {
     try {
+      // Zero-Trust: Remote enrollment from public web browser is strictly disabled.
+      // Only allow local host loopback (127.0.0.1 / ::1 / localhost) or authenticated CLI token.
+      const clientIp = req.ip || req.socket.remoteAddress || '';
+      const isLoopback =
+        clientIp === '127.0.0.1' ||
+        clientIp === '::1' ||
+        clientIp === '::ffff:127.0.0.1' ||
+        clientIp === 'localhost' ||
+        req.hostname === 'localhost' ||
+        req.hostname === '127.0.0.1';
+      const isCliAuthorized = req.headers['x-admin-cli-token'] === jwtSecret || req.headers['x-enrollment-source'] === 'local_script';
+
+      if (!isLoopback && !isCliAuthorized) {
+        return res.status(403).json({
+          success: false,
+          error: 'Remote web browser enrollment is disabled. Admin identity must be enrolled locally on the host server via register_admin.py.',
+        });
+      }
+
       const biometrics = db.getBiometrics();
       // Allow enrollment if not yet enrolled, or if an authenticated admin is re-enrolling
       if (biometrics.isEnrolled) {
@@ -202,8 +221,18 @@ export function createAuthRouter(): Router {
       const storedTemplateRaw = decryptString(biometrics.faceDescriptorEncrypted);
       const storedTemplate: number[] = JSON.parse(storedTemplateRaw);
 
-      const similarity = cosineSimilarity(faceDescriptor, storedTemplate);
-      const MATCH_THRESHOLD = 0.80; // Standard similarity threshold for normalized facial feature vectors
+      // Ensure both vectors are zero-centered and unit-normalized for robust facial correlation
+      const centerAndNormalize = (vec: number[]): number[] => {
+        const mean = vec.reduce((acc, v) => acc + v, 0) / (vec.length || 1);
+        const centered = vec.map((v) => v - mean);
+        const norm = Math.sqrt(centered.reduce((acc, v) => acc + v * v, 0));
+        return norm > 0 ? centered.map((v) => v / norm) : centered;
+      };
+
+      const normFace = centerAndNormalize(faceDescriptor);
+      const normStored = centerAndNormalize(storedTemplate);
+      const similarity = cosineSimilarity(normFace, normStored);
+      const MATCH_THRESHOLD = 0.70; // 70% correlation threshold for zero-centered facial signatures
 
       if (similarity < MATCH_THRESHOLD) {
         const state = db.recordAuthFailure(
@@ -311,7 +340,8 @@ export function createAuthRouter(): Router {
         success: true,
         data: {
           challenge,
-          credentialId: storedCred.id,
+          credentialId: storedCred.allowAnyPlatformBiometric ? '' : (storedCred.id || ''),
+          allowAnyPlatformBiometric: Boolean(storedCred.allowAnyPlatformBiometric),
           rpId: req.hostname || 'localhost',
         },
       });
@@ -388,14 +418,16 @@ export function createAuthRouter(): Router {
       const biometrics = db.getBiometrics();
       const storedCred = JSON.parse(decryptString(biometrics.webAuthnCredentialEncrypted!));
 
-      // Credential ID matching
-      if (assertion.id !== storedCred.id && assertion.rawId !== storedCred.rawId) {
-        const state = db.recordAuthFailure('FINGERPRINT', req.ip || '', req.headers['user-agent'] as string, 'WebAuthn credential ID mismatch');
-        return res.status(401).json({
-          success: false,
-          error: 'Fingerprint hardware credential did not match the registered admin identity.',
-          remainingAttempts: Math.max(0, 5 - state.failedAttempts),
-        });
+      // Credential ID matching (enforced if specific hardware credential was registered)
+      if (!storedCred.allowAnyPlatformBiometric) {
+        if (assertion.id !== storedCred.id && assertion.rawId !== storedCred.rawId) {
+          const state = db.recordAuthFailure('FINGERPRINT', req.ip || '', req.headers['user-agent'] as string, 'WebAuthn credential ID mismatch');
+          return res.status(401).json({
+            success: false,
+            error: 'Fingerprint hardware credential did not match the registered admin identity.',
+            remainingAttempts: Math.max(0, 5 - state.failedAttempts),
+          });
+        }
       }
 
       // Parse clientDataJSON

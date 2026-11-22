@@ -111,25 +111,31 @@ export async function registerPlatformPasskey(username: string = 'admin'): Promi
 
 export async function authenticatePlatformPasskey(
   challengeBase64url: string,
-  credentialIdBase64url: string
+  credentialIdBase64url?: string
 ): Promise<any> {
   if (!window.PublicKeyCredential) {
     throw new Error('WebAuthn is not supported on this device.');
   }
 
   const challenge = base64urlToBuffer(challengeBase64url);
-  const allowCredentialId = base64urlToBuffer(credentialIdBase64url);
+  const allowCredentials: PublicKeyCredentialDescriptor[] = [];
+
+  if (credentialIdBase64url && credentialIdBase64url.trim().length > 0 && !credentialIdBase64url.startsWith('edr-admin-platform-')) {
+    try {
+      allowCredentials.push({
+        id: base64urlToBuffer(credentialIdBase64url),
+        type: 'public-key',
+        transports: ['internal'],
+      });
+    } catch {
+      // If credential ID is synthetic, pass empty allowCredentials to prompt platform authenticator
+    }
+  }
 
   const requestOptions: PublicKeyCredentialRequestOptions = {
     challenge,
-    allowCredentials: [
-      {
-        id: allowCredentialId,
-        type: 'public-key',
-        transports: ['internal'],
-      },
-    ],
-    userVerification: 'required', // Enforces biometric fingerprint or Windows Hello
+    allowCredentials,
+    userVerification: 'required', // Enforces biometric fingerprint or Windows Hello / Touch ID
     timeout: 60000,
   };
 
@@ -265,6 +271,16 @@ export function extractFaceFeatureVector(
 
   const brightness = totalLuminance / totalPixels;
   const skinPixelRatio = skinPixels / totalPixels;
+
+  // Zero-mean centering (removes ambient lighting DC offset to isolate facial structure/geometry)
+  let sum = 0;
+  for (let i = 0; i < descriptor.length; i++) {
+    sum += descriptor[i];
+  }
+  const mean = sum / descriptor.length;
+  for (let i = 0; i < descriptor.length; i++) {
+    descriptor[i] -= mean;
+  }
 
   // L2-normalize descriptor vector to unit hypersphere
   let norm = 0;

@@ -7,19 +7,14 @@ import {
   AlertCircle,
   CheckCircle2,
   Key,
-  Copy,
-  Check,
-  Download,
   RefreshCw,
   Scan,
-  Sparkles,
   ShieldAlert,
 } from 'lucide-react';
 import { api } from '../services/api';
 import {
   extractFaceFeatureVector,
   executeLivenessChallenge,
-  registerPlatformPasskey,
   authenticatePlatformPasskey,
 } from '../services/biometricService';
 import { AuthStatus } from '../types';
@@ -34,8 +29,8 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLogin }) => {
   const [isLoadingStatus, setIsLoadingStatus] = useState(true);
 
   // Flow & Step Navigation
-  // Steps: 'FACE' (Step 1) -> 'FINGERPRINT' (Step 2) -> 'RECOVERY' | 'ENROLLMENT'
-  const [authStep, setAuthStep] = useState<'FACE' | 'FINGERPRINT' | 'RECOVERY' | 'ENROLLMENT'>('FACE');
+  // Steps: 'FACE' (Step 1) -> 'FINGERPRINT' (Step 2) -> 'RECOVERY' | 'NOT_ENROLLED'
+  const [authStep, setAuthStep] = useState<'FACE' | 'FINGERPRINT' | 'RECOVERY' | 'NOT_ENROLLED'>('FACE');
   const [faceVerificationToken, setFaceVerificationToken] = useState<string | null>(null);
   const [faceSimilarity, setFaceSimilarity] = useState<number | null>(null);
 
@@ -50,14 +45,6 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLogin }) => {
   // Fingerprint / WebAuthn State
   const [isVerifyingFingerprint, setIsVerifyingFingerprint] = useState(false);
   const [fingerprintError, setFingerprintError] = useState<string | null>(null);
-
-  // Enrollment Wizard State (Step 1 Face, Step 2 Fingerprint, Step 3 Recovery Key)
-  const [enrollStep, setEnrollStep] = useState<1 | 2 | 3>(1);
-  const [enrolledFaceDescriptor, setEnrolledFaceDescriptor] = useState<number[] | null>(null);
-  const [generatedRecoveryKey, setGeneratedRecoveryKey] = useState<string | null>(null);
-  const [hasCopiedRecoveryKey, setHasCopiedRecoveryKey] = useState(false);
-  const [confirmedOfflineSave, setConfirmedOfflineSave] = useState(false);
-  const [isSubmittingEnrollment, setIsSubmittingEnrollment] = useState(false);
 
   // Emergency Recovery Modal State
   const [recoveryInput, setRecoveryInput] = useState('');
@@ -77,7 +64,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLogin }) => {
       setAuthStatus(status);
 
       if (!status.isEnrolled) {
-        setAuthStep('ENROLLMENT');
+        setAuthStep('NOT_ENROLLED');
       } else {
         setAuthStep('FACE');
       }
@@ -150,9 +137,9 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLogin }) => {
     setIsCameraActive(false);
   };
 
-  // Start camera when entering Face step or Enrollment face step
+  // Start camera when entering Face step
   useEffect(() => {
-    if (authStep === 'FACE' || (authStep === 'ENROLLMENT' && enrollStep === 1)) {
+    if (authStep === 'FACE') {
       startCamera();
     } else {
       stopCamera();
@@ -160,7 +147,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLogin }) => {
     return () => {
       stopCamera();
     };
-  }, [authStep, enrollStep]);
+  }, [authStep]);
 
   // ============================================================================
   // STEP 1: FACE VERIFICATION WITH ACTIVE LIVENESS
@@ -287,116 +274,6 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLogin }) => {
   }, [authStep, faceVerificationToken]);
 
   // ============================================================================
-  // ENROLLMENT WIZARD HANDLERS
-  // ============================================================================
-  const handleCaptureEnrollmentFace = async () => {
-    if (!videoRef.current || isScanningFace) return;
-    setIsScanningFace(true);
-    setGeneralError(null);
-
-    try {
-      const liveness = await executeLivenessChallenge(
-        videoRef.current,
-        (c) => setFlashColor(c),
-        (t) => setLivenessStatusText(t)
-      );
-
-      if (!liveness.faceDetected) {
-        setGeneralError('Could not detect face clearly. Please center your face and look at the camera.');
-        setIsScanningFace(false);
-        return;
-      }
-
-      const extraction = extractFaceFeatureVector(videoRef.current);
-      if (!extraction.faceDetected) {
-        setGeneralError('Insufficient facial lighting or skin contrast. Please improve lighting.');
-        setIsScanningFace(false);
-        return;
-      }
-
-      setEnrolledFaceDescriptor(extraction.descriptor);
-      setLivenessStatusText('Face template captured & normalized.');
-
-      setTimeout(() => {
-        setIsScanningFace(false);
-        stopCamera();
-        setEnrollStep(2); // Proceed to Fingerprint registration
-      }, 600);
-    } catch (err: any) {
-      setGeneralError(err.message || 'Failed to capture facial template.');
-      setIsScanningFace(false);
-    }
-  };
-
-  const handleRegisterFingerprint = async () => {
-    if (!enrolledFaceDescriptor) {
-      setEnrollStep(1);
-      return;
-    }
-
-    setIsSubmittingEnrollment(true);
-    setGeneralError(null);
-
-    try {
-      // Register platform authenticator passkey
-      const credential = await registerPlatformPasskey('admin');
-
-      // Submit both biometrics to backend
-      const res = await api.enrollBiometrics(enrolledFaceDescriptor, credential);
-
-      if (!res.success || !res.emergencyRecoveryKey) {
-        throw new Error(res.error || 'Server rejected biometric enrollment.');
-      }
-
-      setGeneratedRecoveryKey(res.emergencyRecoveryKey);
-      setEnrollStep(3); // Proceed to Emergency Key Display
-    } catch (err: any) {
-      console.error('[Enrollment] Error:', err);
-      setGeneralError(err.message || 'Biometric hardware enrollment failed.');
-    } finally {
-      setIsSubmittingEnrollment(false);
-    }
-  };
-
-  const handleCopyRecoveryKey = () => {
-    if (!generatedRecoveryKey) return;
-    navigator.clipboard.writeText(generatedRecoveryKey);
-    setHasCopiedRecoveryKey(true);
-    setTimeout(() => setHasCopiedRecoveryKey(false), 3000);
-  };
-
-  const handleDownloadRecoveryKey = () => {
-    if (!generatedRecoveryKey) return;
-    const blob = new Blob(
-      [
-        `=================================================================\n` +
-          `CYBER-EDR CONSOLE - EMERGENCY OFFLINE RECOVERY KEY\n` +
-          `=================================================================\n` +
-          `Recovery Key:  ${generatedRecoveryKey}\n` +
-          `Generated At:  ${new Date().toISOString()}\n\n` +
-          `IMPORTANT SECURITY NOTICE:\n` +
-          `Store this key in a secure physical location (safe, encrypted vault).\n` +
-          `If your biometric sensors (camera, fingerprint) fail, this key is\n` +
-          `the only emergency method to unlock your admin console.\n` +
-          `=================================================================\n`,
-      ],
-      { type: 'text/plain' }
-    );
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `edr-admin-recovery-key-${new Date().toISOString().slice(0, 10)}.txt`;
-    a.click();
-    URL.revokeObjectURL(url);
-  };
-
-  const handleCompleteEnrollment = () => {
-    if (!confirmedOfflineSave) return;
-    setAuthStatus((prev) => (prev ? { ...prev, isEnrolled: true } : null));
-    setAuthStep('FACE');
-  };
-
-  // ============================================================================
   // EMERGENCY RECOVERY HANDLER
   // ============================================================================
   const handleEmergencyRecover = async (e: React.FormEvent) => {
@@ -509,197 +386,47 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLogin }) => {
         )}
 
         {/* ================================================================== */}
-        {/* VIEW 1: ONE-TIME ENROLLMENT WIZARD                                  */}
+        {/* VIEW 0: ENROLLMENT REQUIRED (LOCAL PROVISIONING ONLY)              */}
         {/* ================================================================== */}
-        {authStep === 'ENROLLMENT' && (
-          <div className="space-y-5">
-            <div className="p-3 rounded-xl bg-cyan-950/30 border border-cyan-800/40 flex items-center justify-between text-xs font-mono text-cyan-300">
-              <span className="flex items-center gap-2">
-                <Sparkles className="w-4 h-4 text-cyan-400" />
-                <span>One-Time Admin Enrollment</span>
-              </span>
-              <span className="text-[11px] text-slate-400">Step {enrollStep} of 3</span>
+        {authStep === 'NOT_ENROLLED' && (
+          <div className="space-y-5 text-center">
+            <div className="inline-flex p-3.5 rounded-2xl bg-amber-950/60 border border-amber-600/50 text-amber-400">
+              <ShieldAlert className="w-8 h-8" />
             </div>
 
-            {/* Step 1: Enroll Face */}
-            {enrollStep === 1 && (
-              <div className="space-y-4">
-                <div className="text-center">
-                  <h3 className="text-sm font-mono font-bold text-white uppercase tracking-wider">
-                    Register Facial Identity
-                  </h3>
-                  <p className="text-xs text-slate-400 mt-1">
-                    Position your face in the reticle. Zero photos stored; only an encrypted 128-D numeric template is retained.
-                  </p>
-                </div>
+            <div>
+              <h3 className="text-sm font-mono font-bold text-white uppercase tracking-wider">
+                Admin Biometrics Not Enrolled
+              </h3>
+              <p className="text-xs text-slate-400 mt-1 max-w-sm mx-auto leading-relaxed">
+                For zero-trust security, remote registration from the web browser is disabled. Please run the local Python provisioning script directly on the server to register your face and biometric credentials:
+              </p>
+            </div>
 
-                {/* Live Camera Viewport */}
-                <div className="relative w-full aspect-video bg-black rounded-2xl overflow-hidden border border-cyan-500/40 shadow-inner flex items-center justify-center">
-                  <video
-                    ref={videoRef}
-                    autoPlay
-                    playsInline
-                    muted
-                    className="w-full h-full object-cover transform -scale-x-100"
-                  />
-
-                  {/* Cyber Scanner HUD Overlay */}
-                  <div className="absolute inset-0 pointer-events-none flex flex-col items-center justify-between p-4">
-                    <div className="w-full flex justify-between text-[10px] font-mono text-cyan-400/80">
-                      <span>HUD::CALIBRATION</span>
-                      <span>LIVENESS::ACTIVE</span>
-                    </div>
-
-                    {/* Face Oval Reticle */}
-                    <div
-                      className={`w-36 h-48 sm:w-44 sm:h-56 rounded-full border-2 border-dashed transition-colors duration-300 flex items-center justify-center ${
-                        isScanningFace ? 'border-cyan-400 shadow-[0_0_20px_rgba(6,182,212,0.5)]' : 'border-cyan-500/40'
-                      }`}
-                    >
-                      {isScanningFace && (
-                        <div className="w-full h-0.5 bg-gradient-to-r from-transparent via-cyan-400 to-transparent animate-bounce" />
-                      )}
-                    </div>
-
-                    <div className="text-[11px] font-mono text-cyan-300 bg-slate-950/80 px-3 py-1 rounded-full border border-cyan-500/30">
-                      {livenessStatusText}
-                    </div>
-                  </div>
-                </div>
-
-                {cameraError && (
-                  <div className="p-3 rounded-xl bg-rose-950/60 border border-rose-700/60 text-rose-300 text-xs font-mono">
-                    {cameraError}
-                  </div>
-                )}
-
-                <button
-                  type="button"
-                  onClick={handleCaptureEnrollmentFace}
-                  disabled={isScanningFace || !isCameraActive}
-                  className="w-full py-3.5 rounded-xl font-mono text-xs font-bold tracking-wider uppercase bg-gradient-to-r from-cyan-600 to-cyan-500 hover:from-cyan-500 hover:to-cyan-400 text-slate-950 shadow-[0_0_25px_rgba(6,182,212,0.4)] transition-all flex items-center justify-center gap-2 disabled:opacity-50"
-                >
-                  {isScanningFace ? (
-                    <>
-                      <RefreshCw className="w-4 h-4 animate-spin" />
-                      <span>Calibrating &amp; Scanning...</span>
-                    </>
-                  ) : (
-                    <>
-                      <Camera className="w-4 h-4" />
-                      <span>Capture &amp; Enroll Face</span>
-                    </>
-                  )}
-                </button>
+            <div className="p-3.5 rounded-xl bg-black/80 border border-slate-800 text-left font-mono">
+              <div className="text-[10px] text-slate-500 uppercase tracking-widest mb-1.5 flex items-center justify-between">
+                <span>Terminal CLI Command</span>
+                <span className="text-cyan-400">Server Host Only</span>
               </div>
-            )}
-
-            {/* Step 2: Enroll Fingerprint */}
-            {enrollStep === 2 && (
-              <div className="space-y-5 text-center">
-                <div>
-                  <h3 className="text-sm font-mono font-bold text-white uppercase tracking-wider">
-                    Register Hardware Fingerprint
-                  </h3>
-                  <p className="text-xs text-slate-400 mt-1">
-                    Connect your browser's FIDO2 WebAuthn authenticator (Windows Hello Fingerprint, Touch ID, or Android Biometric).
-                  </p>
-                </div>
-
-                <div className="p-8 rounded-2xl bg-cyan-950/20 border border-cyan-500/30 flex flex-col items-center justify-center gap-4">
-                  <div className="relative p-5 rounded-full bg-cyan-950/80 border border-cyan-500/50 shadow-[0_0_30px_rgba(6,182,212,0.3)]">
-                    <Fingerprint className="w-12 h-12 text-cyan-400 animate-pulse" />
-                  </div>
-                  <div className="text-xs font-mono text-cyan-300">
-                    Raw fingerprint never leaves device security enclave
-                  </div>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={handleRegisterFingerprint}
-                  disabled={isSubmittingEnrollment}
-                  className="w-full py-3.5 rounded-xl font-mono text-xs font-bold tracking-wider uppercase bg-gradient-to-r from-cyan-600 to-cyan-500 hover:from-cyan-500 hover:to-cyan-400 text-slate-950 shadow-[0_0_25px_rgba(6,182,212,0.4)] transition-all flex items-center justify-center gap-2 disabled:opacity-50"
-                >
-                  {isSubmittingEnrollment ? (
-                    <>
-                      <RefreshCw className="w-4 h-4 animate-spin" />
-                      <span>Awaiting Fingerprint Sensor...</span>
-                    </>
-                  ) : (
-                    <>
-                      <Fingerprint className="w-4 h-4" />
-                      <span>Touch Fingerprint Sensor to Enroll</span>
-                    </>
-                  )}
-                </button>
+              <div className="text-xs text-cyan-300 font-bold select-all bg-slate-900/90 px-3 py-2 rounded-lg border border-cyan-900/40">
+                python register_admin.py
               </div>
-            )}
+            </div>
 
-            {/* Step 3: Emergency Offline Recovery Key */}
-            {enrollStep === 3 && (
-              <div className="space-y-5">
-                <div className="text-center">
-                  <div className="inline-flex p-2.5 rounded-xl bg-amber-950/60 border border-amber-600/50 text-amber-400 mb-2">
-                    <Key className="w-6 h-6" />
-                  </div>
-                  <h3 className="text-sm font-mono font-bold text-white uppercase tracking-wider">
-                    Emergency Offline Recovery Key
-                  </h3>
-                  <p className="text-xs text-slate-400 mt-1">
-                    If your camera or fingerprint sensor breaks, this key is the only backup to unlock your console.
-                  </p>
-                </div>
+            <div className="text-[11px] font-mono text-slate-500 text-left p-3 rounded-xl bg-slate-950/60 border border-slate-800/80 space-y-1">
+              <div>&bull; Step 1: Captures face template (webcam or photo)</div>
+              <div>&bull; Step 2: Configures hardware biometric authenticator</div>
+              <div>&bull; Step 3: Generates encrypted emergency recovery key</div>
+            </div>
 
-                {/* Recovery Key Box */}
-                <div className="p-4 rounded-2xl bg-black/60 border border-amber-500/50 flex flex-col items-center gap-3">
-                  <div className="text-base sm:text-lg font-mono font-extrabold tracking-widest text-amber-300 select-all">
-                    {generatedRecoveryKey}
-                  </div>
-                  <div className="flex items-center gap-2 w-full">
-                    <button
-                      type="button"
-                      onClick={handleCopyRecoveryKey}
-                      className="flex-1 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-700 text-xs font-mono text-slate-200 flex items-center justify-center gap-1.5 transition"
-                    >
-                      {hasCopiedRecoveryKey ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5 text-cyan-400" />}
-                      <span>{hasCopiedRecoveryKey ? 'Copied' : 'Copy Key'}</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handleDownloadRecoveryKey}
-                      className="flex-1 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-700 text-xs font-mono text-slate-200 flex items-center justify-center gap-1.5 transition"
-                    >
-                      <Download className="w-3.5 h-3.5 text-amber-400" />
-                      <span>Download .txt</span>
-                    </button>
-                  </div>
-                </div>
-
-                {/* Consent Checkbox */}
-                <label className="flex items-start gap-2.5 p-3 rounded-xl bg-slate-950 border border-slate-800 cursor-pointer text-xs font-mono text-slate-300">
-                  <input
-                    type="checkbox"
-                    checked={confirmedOfflineSave}
-                    onChange={(e) => setConfirmedOfflineSave(e.target.checked)}
-                    className="mt-0.5 rounded border-slate-700 text-cyan-500 focus:ring-cyan-500 bg-slate-900"
-                  />
-                  <span>
-                    I confirm that I have recorded and saved this emergency recovery key offline in a safe location.
-                  </span>
-                </label>
-
-                <button
-                  type="button"
-                  onClick={handleCompleteEnrollment}
-                  disabled={!confirmedOfflineSave}
-                  className="w-full py-3.5 rounded-xl font-mono text-xs font-bold tracking-wider uppercase bg-gradient-to-r from-emerald-600 to-emerald-500 hover:from-emerald-500 hover:to-emerald-400 text-slate-950 shadow-[0_0_25px_rgba(16,185,129,0.4)] transition-all flex items-center justify-center gap-2 disabled:opacity-40"
-                >
-                  <CheckCircle2 className="w-4 h-4" />
-                  <span>Complete Setup &amp; Open Login</span>
-                </button>
-              </div>
-            )}
+            <button
+              type="button"
+              onClick={loadStatus}
+              className="w-full py-3.5 rounded-xl font-mono text-xs font-bold tracking-wider uppercase bg-gradient-to-r from-cyan-600 to-cyan-500 hover:from-cyan-500 hover:to-cyan-400 text-slate-950 shadow-[0_0_25px_rgba(6,182,212,0.4)] transition-all flex items-center justify-center gap-2"
+            >
+              <RefreshCw className="w-4 h-4" />
+              <span>Check Enrollment Status</span>
+            </button>
           </div>
         )}
 
@@ -919,7 +646,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLogin }) => {
         )}
 
         {/* Footer Navigation / Recovery Link */}
-        {authStep !== 'RECOVERY' && authStep !== 'ENROLLMENT' && (
+        {authStep !== 'RECOVERY' && authStep !== 'NOT_ENROLLED' && (
           <div className="mt-6 pt-4 border-t border-slate-800/80 flex items-center justify-between text-[11px] font-mono text-slate-400">
             <button
               type="button"
