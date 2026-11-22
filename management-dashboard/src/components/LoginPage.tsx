@@ -149,6 +149,31 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLogin }) => {
     };
   }, [authStep]);
 
+  // Auto-initiate face scan immediately once camera is active on load
+  const hasAutoScannedRef = useRef(false);
+  useEffect(() => {
+    if (
+      authStep === 'FACE' &&
+      isCameraActive &&
+      !isScanningFace &&
+      !hasAutoScannedRef.current &&
+      lockCountdownSec === 0
+    ) {
+      const autoTimer = setTimeout(() => {
+        if (
+          authStep === 'FACE' &&
+          isCameraActive &&
+          !isScanningFace &&
+          !hasAutoScannedRef.current
+        ) {
+          hasAutoScannedRef.current = true;
+          handleVerifyFace();
+        }
+      }, 1200);
+      return () => clearTimeout(autoTimer);
+    }
+  }, [authStep, isCameraActive, isScanningFace, lockCountdownSec]);
+
   // ============================================================================
   // STEP 1: FACE VERIFICATION WITH ACTIVE LIVENESS
   // ============================================================================
