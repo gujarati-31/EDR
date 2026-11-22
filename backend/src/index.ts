@@ -18,6 +18,17 @@ import { createCallLogRouter } from './routes/callLogRoutes.js';
 import { createAuthRouter } from './routes/authRoutes.js';
 
 dotenv.config();
+// Load .env explicitly from current directory, backend directory, or project root
+const candidateEnvFiles = [
+  path.resolve(process.cwd(), '.env'),
+  path.resolve(process.cwd(), 'backend', '.env'),
+  path.resolve(process.cwd(), '..', '.env'),
+];
+for (const envPath of candidateEnvFiles) {
+  if (fs.existsSync(envPath)) {
+    dotenv.config({ path: envPath, override: false });
+  }
+}
 
 const app = express();
 const server = http.createServer(app);

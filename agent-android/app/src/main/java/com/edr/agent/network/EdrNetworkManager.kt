@@ -23,6 +23,39 @@ object EdrNetworkManager {
 
     private const val TAG = "EdrNetworkManager"
 
+    @Volatile
+    var cachedOverrideNetworkType: Int = 0
+    private var isTelephonyListenerRegistered = false
+
+    fun registerTelephonyListener(context: Context) {
+        if (isTelephonyListenerRegistered) return
+        try {
+            val tm = context.getSystemService(Context.TELEPHONY_SERVICE) as? TelephonyManager ?: return
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                val executor = androidx.core.content.ContextCompat.getMainExecutor(context)
+                tm.registerTelephonyCallback(executor, object : android.telephony.TelephonyCallback(), android.telephony.TelephonyCallback.DisplayInfoListener {
+                    override fun onDisplayInfoChanged(telephonyDisplayInfo: android.telephony.TelephonyDisplayInfo) {
+                        cachedOverrideNetworkType = telephonyDisplayInfo.overrideNetworkType
+                        Log.d(TAG, "TelephonyDisplayInfo overrideNetworkType: $cachedOverrideNetworkType")
+                    }
+                })
+                isTelephonyListenerRegistered = true
+            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                @Suppress("DEPRECATION")
+                tm.listen(object : android.telephony.PhoneStateListener() {
+                    @Deprecated("Deprecated in Java")
+                    override fun onDisplayInfoChanged(telephonyDisplayInfo: android.telephony.TelephonyDisplayInfo) {
+                        cachedOverrideNetworkType = telephonyDisplayInfo.overrideNetworkType
+                        Log.d(TAG, "TelephonyDisplayInfo overrideNetworkType: $cachedOverrideNetworkType")
+                    }
+                }, android.telephony.PhoneStateListener.LISTEN_DISPLAY_INFO_CHANGED)
+                isTelephonyListenerRegistered = true
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Could not register TelephonyDisplayInfo listener: ${e.message}")
+        }
+    }
+
     enum class ConnectionType(val wireName: String, val displayName: String, val shouldWorkNormally: Boolean) {
         FIVE_G("5G", "5G", true),
         WIFI("WiFi", "WiFi", true),
@@ -58,6 +91,7 @@ object EdrNetworkManager {
      */
     fun getNetworkStatus(context: Context): NetworkStatus {
         try {
+            registerTelephonyListener(context.applicationContext)
             val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
             val activeNetwork = cm?.activeNetwork
             val caps = cm?.getNetworkCapabilities(activeNetwork)
@@ -254,26 +288,61 @@ object EdrNetworkManager {
                 return ConnectionType.FIVE_G
             }
 
-            // 2. High downstream bandwidth typical of 5G (> 80,000 Kbps = 80 Mbps)
-            if (caps.linkDownstreamBandwidthKbps >= 80_000) {
+            // 2. TelephonyDisplayInfo 5G NSA (3) or 5G Advanced (5)
+            // TelephonyDisplayInfo.OVERRIDE_NETWORK_TYPE_NR_NSA = 3
+            // TelephonyDisplayInfo.OVERRIDE_NETWORK_TYPE_NR_ADVANCED = 5
+            if (cachedOverrideNetworkType == 3 || cachedOverrideNetworkType == 5) {
                 return ConnectionType.FIVE_G
             }
 
-            // 3. 4G+ / LTE-Advanced (Carrier Aggregation or high speed LTE 35-80 Mbps)
-            val isLte = dataNetType == TelephonyManager.NETWORK_TYPE_LTE ||
-                dataNetType == TelephonyManager.NETWORK_TYPE_UNKNOWN
-            if (isLte && caps.linkDownstreamBandwidthKbps in 35_000 until 80_000) {
+            // 3. Inspect ServiceState radio status string for 5G indicators (5G NSA / SA)
+            try {
+                val ss = tm?.serviceState
+                if (ss != null) {
+                    val ssStr = ss.toString()
+                    val is5gRadio = ssStr.contains("nrState=CONNECTED", ignoreCase = true) ||
+                        ssStr.contains("nrState=NOT_RESTRICTED", ignoreCase = true) ||
+                        ssStr.contains("mNrState=CONNECTED", ignoreCase = true) ||
+                        ssStr.contains("mNrState=NOT_RESTRICTED", ignoreCase = true) ||
+                        ssStr.contains("NR_NSA", ignoreCase = true) ||
+                        ssStr.contains("NR_SA", ignoreCase = true) ||
+                        ssStr.contains("radioTechnology=20", ignoreCase = true) ||
+                        (ssStr.contains("5G", ignoreCase = true) && !ssStr.contains("5GHz", ignoreCase = true))
+
+                    if (is5gRadio) {
+                        return ConnectionType.FIVE_G
+                    }
+                }
+            } catch (_: Exception) {}
+
+            // 4. Bandwidth-assisted 5G detection
+            // When on cellular, link downstream bandwidth >= 40,000 Kbps (40 Mbps) indicates 5G link
+            if (caps.linkDownstreamBandwidthKbps >= 40_000) {
+                return ConnectionType.FIVE_G
+            }
+
+            // 5. Check if carrier has temporarily unmetered capability (often used for 5G unlimited plans)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                try {
+                    if (caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_TEMPORARILY_NOT_METERED)) {
+                        return ConnectionType.FIVE_G
+                    }
+                } catch (_: Exception) {}
+            }
+
+            // 6. 4G+ / LTE-Advanced (Carrier Aggregation: overrideNetworkType == 1 or 2)
+            if (cachedOverrideNetworkType == 1 || cachedOverrideNetworkType == 2) {
                 return ConnectionType.FOUR_G_PLUS
             }
 
-            // 4. 4G LTE check
-            if (dataNetType == TelephonyManager.NETWORK_TYPE_LTE ||
-                (isLte && caps.linkDownstreamBandwidthKbps > 5_000)
-            ) {
+            // 7. Standard 4G LTE check
+            val isLte = dataNetType == TelephonyManager.NETWORK_TYPE_LTE ||
+                dataNetType == TelephonyManager.NETWORK_TYPE_UNKNOWN
+            if (isLte || caps.linkDownstreamBandwidthKbps > 5_000) {
                 return ConnectionType.FOUR_G
             }
 
-            // 4. Slower legacy networks (3G / 2G)
+            // 8. Slower legacy networks (3G / 2G)
             val is3gType = dataNetType in listOf(
                 TelephonyManager.NETWORK_TYPE_UMTS,
                 TelephonyManager.NETWORK_TYPE_EVDO_0,

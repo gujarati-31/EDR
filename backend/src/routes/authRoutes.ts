@@ -38,27 +38,84 @@ export function createAuthRouter(): Router {
   // ==========================================================================
   router.get('/status', (req: Request, res: Response) => {
     try {
-      const biometrics = db.getBiometrics();
-      const lockout = db.getLockoutState();
-      const now = Date.now();
-
-      const isLocked = !!(lockout.lockedUntil && now < lockout.lockedUntil);
-      const lockExpiresInMs = isLocked ? Math.max(0, lockout.lockedUntil! - now) : 0;
-      const remainingAttempts = isLocked ? 0 : Math.max(0, 5 - (lockout.failedAttempts || 0));
-
       res.json({
         success: true,
         data: {
-          isEnrolled: !!biometrics.isEnrolled,
-          enrolledAt: biometrics.enrolledAt,
-          isLocked,
-          lockExpiresInMs,
-          remainingAttempts,
-          maxAttempts: 5,
+          authType: 'PASSWORD',
+          isConfigured: true,
         },
       });
     } catch (err: any) {
       res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // ==========================================================================
+  // POST /api/auth/login (Username & Password Authentication from .env)
+  // ==========================================================================
+  router.post('/login', (req: Request, res: Response) => {
+    try {
+      const { username, password } = req.body;
+      const expectedUsername = (process.env.ADMIN_USERNAME || 'admin').trim();
+      const expectedPassword = (process.env.ADMIN_PASSWORD || 'admin123').trim();
+
+      if (!username || !password) {
+        return res.status(400).json({
+          success: false,
+          error: 'Please enter both username and password.',
+        });
+      }
+
+      const inputUser = username.trim();
+      const inputPass = String(password).trim();
+
+      if (inputUser !== expectedUsername || inputPass !== expectedPassword) {
+        db.addAuthAuditLog({
+          stage: 'SESSION',
+          result: 'FAILED',
+          ip: req.ip || '',
+          userAgent: req.headers['user-agent'] as string,
+          details: `Failed admin login attempt for username: ${inputUser}`,
+        });
+        return res.status(401).json({
+          success: false,
+          error: 'Invalid username or password. Please check your credentials.',
+        });
+      }
+
+      // Success: Issue admin session JWT (valid for 24 hours)
+      const token = jwt.sign(
+        {
+          sub: 'edr_admin_root',
+          role: 'ADMIN',
+          username: expectedUsername,
+          authMethod: 'PASSWORD',
+          issuedAt: Date.now(),
+        },
+        jwtSecret,
+        { expiresIn: '24h' }
+      );
+
+      db.addAuthAuditLog({
+        stage: 'SESSION',
+        result: 'SUCCESS',
+        ip: req.ip || '',
+        userAgent: req.headers['user-agent'] as string,
+        details: `Admin successfully authenticated via password login (${expectedUsername})`,
+      });
+
+      return res.json({
+        success: true,
+        message: 'Admin authenticated successfully.',
+        data: {
+          token,
+          username: expectedUsername,
+          expiresInSec: 86400, // 24 hours
+        },
+      });
+    } catch (err: any) {
+      console.error('[Auth] Login error:', err);
+      return res.status(500).json({ success: false, error: err.message });
     }
   });
 

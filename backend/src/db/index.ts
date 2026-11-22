@@ -147,7 +147,7 @@ class Database {
 
   // Devices
   getDevices(): Device[] {
-    return this.data.devices;
+    return this.data.devices.filter((d) => !d.isUninstalled);
   }
 
   getDeviceById(id: string): Device | undefined {
@@ -303,12 +303,9 @@ class Database {
   }
 
   deleteDevice(id: string): boolean {
-    const device = this.data.devices.find((d) => d.id === id || d.deviceId === id);
-    if (!device) return false;
-    device.isUninstalled = true;
-    device.uninstalledAt = new Date().toISOString();
-    device.status = 'OFFLINE';
-    device.tamperReason = 'Device deregistered / uninstalled from console';
+    const idx = this.data.devices.findIndex((d) => d.id === id || d.deviceId === id);
+    if (idx === -1) return false;
+    this.data.devices.splice(idx, 1);
     this.save();
     return true;
   }

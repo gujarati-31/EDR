@@ -482,16 +482,16 @@ export function createDeviceRouter(gateway: EDRWebSocketGateway) {
     res.json({ success: true, message: 'Uninstall alert recorded. Device remains permanently preserved in dashboard.', data: updated });
   });
 
-  // Deregister / archive device (never permanently deleted; retained with UNINSTALLED status)
+  // Deregister / remove device
   router.delete('/:id', (req, res) => {
     const device = db.getDeviceById(req.params.id);
     if (!device) {
       return res.status(404).json({ success: false, message: 'Device not found' });
     }
+    const devId = device.deviceId;
     db.deleteDevice(req.params.id);
-    const updated = db.getDeviceById(device.deviceId);
-    gateway.broadcastToDashboards('DEVICE_UPDATED', updated);
-    res.json({ success: true, message: 'Device archived as uninstalled. Historical forensic data preserved.' });
+    gateway.broadcastToDashboards('DEVICE_DELETED', { deviceId: devId, id: req.params.id });
+    res.json({ success: true, message: 'Device removed successfully.' });
   });
 
   // Upload Intruder Evidence Photos & Live Screen Proofs

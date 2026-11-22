@@ -1,41 +1,5 @@
 {
-  "devices": [
-    {
-      "id": "2b5e1656-7b29-479c-b805-bbef697e7706",
-      "deviceId": "1ab2f2adddf2c534",
-      "deviceName": "vivo V2334",
-      "isCustomName": false,
-      "osVersion": "Android 14 (OriginOS 4 / Funtouch OS 14)",
-      "ipAddress": "192.168.1.105",
-      "status": "OFFLINE",
-      "batteryLevel": 82,
-      "isDeviceOwner": true,
-      "enrolledAt": "2026-10-29T18:12:27.756Z",
-      "lastHeartbeat": "2026-11-15T08:24:27.117Z",
-      "lastSyncedTimestamp": "2026-11-15T03:21:10.405Z",
-      "isLiveConnected": true,
-      "networkQuality": "FAST",
-      "downstreamKbps": 98500,
-      "networkType": "5G",
-      "networkLabel": "5G Standalone (Ultra-Fast)",
-      "isCloudUploadAllowed": true,
-      "appVersionCode": 13,
-      "appVersionName": "3.9.0",
-      "permissions": {
-        "accessibility": true,
-        "usageStats": true,
-        "batteryOptimization": true,
-        "manageStorage": true,
-        "camera": true,
-        "notifications": true,
-        "deviceAdmin": true,
-        "overlay": true,
-        "installPackages": true,
-        "callLog": true
-      },
-      "isPaused": false
-    }
-  ],
+  "devices": [],
   "policies": {
     "1ab2f2adddf2c534": {
       "deviceId": "1ab2f2adddf2c534",
@@ -318,10 +282,10 @@
   },
   "biometrics": {
     "isEnrolled": true,
-    "enrolledAt": "2026-11-22T14:06:51Z",
-    "webAuthnCredentialEncrypted": "RURSMca9tJPxZ9sFDk6Pi8EzGE+CWnQvKZqWghvvduU+lKxThKK7fgmGS1TlJEdAan4Xc77NvSwjR8yZl6A8msT8i4sumElvHUZMbcG5WbSiBG19OQ9uur96DVyJ4at4sMPjouYHDm3AGY11pGPyO8EoI8X4OwbxwQliMXEDZqYqetw91KD+zO9ZgUD84Jx40AqJdszmBTmuTk2wKiBZDVh+W10mVc1oaEWNVOmI+PuoecRKqEcgxsxfnlLBz/Fz/8OG4sd3hrqXcTyClGALUAu9",
-    "recoveryKeyHash": "3d84bf6ca634d3eba5171f42dcb07c72b94af1e7da13269fd4fb562a0ac8d468",
-    "recoveryKeySalt": "T1--BmnHVaTDufydPMnSTw"
+    "enrolledAt": "2026-11-22T14:09:25Z",
+    "webAuthnCredentialEncrypted": "RURSMTLZy8ncZH3TscPks0D+ALAbdz0gIWSoN14mcSr0or7ujymc81flaq/MTQDL4eOZud6JXy9oD72d8lGYMBdxF3Ij7MYMIhiVVEBMoG9m1bF1KDIZzFNyu9hA+1qP/oJ9yAn8yRZRqWImjwEN8bcxQZB5prh6l0HEb/0h0yCSnKYnEAxGG92EGO8WhdMnIbbZ8Nv/bxnAervP2Ad4cgaMABaJeN88OYpyhUWidq5l7HXnAGgDtKZL6TEcOZvfirXO7vb0HD5DKINyin9n0kud",
+    "recoveryKeyHash": "680089584d1bfd2b6032c375c39f6f0811618eb9375677d7fb8d111729749219",
+    "recoveryKeySalt": "Upnx95lkVOmX-F7WEP32zg"
   },
   "authLockout": {
     "failedAttempts": 0,
@@ -358,6 +322,15 @@
     {
       "id": "audit_1795356411281",
       "timestamp": "2026-11-22T14:06:51Z",
+      "ip": "127.0.0.1",
+      "userAgent": "register_admin.py (Biometric Setup)",
+      "stage": "ENROLL",
+      "result": "SUCCESS",
+      "details": "Admin biometric platform authenticator provisioned locally"
+    },
+    {
+      "id": "audit_1795356565584",
+      "timestamp": "2026-11-22T14:09:25Z",
       "ip": "127.0.0.1",
       "userAgent": "register_admin.py (Biometric Setup)",
       "stage": "ENROLL",

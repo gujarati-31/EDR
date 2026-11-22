@@ -502,6 +502,19 @@ export const api = {
     };
   },
 
+  async login(username: string, password: string): Promise<{ success: boolean; token?: string; error?: string }> {
+    const res = await fetch(`${API_BASE}/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password }),
+    });
+    const json = await res.json();
+    if (!res.ok || !json.success) {
+      return { success: false, error: json.error || 'Authentication failed' };
+    }
+    return { success: true, token: json.data?.token };
+  },
+
   async verifyFace(faceDescriptor: number[], livenessProof: any): Promise<FaceVerifyResult> {
     const res = await fetch(`${API_BASE}/auth/face-verify`, {
       method: 'POST',
