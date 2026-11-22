@@ -324,6 +324,7 @@ export interface FaceVerifyResult {
 }
 
 export interface FingerprintChallengeData {
+  challengeId?: string;
   challenge: string;
   credentialId: string;
   rpId: string;

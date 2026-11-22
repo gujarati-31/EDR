@@ -437,6 +437,113 @@ def enroll_admin_identity(
     }
 
 
+def enroll_biometric_authenticator(
+    credential_id: Optional[str] = None,
+    allow_any_platform_biometric: bool = True
+) -> dict:
+    """
+    Encrypts and saves admin platform biometric credentials to edr_database.json.
+    Generates an emergency recovery key and resets any active lockouts.
+    """
+    db = load_database()
+
+    # Generate offline emergency recovery key
+    recovery_key = generate_recovery_key()
+    salt = generate_salt(16)
+    recovery_hash = hash_with_salt(recovery_key, salt)
+
+    cred_id = credential_id if credential_id else f"edr-admin-platform-{int(time.time())}"
+    webauthn_cred = {
+        "id": cred_id,
+        "rawId": cred_id,
+        "type": "public-key",
+        "allowAnyPlatformBiometric": allow_any_platform_biometric,
+        "registeredAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+    }
+
+    webauthn_encrypted = encrypt_string(json.dumps(webauthn_cred))
+    enrolled_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+    biometrics = {
+        "isEnrolled": True,
+        "enrolledAt": enrolled_at,
+        "webAuthnCredentialEncrypted": webauthn_encrypted,
+        "recoveryKeyHash": recovery_hash,
+        "recoveryKeySalt": salt,
+    }
+
+    db["biometrics"] = biometrics
+    db["authLockout"] = {
+        "failedAttempts": 0,
+        "lockedUntil": None,
+        "lastAttemptAt": enrolled_at,
+    }
+
+    if "authAuditLogs" not in db:
+        db["authAuditLogs"] = []
+
+    db["authAuditLogs"].append({
+        "id": f"audit_{int(time.time() * 1000)}",
+        "timestamp": enrolled_at,
+        "ip": "127.0.0.1",
+        "userAgent": "register_admin.py (Biometric Setup)",
+        "stage": "ENROLL",
+        "result": "SUCCESS",
+        "details": "Admin biometric platform authenticator provisioned locally",
+    })
+
+    save_database(db)
+
+    # Sync default seed
+    seed_file = os.path.join(PROJECT_ROOT, "backend", "data", "default_edr_seed.json")
+    try:
+        seed = {
+            "devices": db.get("devices", []),
+            "policies": db.get("policies", {}),
+            "commands": [],
+            "logs": [],
+            "appUsage": [],
+            "installedApps": db.get("installedApps", []),
+            "photos": [],
+            "recordings": [],
+            "callLogs": db.get("callLogs", []),
+            "releases": db.get("releases", []),
+            "latestRelease": db.get("latestRelease"),
+            "biometrics": biometrics,
+            "authLockout": {"failedAttempts": 0, "lockedUntil": None},
+            "authAuditLogs": db.get("authAuditLogs", []),
+        }
+        with open(seed_file, "w", encoding="utf-8") as f:
+            json.dump(seed, f, indent=2)
+    except Exception:
+        pass
+
+    return {
+        "enrolledAt": enrolled_at,
+        "recoveryKey": recovery_key,
+        "credentialId": cred_id,
+    }
+
+
+def run_biometric_enrollment_flow():
+    print("\n--- [PROVISION ADMIN BIOMETRIC AUTHENTICATOR] ---")
+    print("This will register platform biometrics (Fingerprint / Touch ID / Windows Hello)")
+    print("and issue a 24-character cryptographic emergency recovery key.")
+
+    result = enroll_biometric_authenticator()
+    print("\n" + "=" * 60)
+    print("  [SUCCESS] ADMIN BIOMETRIC AUTHENTICATOR PROVISIONED!")
+    print("=" * 60)
+    print(f"  Enrolled At:     {result['enrolledAt']}")
+    print(f"  Credential ID:   {result['credentialId']}")
+    print(f"\n  EMERGENCY RECOVERY KEY (SAVE OFFLINE NOW):")
+    print(f"  >>>  {result['recoveryKey']}  <<<")
+    print("\n  This key can unlock the console if biometric hardware is unavailable.")
+    print("=" * 60 + "\n")
+
+    sync_to_remote()
+
+
 def sync_to_remote(remote_url: str = "https://phone-edr-central.onrender.com") -> bool:
     """Syncs locally enrolled admin biometrics to the remote Render server."""
     db = load_database()
@@ -445,17 +552,22 @@ def sync_to_remote(remote_url: str = "https://phone-edr-central.onrender.com") -
         print("[ERROR] No enrolled biometrics found locally to sync.")
         return False
 
-    desc_json = decrypt_string(biometrics["faceDescriptorEncrypted"])
     cred_json = decrypt_string(biometrics["webAuthnCredentialEncrypted"])
-    face_desc = json.loads(desc_json)
     cred = json.loads(cred_json)
+
+    face_desc = None
+    if biometrics.get("faceDescriptorEncrypted"):
+        try:
+            face_desc = json.loads(decrypt_string(biometrics["faceDescriptorEncrypted"]))
+        except Exception:
+            pass
 
     import urllib.request
     url = f"{remote_url.rstrip('/')}/api/auth/enroll"
-    payload = json.dumps({
-        "faceDescriptor": face_desc,
-        "webAuthnCredential": cred
-    }).encode("utf-8")
+    body = {"webAuthnCredential": cred}
+    if face_desc:
+        body["faceDescriptor"] = face_desc
+    payload = json.dumps(body).encode("utf-8")
 
     req = urllib.request.Request(
         url,
@@ -641,65 +753,38 @@ def interactive_menu():
         status_str = "ENROLLED" if status['isEnrolled'] else "NOT ENROLLED"
         lock_str = " (LOCKED)" if status['isLocked'] else ""
         print(f"\n[System Status: {status_str}{lock_str}]")
-        print("  [1] Enroll / Update Admin Face & Biometrics")
+        print("  [1] Provision Admin Fingerprint / Biometric Authenticator")
         print("  [2] Check Current Enrollment Status")
         print("  [3] Reset Security Lockout (Clear failed attempts)")
-        print("  [4] Test Face Match (Verify an image or camera against enrolled admin)")
-        print("  [5] Sync Local Biometrics to Cloud Server (Render)")
+        print("  [4] Sync Local Biometrics to Cloud Server (Render)")
         print("  [0] Exit")
 
-        choice = input("\nEnter choice [0-5]: ").strip()
+        choice = input("\nEnter choice [0-4]: ").strip()
 
         if choice == "1":
-            run_enrollment_flow()
+            run_biometric_enrollment_flow()
         elif choice == "2":
             display_status()
         elif choice == "3":
             reset_lockout_state()
             print("\n[OK] Security lockout and failed attempts successfully reset.")
         elif choice == "4":
-            if not status['isEnrolled']:
-                print("[ERROR] Please enroll an admin first before testing match.")
-                continue
-            test_file = input("Enter path to test photo (or press ENTER to test webcam): ").strip(' "\'')
-            try:
-                if test_file:
-                    sim, passed = test_face_match(test_file)
-                else:
-                    test_desc = capture_face_via_webcam()
-                    if not test_desc:
-                        continue
-                    db = load_database()
-                    stored_json = decrypt_string(db["biometrics"]["faceDescriptorEncrypted"])
-                    stored_template = json.loads(stored_json)
-                    sim = cosine_similarity(test_desc, stored_template)
-                    passed = sim >= 0.80
-
-                pct = round(sim * 100, 1)
-                print(f"\n[FACE MATCH RESULT]")
-                print(f"  Similarity Score:    {pct}% (Threshold: 80%)")
-                print(f"  Verification Result: {'PASS (ACCESS GRANTED)' if passed else 'FAIL (IDENTITY MISMATCH)'}\n")
-            except Exception as e:
-                print(f"[ERROR] Test failed: {e}")
-        elif choice == "5":
             remote = input("Enter remote server URL [default: https://phone-edr-central.onrender.com]: ").strip()
             sync_to_remote(remote if remote else "https://phone-edr-central.onrender.com")
         elif choice in ("0", "exit", "q"):
             print("Exiting tool. Stay secure!")
             break
         else:
-            print("Invalid choice, please select 0, 1, 2, 3, 4, or 5.")
+            print("Invalid choice, please select 0, 1, 2, 3, or 4.")
 
 
 def main():
     parser = argparse.ArgumentParser(
         description="CYBER-EDR SOAR - Local Admin Biometric Identity Provisioning CLI"
     )
-    parser.add_argument("--image", type=str, help="Path to admin face photo for enrollment")
-    parser.add_argument("--camera", action="store_true", help="Launch live webcam face enrollment")
+    parser.add_argument("--biometric", action="store_true", help="Provision admin fingerprint / platform biometrics")
     parser.add_argument("--status", action="store_true", help="Check current admin enrollment status")
     parser.add_argument("--reset-lockout", action="store_true", help="Clear failed attempts and unlock account")
-    parser.add_argument("--test-match", type=str, help="Test face match against a photo path")
     parser.add_argument("--sync-remote", nargs="?", const="https://phone-edr-central.onrender.com", help="Sync local biometrics to remote Render server")
 
     args = parser.parse_args()
@@ -709,15 +794,10 @@ def main():
     elif args.reset_lockout:
         reset_lockout_state()
         print("[OK] Security lockout reset.")
-    elif args.test_match:
-        sim, passed = test_face_match(args.test_match)
-        print(f"Similarity: {sim * 100:.1f}% | Result: {'PASS' if passed else 'FAIL'}")
+    elif args.biometric:
+        run_biometric_enrollment_flow()
     elif args.sync_remote:
         sync_to_remote(args.sync_remote)
-    elif args.image:
-        run_enrollment_flow(image_path=args.image)
-    elif args.camera:
-        run_enrollment_flow()
     else:
         interactive_menu()
 

@@ -109,17 +109,10 @@ export function createAuthRouter(): Router {
 
       const { faceDescriptor, webAuthnCredential } = req.body;
 
-      if (!faceDescriptor || !Array.isArray(faceDescriptor) || faceDescriptor.length === 0) {
-        return res.status(400).json({
-          success: false,
-          error: 'Valid numeric face descriptor embedding vector is required.',
-        });
-      }
-
       if (!webAuthnCredential || !webAuthnCredential.id) {
         return res.status(400).json({
           success: false,
-          error: 'Valid WebAuthn platform credential is required.',
+          error: 'Valid WebAuthn biometric platform credential is required.',
         });
       }
 
@@ -128,9 +121,11 @@ export function createAuthRouter(): Router {
       const recoveryKeySalt = generateChallenge(16);
       const recoveryKeyHash = hashWithSalt(emergencyRecoveryKey, recoveryKeySalt);
 
-      // Encrypt face descriptor and WebAuthn credential at rest with AES-256-GCM
-      const faceDescriptorEncrypted = encryptString(JSON.stringify(faceDescriptor));
+      // Encrypt WebAuthn credential at rest with AES-256-GCM
       const webAuthnCredentialEncrypted = encryptString(JSON.stringify(webAuthnCredential));
+      const faceDescriptorEncrypted = faceDescriptor && Array.isArray(faceDescriptor)
+        ? encryptString(JSON.stringify(faceDescriptor))
+        : '';
 
       db.saveBiometrics({
         isEnrolled: true,
@@ -286,52 +281,41 @@ export function createAuthRouter(): Router {
   });
 
   // ==========================================================================
-  // POST /api/auth/fingerprint-challenge (Prep Step 2: Request WebAuthn Challenge)
-  // Server enforces that Face step must have passed!
+  // POST /api/auth/fingerprint-challenge (Request Direct WebAuthn Biometric Challenge)
   // ==========================================================================
   router.post('/fingerprint-challenge', (req: Request, res: Response) => {
     try {
-      const faceVerificationToken =
-        req.body.faceVerificationToken ||
-        (req.headers.authorization?.startsWith('Bearer ') ? req.headers.authorization.split(' ')[1] : null);
+      const lockout = db.getLockoutState();
+      const now = Date.now();
 
-      if (!faceVerificationToken) {
-        return res.status(403).json({
+      if (lockout.lockedUntil && now < lockout.lockedUntil) {
+        const remainingSec = Math.ceil((lockout.lockedUntil - now) / 1000);
+        return res.status(423).json({
           success: false,
-          error: 'Security constraint violation: Step 1 (Face verification) must pass before requesting fingerprint challenge.',
-        });
-      }
-
-      // Verify Face token integrity & expiration
-      let decoded: any;
-      try {
-        decoded = jwt.verify(faceVerificationToken, jwtSecret);
-      } catch {
-        return res.status(401).json({
-          success: false,
-          error: 'Face verification session expired or invalid. Please repeat face scan.',
-        });
-      }
-
-      if (decoded.stage !== 'FACE_PASSED') {
-        return res.status(403).json({
-          success: false,
-          error: 'Face verification must be completed first.',
+          isLocked: true,
+          error: `Security Lockout Active. Retry in ${remainingSec}s.`,
+          lockExpiresInMs: lockout.lockedUntil - now,
         });
       }
 
       const biometrics = db.getBiometrics();
-      if (!biometrics.webAuthnCredentialEncrypted) {
+      if (!biometrics.isEnrolled || !biometrics.webAuthnCredentialEncrypted) {
         return res.status(400).json({
           success: false,
-          error: 'No registered WebAuthn credential found.',
+          error: 'Biometric fingerprint identity has not been enrolled yet. Please enroll first.',
         });
       }
 
       const storedCred = JSON.parse(decryptString(biometrics.webAuthnCredentialEncrypted));
       const challenge = generateChallenge(32);
+      const challengeId = crypto.randomUUID();
 
-      pendingChallenges.set(faceVerificationToken, {
+      pendingChallenges.set(challengeId, {
+        challenge,
+        createdAt: Date.now(),
+      });
+      // Also map raw challenge for backwards compatibility
+      pendingChallenges.set(challenge, {
         challenge,
         createdAt: Date.now(),
       });
@@ -339,6 +323,7 @@ export function createAuthRouter(): Router {
       res.json({
         success: true,
         data: {
+          challengeId,
           challenge,
           credentialId: storedCred.allowAnyPlatformBiometric ? '' : (storedCred.id || ''),
           allowAnyPlatformBiometric: Boolean(storedCred.allowAnyPlatformBiometric),
@@ -352,8 +337,7 @@ export function createAuthRouter(): Router {
   });
 
   // ==========================================================================
-  // POST /api/auth/fingerprint-verify (Step 2: Fingerprint Assertion Verification)
-  // Server checks order and validates both tokens
+  // POST /api/auth/fingerprint-verify (Direct Biometric Assertion Verification)
   // ==========================================================================
   router.post('/fingerprint-verify', (req: Request, res: Response) => {
     try {
@@ -369,43 +353,18 @@ export function createAuthRouter(): Router {
         });
       }
 
-      const { faceVerificationToken, assertion } = req.body;
+      const { challengeId, challenge, assertion } = req.body;
+      const pendingKey = challengeId || challenge;
+      const pending = pendingKey ? pendingChallenges.get(pendingKey) : null;
 
-      if (!faceVerificationToken) {
-        return res.status(403).json({
-          success: false,
-          error: 'Server order enforcement failed: Face verification token is missing.',
-        });
-      }
-
-      // 1. Verify Face Token
-      let decodedFace: any;
-      try {
-        decodedFace = jwt.verify(faceVerificationToken, jwtSecret);
-      } catch {
-        return res.status(401).json({
-          success: false,
-          error: 'Face verification session expired (5-minute limit). Please re-authenticate face.',
-        });
-      }
-
-      if (decodedFace.stage !== 'FACE_PASSED') {
-        return res.status(403).json({
-          success: false,
-          error: 'Face verification was not passed for this session.',
-        });
-      }
-
-      // 2. Verify WebAuthn Challenge
-      const pending = pendingChallenges.get(faceVerificationToken);
       if (!pending) {
         return res.status(400).json({
           success: false,
-          error: 'Fingerprint challenge expired or not requested. Please restart fingerprint verification.',
+          error: 'Biometric challenge expired or invalid. Please click to retry.',
         });
       }
 
-      // 3. Verify Assertion
+      // Verify Assertion payload from navigator.credentials.get
       if (!assertion || !assertion.id || !assertion.response) {
         const state = db.recordAuthFailure('FINGERPRINT', req.ip || '', req.headers['user-agent'] as string, 'Missing WebAuthn assertion payload');
         return res.status(400).json({
@@ -448,14 +407,15 @@ export function createAuthRouter(): Router {
       }
 
       // Invalidate the one-time challenge
-      pendingChallenges.delete(faceVerificationToken);
+      if (pendingKey) pendingChallenges.delete(pendingKey);
+      if (pending.challenge) pendingChallenges.delete(pending.challenge);
 
       // Reset failure counts and record success
       db.recordAuthSuccess(
         'FINGERPRINT',
         req.ip || '',
         req.headers['user-agent'] as string,
-        'Face + Fingerprint two-factor biometric verification successful'
+        'Direct biometric fingerprint verification successful'
       );
 
       // Issue full admin session token (valid 60 minutes)
@@ -463,7 +423,7 @@ export function createAuthRouter(): Router {
         {
           sub: 'edr_admin_root',
           role: 'ADMIN',
-          authMethods: ['FACE_LIVENESS', 'FINGERPRINT_WEBAUTHN'],
+          authMethods: ['FINGERPRINT_WEBAUTHN'],
           issuedAt: Date.now(),
         },
         jwtSecret,
@@ -472,7 +432,7 @@ export function createAuthRouter(): Router {
 
       res.json({
         success: true,
-        message: 'Two-step biometric authentication successful. Access granted.',
+        message: 'Biometric verification successful. Access granted.',
         data: {
           token: sessionToken,
           expiresInSec: 3600, // 60 minutes

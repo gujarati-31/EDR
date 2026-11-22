@@ -526,7 +526,7 @@ export const api = {
     };
   },
 
-  async getFingerprintChallenge(faceVerificationToken: string): Promise<{
+  async getFingerprintChallenge(): Promise<{
     success: boolean;
     data?: FingerprintChallengeData;
     error?: string;
@@ -534,20 +534,20 @@ export const api = {
     const res = await fetch(`${API_BASE}/auth/fingerprint-challenge`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ faceVerificationToken }),
+      body: JSON.stringify({}),
     });
     const json = await res.json();
     if (!res.ok || !json.success) {
-      return { success: false, error: json.error || 'Failed to initialize fingerprint challenge' };
+      return { success: false, error: json.error || 'Failed to initialize biometric challenge' };
     }
     return { success: true, data: json.data };
   },
 
-  async verifyFingerprint(faceVerificationToken: string, assertion: any): Promise<FingerprintVerifyResult> {
+  async verifyFingerprint(assertion: any, challengeId?: string, challenge?: string): Promise<FingerprintVerifyResult> {
     const res = await fetch(`${API_BASE}/auth/fingerprint-verify`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ faceVerificationToken, assertion }),
+      body: JSON.stringify({ assertion, challengeId, challenge }),
     });
     const json = await res.json();
     if (!res.ok || !json.success) {
