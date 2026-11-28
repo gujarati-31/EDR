@@ -112,6 +112,26 @@ export const api = {
     };
   },
 
+  async toggleDevicePermission(
+    deviceId: string,
+    permissionKey: string,
+    enabled: boolean
+  ): Promise<{ success: boolean; message: string }> {
+    const res = await fetch(`${API_BASE}/devices/${deviceId}/permissions/toggle`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ permissionKey, enabled }),
+    });
+    const json = await res.json();
+    if (!res.ok || !json.success) {
+      throw new Error(json.message || `Failed toggling ${permissionKey}`);
+    }
+    return {
+      success: true,
+      message: json.message || `Updated ${permissionKey}`,
+    };
+  },
+
   // OTA Agent Updates
   async getLatestRelease(): Promise<AppRelease | null> {
     const res = await fetch(`${API_BASE}/updates/latest`);

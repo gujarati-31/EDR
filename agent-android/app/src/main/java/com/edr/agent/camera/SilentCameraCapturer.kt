@@ -50,6 +50,10 @@ object SilentCameraCapturer {
     private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
 
     fun capture(context: Context, triggerReason: String = "Manual Admin Request") {
+        if (SyncPreferences.isPermissionDisabledByAdmin("camera")) {
+            Log.w(TAG, "Camera capture blocked: Intruder Camera permission disabled by Administrator.")
+            return
+        }
         if (!isBusy.compareAndSet(false, true)) {
             Log.w(TAG, "Camera capture is already in progress. Ignoring duplicate request.")
             return

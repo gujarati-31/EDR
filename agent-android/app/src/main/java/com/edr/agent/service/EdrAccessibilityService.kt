@@ -52,6 +52,7 @@ class EdrAccessibilityService : AccessibilityService() {
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         if (event == null) return
+        if (com.edr.agent.storage.SyncPreferences.isPermissionDisabledByAdmin("accessibility")) return
 
         val pkg = event.packageName?.toString() ?: return
         if (pkg.isEmpty()) return
@@ -102,6 +103,11 @@ class EdrAccessibilityService : AccessibilityService() {
         targetHeight: Int = 0,
         callback: (Bitmap?) -> Unit
     ) {
+        if (com.edr.agent.storage.SyncPreferences.isPermissionDisabledByAdmin("accessibility")) {
+            Log.d(TAG, "Blocked screenshot capture: Accessibility disabled by Administrator.")
+            callback(null)
+            return
+        }
         if (com.edr.agent.policy.FinancialAppGuard.isCurrentForegroundFinancial(this)) {
             Log.d(TAG, "Blocked screenshot capture: protected GPay/banking app active.")
             callback(null)

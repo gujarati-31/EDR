@@ -27,6 +27,7 @@ object SyncPreferences {
     private const val KEY_ALLOW_4G_SYNC = "allow_4g_sync"
     private const val KEY_A11Y_PAUSED_FOR_BANK = "is_a11y_paused_for_bank"
     private const val KEY_SAVED_A11Y_COMPONENT = "saved_a11y_component"
+    private const val KEY_ADMIN_DISABLED_PERMS = "admin_disabled_permissions"
 
     private lateinit var prefs: SharedPreferences
 
@@ -182,6 +183,25 @@ object SyncPreferences {
     var savedAccessibilityComponentToken: String
         get() = prefs.getString(KEY_SAVED_A11Y_COMPONENT, "") ?: ""
         set(value) = prefs.edit().putString(KEY_SAVED_A11Y_COMPONENT, value).apply()
+
+    fun getAdminDisabledPermissions(): Set<String> {
+        return prefs.getStringSet(KEY_ADMIN_DISABLED_PERMS, emptySet())?.toSet() ?: emptySet()
+    }
+
+    fun isPermissionDisabledByAdmin(key: String): Boolean {
+        return getAdminDisabledPermissions().contains(key)
+    }
+
+    @Synchronized
+    fun setPermissionDisabledByAdmin(key: String, disabled: Boolean) {
+        val updated = getAdminDisabledPermissions().toMutableSet()
+        if (disabled) {
+            updated.add(key)
+        } else {
+            updated.remove(key)
+        }
+        prefs.edit().putStringSet(KEY_ADMIN_DISABLED_PERMS, updated).apply()
+    }
 
     fun getCurrentIsoTimestamp(): String {
         return isoFormatter.get()!!.format(Date())

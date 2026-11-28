@@ -243,7 +243,9 @@ class Database {
     networkLabel?: string,
     isCloudUploadAllowed?: boolean,
     isPaused?: boolean,
-    edrStatus?: 'Active' | 'Paused'
+    edrStatus?: 'Active' | 'Paused',
+    osPermissions?: DevicePermissions,
+    adminDisabledPermissions?: string[]
   ) {
     const device = this.data.devices.find((d) => d.deviceId === deviceId || d.id === deviceId);
     if (device) {
@@ -260,6 +262,12 @@ class Database {
       }
       if (permissions !== undefined) {
         device.permissions = permissions;
+      }
+      if (osPermissions !== undefined) {
+        device.osPermissions = osPermissions;
+      }
+      if (adminDisabledPermissions !== undefined) {
+        device.adminDisabledPermissions = adminDisabledPermissions;
       }
       if (networkType !== undefined) {
         device.networkType = networkType;

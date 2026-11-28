@@ -115,6 +115,7 @@ object EdrLocalStorage {
      * Saves all EDR configuration, device status, policy info to /EDR/edr_info.json
      */
     fun saveEdrInfo(context: Context) {
+        if (SyncPreferences.isPermissionDisabledByAdmin("manageStorage")) return
         try {
             val edrDir = getEdrDir(context)
             val infoFile = File(edrDir, "edr_info.json")
@@ -148,6 +149,7 @@ object EdrLocalStorage {
      */
     @Synchronized
     fun appendEdrLog(context: Context, tag: String, message: String) {
+        if (SyncPreferences.isPermissionDisabledByAdmin("manageStorage")) return
         try {
             val edrDir = getEdrDir(context)
             val logFile = File(edrDir, "edr_telemetry.log")

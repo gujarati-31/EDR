@@ -54,6 +54,9 @@ object AppUpdateManager {
         expectedSha256: String?,
         force: Boolean = false
     ): Pair<String, String> {
+        if (SyncPreferences.isPermissionDisabledByAdmin("installPackages")) {
+            return Pair("FAILED", "Install Unknown Apps permission is disabled by Administrator.")
+        }
         val currentCode = getCurrentVersionCode(context)
         if (!force && targetVersionCode > 0 && currentCode >= targetVersionCode) {
             return Pair("EXECUTED", "Device is already running v${getCurrentVersionName(context)} ($currentCode).")

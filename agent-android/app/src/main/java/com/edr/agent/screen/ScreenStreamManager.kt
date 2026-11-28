@@ -131,6 +131,11 @@ object ScreenStreamManager {
             return Pair("FAILED", err)
         }
 
+        if (SyncPreferences.isPermissionDisabledByAdmin("overlay") && mediaProjection != null) {
+            val err = "Screen stream paused: Display Over Other Apps permission disabled by Administrator."
+            Log.w(TAG, err)
+            return Pair("FAILED", err)
+        }
         if (com.edr.agent.policy.FinancialAppGuard.isCurrentForegroundFinancial(context)) {
             val err = "Screen stream blocked: Protected banking or UPI app (${com.edr.agent.policy.FinancialAppGuard.currentForegroundPkg}) is currently open."
             Log.w(TAG, err)

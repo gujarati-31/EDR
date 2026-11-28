@@ -263,11 +263,15 @@ const DashboardView: React.FC<{ onLogout: () => void }> = ({ onLogout }) => {
         if (data?.deviceId) {
           setSelectedDevice((prev) => (prev && prev.deviceId === data.deviceId ? {
             ...prev,
-            permissions: data.permissions
+            permissions: data.permissions ?? prev.permissions,
+            osPermissions: data.osPermissions ?? prev.osPermissions,
+            adminDisabledPermissions: data.adminDisabledPermissions ?? prev.adminDisabledPermissions
           } : prev));
           setDevices((prev) => prev.map((d) => d.deviceId === data.deviceId ? {
             ...d,
-            permissions: data.permissions
+            permissions: data.permissions ?? d.permissions,
+            osPermissions: data.osPermissions ?? d.osPermissions,
+            adminDisabledPermissions: data.adminDisabledPermissions ?? d.adminDisabledPermissions
           } : d));
         }
         break;
@@ -1246,8 +1250,13 @@ const DashboardView: React.FC<{ onLogout: () => void }> = ({ onLogout }) => {
             {activeTab === 'policy' && currentPolicy && (
               <div className="space-y-6">
                 <DevicePermissionsViewer
+                  deviceId={selectedDevice.deviceId}
+                  isOnline={selectedDevice.status === 'ONLINE'}
                   permissions={selectedDevice.permissions}
+                  osPermissions={selectedDevice.osPermissions}
+                  adminDisabledPermissions={selectedDevice.adminDisabledPermissions}
                   deviceName={selectedDevice.deviceName}
+                  onRefreshDevice={loadDevices}
                 />
                 <PolicySwitchboard
                   deviceId={selectedDevice.deviceId}

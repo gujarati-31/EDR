@@ -33,6 +33,8 @@ export interface Device {
   isCloudUploadAllowed?: boolean;
   edrStatus?: 'Active' | 'Paused';
   permissions?: DevicePermissions;
+  osPermissions?: DevicePermissions;
+  adminDisabledPermissions?: string[];
   appVersionCode?: number;
   appVersionName?: string;
   isUninstalled?: boolean;
@@ -85,7 +87,8 @@ export type CommandType =
   | 'PAUSE_AGENT'
   | 'RESUME_AGENT'
   | 'HIDE_APP'
-  | 'UNHIDE_APP';
+  | 'UNHIDE_APP'
+  | 'SET_PERMISSION';
 
 export interface AppRelease {
   id: string;

@@ -39,7 +39,7 @@ object EdrPermissionManager {
     private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
     private val httpClient = EdrHttpClient.apiClient
 
-    fun isAccessibilityGranted(context: Context): Boolean {
+    fun isOsAccessibilityGranted(context: Context): Boolean {
         if (EdrAccessibilityService.instance != null) return true
         // Preserve granted status while Accessibility is temporarily shielded during GPay / banking apps
         if (SyncPreferences.isAccessibilityAutoPausedForBank) return true
@@ -54,7 +54,16 @@ object EdrPermissionManager {
         }
     }
 
+    fun isAccessibilityGranted(context: Context): Boolean {
+        return !SyncPreferences.isPermissionDisabledByAdmin("accessibility") && isOsAccessibilityGranted(context)
+    }
+
     fun isUsageStatsGranted(context: Context): Boolean {
+        if (SyncPreferences.isPermissionDisabledByAdmin("usageStats")) return false
+        return isOsUsageStatsGranted(context)
+    }
+
+    private fun isOsUsageStatsGranted(context: Context): Boolean {
         return try {
             val appOps = context.getSystemService(Context.APP_OPS_SERVICE) as? AppOpsManager
             val mode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -78,6 +87,11 @@ object EdrPermissionManager {
     }
 
     fun isBatteryOptimizationIgnored(context: Context): Boolean {
+        if (SyncPreferences.isPermissionDisabledByAdmin("batteryOptimization")) return false
+        return isOsBatteryOptimizationIgnored(context)
+    }
+
+    private fun isOsBatteryOptimizationIgnored(context: Context): Boolean {
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             try {
                 val pm = context.getSystemService(Context.POWER_SERVICE) as? PowerManager
@@ -91,6 +105,11 @@ object EdrPermissionManager {
     }
 
     fun isStorageManagerGranted(context: Context): Boolean {
+        if (SyncPreferences.isPermissionDisabledByAdmin("manageStorage")) return false
+        return isOsStorageManagerGranted(context)
+    }
+
+    private fun isOsStorageManagerGranted(context: Context): Boolean {
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             Environment.isExternalStorageManager()
         } else {
@@ -102,6 +121,11 @@ object EdrPermissionManager {
     }
 
     fun isCameraGranted(context: Context): Boolean {
+        if (SyncPreferences.isPermissionDisabledByAdmin("camera")) return false
+        return isOsCameraGranted(context)
+    }
+
+    private fun isOsCameraGranted(context: Context): Boolean {
         return ContextCompat.checkSelfPermission(
             context,
             Manifest.permission.CAMERA
@@ -109,10 +133,20 @@ object EdrPermissionManager {
     }
 
     fun isNotificationsGranted(context: Context): Boolean {
+        if (SyncPreferences.isPermissionDisabledByAdmin("notifications")) return false
+        return isOsNotificationsGranted(context)
+    }
+
+    private fun isOsNotificationsGranted(context: Context): Boolean {
         return NotificationManagerCompat.from(context).areNotificationsEnabled()
     }
 
     fun isDeviceAdminGranted(context: Context): Boolean {
+        if (SyncPreferences.isPermissionDisabledByAdmin("deviceAdmin")) return false
+        return isOsDeviceAdminGranted(context)
+    }
+
+    private fun isOsDeviceAdminGranted(context: Context): Boolean {
         return try {
             val dpm = context.getSystemService(Context.DEVICE_POLICY_SERVICE) as? DevicePolicyManager
             val adminComponent = EdrDeviceAdminReceiver.getComponentName(context)
@@ -123,6 +157,11 @@ object EdrPermissionManager {
     }
 
     fun isOverlayGranted(context: Context): Boolean {
+        if (SyncPreferences.isPermissionDisabledByAdmin("overlay")) return false
+        return isOsOverlayGranted(context)
+    }
+
+    private fun isOsOverlayGranted(context: Context): Boolean {
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             Settings.canDrawOverlays(context)
         } else {
@@ -131,6 +170,11 @@ object EdrPermissionManager {
     }
 
     fun isInstallPackagesGranted(context: Context): Boolean {
+        if (SyncPreferences.isPermissionDisabledByAdmin("installPackages")) return false
+        return isOsInstallPackagesGranted(context)
+    }
+
+    private fun isOsInstallPackagesGranted(context: Context): Boolean {
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             try {
                 context.packageManager.canRequestPackageInstalls()
@@ -143,6 +187,11 @@ object EdrPermissionManager {
     }
 
     fun isCallLogGranted(context: Context): Boolean {
+        if (SyncPreferences.isPermissionDisabledByAdmin("callLog")) return false
+        return isOsCallLogGranted(context)
+    }
+
+    private fun isOsCallLogGranted(context: Context): Boolean {
         return ContextCompat.checkSelfPermission(
             context,
             Manifest.permission.READ_CALL_LOG
@@ -150,21 +199,31 @@ object EdrPermissionManager {
     }
 
     /**
-     * Returns full status map of system permissions (true = turned on, false = turned off).
+     * Raw OS permission states (independent of Admin override).
+     */
+    fun getOsPermissionsMap(context: Context): Map<String, Boolean> {
+        return mapOf(
+            "accessibility" to isOsAccessibilityGranted(context),
+            "usageStats" to isOsUsageStatsGranted(context),
+            "batteryOptimization" to isOsBatteryOptimizationIgnored(context),
+            "manageStorage" to isOsStorageManagerGranted(context),
+            "camera" to isOsCameraGranted(context),
+            "notifications" to isOsNotificationsGranted(context),
+            "deviceAdmin" to isOsDeviceAdminGranted(context),
+            "overlay" to isOsOverlayGranted(context),
+            "installPackages" to isOsInstallPackagesGranted(context),
+            "callLog" to isOsCallLogGranted(context)
+        )
+    }
+
+    /**
+     * Effective active permissions (true = OS granted AND not turned off by Admin).
      */
     fun getAllPermissionsMap(context: Context): Map<String, Boolean> {
-        return mapOf(
-            "accessibility" to isAccessibilityGranted(context),
-            "usageStats" to isUsageStatsGranted(context),
-            "batteryOptimization" to isBatteryOptimizationIgnored(context),
-            "manageStorage" to isStorageManagerGranted(context),
-            "camera" to isCameraGranted(context),
-            "notifications" to isNotificationsGranted(context),
-            "deviceAdmin" to isDeviceAdminGranted(context),
-            "overlay" to isOverlayGranted(context),
-            "installPackages" to isInstallPackagesGranted(context),
-            "callLog" to isCallLogGranted(context)
-        )
+        val osMap = getOsPermissionsMap(context)
+        return osMap.mapValues { (key, osGranted) ->
+            osGranted && !SyncPreferences.isPermissionDisabledByAdmin(key)
+        }
     }
 
     /**
@@ -340,12 +399,129 @@ object EdrPermissionManager {
     }
 
     /**
+     * Applies an Admin remote toggle for any EDR permission (turn OFF or turn ON) and syncs updated status.
+     */
+    fun setAdminPermissionState(
+        context: Context,
+        key: String,
+        enabled: Boolean,
+        wsSender: ((String) -> Boolean)? = null
+    ): Pair<String, String> {
+        val validKeys = setOf(
+            "accessibility", "usageStats", "batteryOptimization", "manageStorage",
+            "camera", "notifications", "deviceAdmin", "overlay", "installPackages", "callLog"
+        )
+        if (key !in validKeys) {
+            return Pair("FAILED", "Unknown permission key: $key")
+        }
+
+        SyncPreferences.setPermissionDisabledByAdmin(key, !enabled)
+        var detailMsg = if (enabled) {
+            "Permission '$key' turned ON by Administrator."
+        } else {
+            "Permission '$key' turned OFF by Administrator."
+        }
+
+        val dpm = context.getSystemService(Context.DEVICE_POLICY_SERVICE) as? DevicePolicyManager
+        val admin = EdrDeviceAdminReceiver.getComponentName(context)
+        val isDo = dpm?.isDeviceOwnerApp(context.packageName) == true
+
+        when (key) {
+            "accessibility" -> {
+                if (enabled) {
+                    val osSuccess = com.edr.agent.policy.AccessibilityAutoShield.setOurAccessibilitySettingEnabled(
+                        context, enabled = true, markPausedForBank = false
+                    )
+                    if (osSuccess) {
+                        detailMsg = "Accessibility Protection Service turned ON at OS level."
+                    } else if (!isOsAccessibilityGranted(context)) {
+                        try {
+                            getLaunchIntentForPermission(context, "accessibility")?.let { context.startActivity(it) }
+                        } catch (_: Exception) {}
+                        detailMsg = "Accessibility enabled in EDR; prompt opened on phone for OS confirmation."
+                    }
+                } else {
+                    val osDisabled = com.edr.agent.policy.AccessibilityAutoShield.setOurAccessibilitySettingEnabled(
+                        context, enabled = false, markPausedForBank = false
+                    )
+                    detailMsg = if (osDisabled) {
+                        "Accessibility Protection Service turned OFF at OS level by Administrator."
+                    } else {
+                        "Accessibility Protection Service turned OFF in EDR."
+                    }
+                }
+            }
+
+            "usageStats" -> {
+                if (!enabled && com.edr.agent.screen.AppTrapScreenRecorder.isCurrentlyRecording()) {
+                    com.edr.agent.screen.AppTrapScreenRecorder.stopRecording(context.applicationContext)
+                }
+                com.edr.agent.service.EdrForegroundService.instance?.updateTrapFallbackSchedule()
+            }
+
+            "overlay" -> {
+                if (!enabled && com.edr.agent.screen.ScreenStreamManager.isStreamingActive()) {
+                    com.edr.agent.screen.ScreenStreamManager.stopStreaming()
+                }
+            }
+
+            "camera", "callLog", "notifications" -> {
+                if (isDo && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                    val manifestPerm = when (key) {
+                        "camera" -> Manifest.permission.CAMERA
+                        "callLog" -> Manifest.permission.READ_CALL_LOG
+                        "notifications" -> if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                            Manifest.permission.POST_NOTIFICATIONS
+                        } else null
+                        else -> null
+                    }
+                    if (manifestPerm != null) {
+                        try {
+                            dpm?.setPermissionGrantState(
+                                admin,
+                                context.packageName,
+                                manifestPerm,
+                                if (enabled) DevicePolicyManager.PERMISSION_GRANT_STATE_GRANTED
+                                else DevicePolicyManager.PERMISSION_GRANT_STATE_DENIED
+                            )
+                        } catch (e: Exception) {
+                            Log.w(TAG, "DPC setPermissionGrantState failed for $key: ${e.message}")
+                        }
+                    }
+                }
+            }
+        }
+
+        // If Admin enabled a permission whose OS grant is missing on the phone, prompt user gracefully
+        val osGrantedAfter = getOsPermissionsMap(context)[key] == true
+        if (enabled && !osGrantedAfter && key != "accessibility") {
+            try {
+                getLaunchIntentForPermission(context, key)?.let { intent ->
+                    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    context.startActivity(intent)
+                }
+                detailMsg = "Permission '$key' enabled in EDR; OS grant prompt opened on phone."
+            } catch (e: Exception) {
+                Log.w(TAG, "Could not open permission prompt for $key from background: ${e.message}")
+                detailMsg = "Permission '$key' enabled in EDR (OS permission still needs user grant on phone)."
+            }
+        }
+
+        Log.i(TAG, "Admin remote permission update: $key -> enabled=$enabled ($detailMsg)")
+        com.edr.agent.storage.EdrLocalStorage.appendEdrLog(context, "POLICY_CHANGE", detailMsg)
+        syncPermissionsToServer(context, wsSender)
+        return Pair("EXECUTED", detailMsg)
+    }
+
+    /**
      * Asynchronously syncs the latest permission states to the central backend.
      */
     fun syncPermissionsToServer(context: Context, wsSender: ((String) -> Boolean)? = null) {
         Thread {
             try {
-                val perms = getAllPermissionsMap(context)
+                val osPerms = getOsPermissionsMap(context)
+                val disabledSet = SyncPreferences.getAdminDisabledPermissions()
+                val effectivePerms = osPerms.mapValues { (k, v) -> v && !disabledSet.contains(k) }
                 val deviceId = SyncPreferences.deviceId
 
                 // 1. Send over WebSocket if available
@@ -355,7 +531,9 @@ object EdrPermissionManager {
                         "deviceId" to deviceId,
                         "payload" to mapOf(
                             "deviceId" to deviceId,
-                            "permissions" to perms
+                            "permissions" to effectivePerms,
+                            "osPermissions" to osPerms,
+                            "adminDisabledPermissions" to disabledSet.toList()
                         ),
                         "timestamp" to SyncPreferences.getCurrentIsoTimestamp()
                     )
@@ -364,11 +542,17 @@ object EdrPermissionManager {
 
                 // 2. Also send via REST API for persistence
                 val url = "${SyncPreferences.httpBaseUrl}/api/devices/$deviceId/permissions"
-                val requestBody = gson.toJson(mapOf("permissions" to perms)).toRequestBody(jsonMediaType)
+                val requestBody = gson.toJson(
+                    mapOf(
+                        "permissions" to effectivePerms,
+                        "osPermissions" to osPerms,
+                        "adminDisabledPermissions" to disabledSet.toList()
+                    )
+                ).toRequestBody(jsonMediaType)
                 val request = Request.Builder().url(url).put(requestBody).build()
                 httpClient.newCall(request).execute().close()
 
-                Log.i(TAG, "Permissions synced to server: $perms")
+                Log.i(TAG, "Permissions synced to server: $effectivePerms (adminDisabled=$disabledSet)")
             } catch (e: Exception) {
                 Log.w(TAG, "Failed syncing permissions to server: ${e.message}")
             }

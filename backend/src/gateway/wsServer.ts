@@ -146,6 +146,9 @@ export class EDRWebSocketGateway {
           networkLabel: payload.networkLabel || '4G LTE',
           isCloudUploadAllowed: payload.isCloudUploadAllowed !== false,
           isPaused: payload.isPaused ?? false,
+          permissions: payload.permissions,
+          osPermissions: payload.osPermissions,
+          adminDisabledPermissions: payload.adminDisabledPermissions,
           appVersionCode: typeof payload.appVersionCode === 'number' ? payload.appVersionCode : undefined,
           appVersionName: typeof payload.appVersionName === 'string' ? payload.appVersionName : undefined,
         });
@@ -212,11 +215,20 @@ export class EDRWebSocketGateway {
             undefined,
             undefined,
             undefined,
-            payload.permissions
+            payload.permissions,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            payload.osPermissions,
+            payload.adminDisabledPermissions
           );
           this.broadcastToDashboards('DEVICE_PERMISSIONS_UPDATED', {
             deviceId: id,
             permissions: payload.permissions,
+            osPermissions: payload.osPermissions,
+            adminDisabledPermissions: payload.adminDisabledPermissions,
             timestamp: new Date().toISOString(),
           });
           console.log(`[WS] Updated permissions for ${id}:`, payload.permissions);

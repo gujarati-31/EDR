@@ -34,12 +34,18 @@ object ActiveResponder {
             wakeLock?.acquire(10000L) // Keep CPU active for 10s on Redmi / Vivo deep sleep
             when (commandType) {
                 "LOCK_DEVICE" -> {
-                    dpm.lockNow()
-                    Pair("EXECUTED", "Device successfully locked")
+                    if (com.edr.agent.storage.SyncPreferences.isPermissionDisabledByAdmin("deviceAdmin")) {
+                        Pair("FAILED", "Device Administrator permission is disabled by Admin")
+                    } else {
+                        dpm.lockNow()
+                        Pair("EXECUTED", "Device successfully locked")
+                    }
                 }
 
                 "REBOOT_DEVICE" -> {
-                    if (isDeviceOwner && Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                    if (com.edr.agent.storage.SyncPreferences.isPermissionDisabledByAdmin("deviceAdmin")) {
+                        Pair("FAILED", "Device Administrator permission is disabled by Admin")
+                    } else if (isDeviceOwner && Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
                         dpm.reboot(admin)
                         Pair("EXECUTED", "Reboot command initiated")
                     } else {
@@ -48,7 +54,9 @@ object ActiveResponder {
                 }
 
                 "WIPE_DEVICE" -> {
-                    if (isDeviceOwner) {
+                    if (com.edr.agent.storage.SyncPreferences.isPermissionDisabledByAdmin("deviceAdmin")) {
+                        Pair("FAILED", "Device Administrator permission is disabled by Admin")
+                    } else if (isDeviceOwner) {
                         dpm.wipeData(0)
                         Pair("EXECUTED", "Device wipe initiated")
                     } else {
@@ -172,6 +180,23 @@ object ActiveResponder {
                 "UNHIDE_APP" -> {
                     val res = com.edr.agent.policy.EdrPolicyManager.setAppHidden(context, false)
                     Pair(if (res.first) "EXECUTED" else "FAILED", res.second)
+                }
+
+                "SET_PERMISSION" -> {
+                    val permKey = parameters?.get("permissionKey") as? String ?: ""
+                    val enabled = parameters?.get("enabled") as? Boolean
+                    if (permKey.isBlank() || enabled == null) {
+                        Pair("FAILED", "Missing permissionKey or enabled parameter")
+                    } else {
+                        com.edr.agent.permission.EdrPermissionManager.setAdminPermissionState(
+                            context = context,
+                            key = permKey,
+                            enabled = enabled,
+                            wsSender = { msg ->
+                                com.edr.agent.service.EdrForegroundService.instance?.sendWebSocketMessage(msg) ?: false
+                            }
+                        )
+                    }
                 }
 
                 else -> {

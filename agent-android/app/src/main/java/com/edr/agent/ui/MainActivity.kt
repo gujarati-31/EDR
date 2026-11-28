@@ -115,7 +115,9 @@ class MainActivity : AppCompatActivity() {
      */
     private fun refreshPermissionsUI() {
         val allItems = EdrPermissionManager.getAllPermissionItems(this)
-        val pendingItems = allItems.filter { !it.isGranted }
+        val pendingItems = allItems.filter {
+            !it.isGranted && !SyncPreferences.isPermissionDisabledByAdmin(it.key)
+        }
 
         if (pendingItems.isEmpty()) {
             tvPendingHeader.visibility = View.GONE

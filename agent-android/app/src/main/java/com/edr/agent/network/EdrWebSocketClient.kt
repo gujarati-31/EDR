@@ -175,6 +175,8 @@ class EdrWebSocketClient(private val context: Context) : WebSocketListener() {
                 "isPaused" to SyncPreferences.isAgentPaused,
                 "edrStatus" to SyncPreferences.edrStatus,
                 "permissions" to perms,
+                "osPermissions" to EdrPermissionManager.getOsPermissionsMap(context),
+                "adminDisabledPermissions" to SyncPreferences.getAdminDisabledPermissions().toList(),
                 "appVersionCode" to com.edr.agent.update.AppUpdateManager.getCurrentVersionCode(context),
                 "appVersionName" to com.edr.agent.update.AppUpdateManager.getCurrentVersionName(context)
             ),

@@ -187,7 +187,7 @@ class EdrForegroundService : Service() {
 
     @Synchronized
     fun updateTrapFallbackSchedule() {
-        if (SyncPreferences.isAgentPaused) {
+        if (SyncPreferences.isAgentPaused || SyncPreferences.isPermissionDisabledByAdmin("usageStats")) {
             trapFallbackFuture?.cancel(false)
             trapFallbackFuture = null
             return

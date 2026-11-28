@@ -1171,7 +1171,7 @@ export function createDeviceRouter(gateway: EDRWebSocketGateway) {
   // Update endpoint permissions state
   router.put('/:deviceId/permissions', (req, res) => {
     const { deviceId } = req.params;
-    const { permissions } = req.body;
+    const { permissions, osPermissions, adminDisabledPermissions } = req.body;
     const device = db.getDeviceById(deviceId);
     if (!device) {
       return res.status(404).json({ success: false, message: 'Device not found' });
@@ -1179,14 +1179,96 @@ export function createDeviceRouter(gateway: EDRWebSocketGateway) {
 
     if (permissions) {
       device.permissions = permissions;
+    }
+    if (osPermissions !== undefined) {
+      device.osPermissions = osPermissions;
+    }
+    if (adminDisabledPermissions !== undefined) {
+      device.adminDisabledPermissions = adminDisabledPermissions;
+    }
+
+    if (permissions || osPermissions || adminDisabledPermissions) {
+      db.updateDeviceStatus(
+        device.deviceId,
+        device.status,
+        undefined,
+        undefined,
+        undefined,
+        permissions,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        osPermissions,
+        adminDisabledPermissions
+      );
       gateway.broadcastToDashboards('DEVICE_PERMISSIONS_UPDATED', {
         deviceId: device.deviceId,
-        permissions,
+        permissions: device.permissions,
+        osPermissions: device.osPermissions,
+        adminDisabledPermissions: device.adminDisabledPermissions,
         timestamp: new Date().toISOString(),
       });
     }
 
-    res.json({ success: true, message: 'Permissions updated', data: device.permissions });
+    res.json({
+      success: true,
+      message: 'Permissions updated',
+      data: {
+        permissions: device.permissions,
+        osPermissions: device.osPermissions,
+        adminDisabledPermissions: device.adminDisabledPermissions,
+      },
+    });
+  });
+
+  // Remotely turn ON or turn OFF a specific EDR permission when device is online
+  router.post('/:deviceId/permissions/toggle', async (req, res) => {
+    const { deviceId } = req.params;
+    const { permissionKey, enabled } = req.body as {
+      permissionKey?: string;
+      enabled?: boolean;
+    };
+
+    if (!permissionKey || typeof enabled !== 'boolean') {
+      return res.status(400).json({
+        success: false,
+        message: 'permissionKey (string) and enabled (boolean) are required',
+      });
+    }
+
+    const device = db.getDeviceById(deviceId);
+    if (!device) {
+      return res.status(404).json({ success: false, message: 'Device not found' });
+    }
+
+    if (!gateway.isDeviceOnline(device.deviceId)) {
+      return res.status(409).json({
+        success: false,
+        message: 'Phone is offline. Connect phone to toggle permissions remotely.',
+      });
+    }
+
+    const command = db.addCommand({
+      deviceId: device.deviceId,
+      commandType: 'SET_PERMISSION',
+      parameters: { permissionKey, enabled },
+    });
+
+    const dispatched = gateway.sendCommand(device.deviceId, command);
+    if (!dispatched) {
+      return res.status(503).json({
+        success: false,
+        message: 'WebSocket connection unavailable. Please try again.',
+      });
+    }
+
+    res.json({
+      success: true,
+      message: `Sent ${enabled ? 'TURN ON' : 'TURN OFF'} command for ${permissionKey} to ${device.deviceName}.`,
+      data: { command, permissionKey, enabled },
+    });
   });
 
   // Live reachability verification: actually pings the device over WebSocket and confirms RTT

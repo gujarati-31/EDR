@@ -202,7 +202,7 @@ object TrapAppMonitor {
      * @param pkg     Package name of the newly-foreground app/window
      */
     fun onWindowChanged(context: Context, pkg: String) {
-        if (SyncPreferences.isAgentPaused) {
+        if (SyncPreferences.isAgentPaused || SyncPreferences.isPermissionDisabledByAdmin("usageStats")) {
             return
         }
 
@@ -262,7 +262,7 @@ object TrapAppMonitor {
      * Acts strictly as a backup if AccessibilityService is not yet running.
      */
     fun checkForegroundApp(context: Context) {
-        if (SyncPreferences.isAgentPaused) return
+        if (SyncPreferences.isAgentPaused || SyncPreferences.isPermissionDisabledByAdmin("usageStats")) return
         if (trapPackages.isEmpty() && !AppTrapScreenRecorder.isCurrentlyRecording()) return
 
         // If AccessibilityService is connected and healthy, it handles all real-time events.

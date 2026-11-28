@@ -24,6 +24,10 @@ object UsageStatsTracker {
      * Collects exact day-wise usage (12:00 AM to 11:59 PM) for the past [daysBack] days
      */
     fun collectDayWiseUsage(context: Context, daysBack: Int = 7): List<AppUsageRecord> {
+        if (com.edr.agent.storage.SyncPreferences.isPermissionDisabledByAdmin("usageStats")) {
+            Log.i(TAG, "Usage Stats permission disabled by Administrator; returning empty stats.")
+            return emptyList()
+        }
         val usm = context.getSystemService(Context.USAGE_STATS_SERVICE) as? UsageStatsManager
             ?: return emptyList()
 

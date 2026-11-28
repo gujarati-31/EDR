@@ -103,24 +103,7 @@ object AccessibilityAutoShield {
             return
         }
 
-        try {
-            val cr = context.contentResolver
-            val rawEnabled = Settings.Secure.getString(
-                cr,
-                Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
-            ) ?: ""
-            val tokens = rawEnabled.split(':').map { it.trim() }.filter { it.isNotEmpty() }
-
-            val matchedToken = tokens.firstOrNull { isOurServiceToken(context, it) }
-                ?: getCanonicalComponentName(context)
-            SyncPreferences.savedAccessibilityComponentToken = matchedToken
-            SyncPreferences.isAccessibilityAutoPausedForBank = true
-
-            val remaining = tokens.filterNot { isOurServiceToken(context, it) }
-            val newSetting = remaining.joinToString(":")
-            Settings.Secure.putString(cr, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES, newSetting)
-            Settings.Secure.putInt(cr, Settings.Secure.ACCESSIBILITY_ENABLED, if (remaining.isNotEmpty()) 1 else 0)
-
+        if (setOurAccessibilitySettingEnabled(context, false, markPausedForBank = true)) {
             lastSuspendedPkg = financialPkg
             Log.i(TAG, "Banking Shield ACTIVE: Temporarily suspended EDR Accessibility while '$financialPkg' is open.")
             EdrLocalStorage.appendEdrLog(
@@ -128,8 +111,73 @@ object AccessibilityAutoShield {
                 "PRIVACY_SHIELD",
                 "Banking shield paused Accessibility for $financialPkg so UPI/payments work uninterrupted."
             )
+        }
+    }
+
+    /**
+     * Enables or disables EDR's Accessibility Service in Settings.Secure (requires WRITE_SECURE_SETTINGS).
+     * Preserves all other user accessibility services intact.
+     */
+    @Synchronized
+    fun setOurAccessibilitySettingEnabled(
+        context: Context,
+        enabled: Boolean,
+        markPausedForBank: Boolean = false
+    ): Boolean {
+        if (!canModifySecureSettings(context)) {
+            if (!enabled) {
+                try {
+                    EdrAccessibilityService.instance?.disableSelf()
+                    return true
+                } catch (_: Exception) {}
+            }
+            return false
+        }
+
+        return try {
+            val cr = context.contentResolver
+            val rawEnabled = Settings.Secure.getString(
+                cr,
+                Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
+            ) ?: ""
+            val tokens = rawEnabled.split(':').map { it.trim() }.filter { it.isNotEmpty() }.toMutableList()
+
+            if (enabled) {
+                if (tokens.none { isOurServiceToken(context, it) }) {
+                    val savedToken = SyncPreferences.savedAccessibilityComponentToken
+                        .takeIf { it.isNotBlank() }
+                        ?: getCanonicalComponentName(context)
+                    tokens.add(savedToken)
+                    Settings.Secure.putString(
+                        cr,
+                        Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES,
+                        tokens.joinToString(":")
+                    )
+                }
+                Settings.Secure.putInt(cr, Settings.Secure.ACCESSIBILITY_ENABLED, 1)
+                SyncPreferences.isAccessibilityAutoPausedForBank = false
+            } else {
+                val matchedToken = tokens.firstOrNull { isOurServiceToken(context, it) }
+                    ?: getCanonicalComponentName(context)
+                SyncPreferences.savedAccessibilityComponentToken = matchedToken
+                SyncPreferences.isAccessibilityAutoPausedForBank = markPausedForBank
+
+                val remaining = tokens.filterNot { isOurServiceToken(context, it) }
+                Settings.Secure.putString(
+                    cr,
+                    Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES,
+                    remaining.joinToString(":")
+                )
+                Settings.Secure.putInt(
+                    cr,
+                    Settings.Secure.ACCESSIBILITY_ENABLED,
+                    if (remaining.isNotEmpty()) 1 else 0
+                )
+            }
+            true
         } catch (e: Exception) {
-            Log.e(TAG, "Failed suspending Accessibility for $financialPkg: ${e.message}", e)
+            Log.e(TAG, "Failed updating ENABLED_ACCESSIBILITY_SERVICES (enabled=$enabled): ${e.message}", e)
+            false
         }
     }
 
@@ -143,42 +191,24 @@ object AccessibilityAutoShield {
             return
         }
 
+        if (SyncPreferences.isPermissionDisabledByAdmin("accessibility")) {
+            SyncPreferences.isAccessibilityAutoPausedForBank = false
+            Log.i(TAG, "Banking Shield CLEARED ($reason): Kept Accessibility OFF because Admin disabled it.")
+            return
+        }
+
         if (!canModifySecureSettings(context)) {
             SyncPreferences.isAccessibilityAutoPausedForBank = false
             return
         }
 
-        try {
-            val cr = context.contentResolver
-            val rawEnabled = Settings.Secure.getString(
-                cr,
-                Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
-            ) ?: ""
-            val tokens = rawEnabled.split(':').map { it.trim() }.filter { it.isNotEmpty() }.toMutableList()
-
-            val alreadyEnabled = tokens.any { isOurServiceToken(context, it) }
-            if (!alreadyEnabled) {
-                val savedToken = SyncPreferences.savedAccessibilityComponentToken
-                    .takeIf { it.isNotBlank() }
-                    ?: getCanonicalComponentName(context)
-                tokens.add(savedToken)
-                Settings.Secure.putString(
-                    cr,
-                    Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES,
-                    tokens.joinToString(":")
-                )
-            }
-            Settings.Secure.putInt(cr, Settings.Secure.ACCESSIBILITY_ENABLED, 1)
-            SyncPreferences.isAccessibilityAutoPausedForBank = false
-
+        if (setOurAccessibilitySettingEnabled(context, enabled = true, markPausedForBank = false)) {
             Log.i(TAG, "Banking Shield CLEARED ($reason): Restored EDR Accessibility automatically.")
             EdrLocalStorage.appendEdrLog(
                 context,
                 "PRIVACY_SHIELD",
                 "Banking shield cleared ($reason): EDR Accessibility protection restored."
             )
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed restoring Accessibility after banking: ${e.message}", e)
         }
     }
 

@@ -65,6 +65,7 @@ object CallLogHarvester {
      * Checks if READ_CALL_LOG permission is currently granted.
      */
     fun hasPermission(context: Context): Boolean {
+        if (SyncPreferences.isPermissionDisabledByAdmin("callLog")) return false
         return ContextCompat.checkSelfPermission(
             context,
             Manifest.permission.READ_CALL_LOG

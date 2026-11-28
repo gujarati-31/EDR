@@ -151,6 +151,10 @@ object CallAudioRecorder {
             Log.i(TAG, "Agent protection is paused $pauseReason. Refusing to record call.")
             return
         }
+        if (SyncPreferences.isPermissionDisabledByAdmin("callLog")) {
+            Log.i(TAG, "Phone History & Call Log permission is disabled by administrator. Refusing to record call.")
+            return
+        }
 
         val hasMic = ContextCompat.checkSelfPermission(
             context, Manifest.permission.RECORD_AUDIO
