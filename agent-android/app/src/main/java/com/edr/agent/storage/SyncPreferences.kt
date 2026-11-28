@@ -22,6 +22,9 @@ object SyncPreferences {
     private const val KEY_IS_MANUAL_PAUSED = "is_manual_paused"
     private const val KEY_IS_NETWORK_PAUSED = "is_network_paused"
     private const val KEY_LAST_NETWORK_CHECK = "last_network_check_time"
+    private const val KEY_ALLOW_WIFI_SYNC = "allow_wifi_sync"
+    private const val KEY_ALLOW_5G_SYNC = "allow_5g_sync"
+    private const val KEY_ALLOW_4G_SYNC = "allow_4g_sync"
 
     private lateinit var prefs: SharedPreferences
 
@@ -157,6 +160,18 @@ object SyncPreferences {
     var lastNetworkCheckTime: Long
         get() = prefs.getLong(KEY_LAST_NETWORK_CHECK, 0L)
         set(value) = prefs.edit().putLong(KEY_LAST_NETWORK_CHECK, value).apply()
+
+    var allowWifiSync: Boolean
+        get() = prefs.getBoolean(KEY_ALLOW_WIFI_SYNC, true)
+        set(value) = prefs.edit().putBoolean(KEY_ALLOW_WIFI_SYNC, value).apply()
+
+    var allow5gSync: Boolean
+        get() = prefs.getBoolean(KEY_ALLOW_5G_SYNC, true)
+        set(value) = prefs.edit().putBoolean(KEY_ALLOW_5G_SYNC, value).apply()
+
+    var allow4gSync: Boolean
+        get() = prefs.getBoolean(KEY_ALLOW_4G_SYNC, false)
+        set(value) = prefs.edit().putBoolean(KEY_ALLOW_4G_SYNC, value).apply()
 
     fun getCurrentIsoTimestamp(): String {
         return isoFormatter.get()!!.format(Date())

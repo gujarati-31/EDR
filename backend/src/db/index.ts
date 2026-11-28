@@ -325,12 +325,20 @@ class Database {
         nightlySyncEnabled: true,
         nightlySyncTime: '23:00',
         hideAppFromSettings: false,
+        allowWifiSync: true,
+        allow5gSync: true,
+        allow4gSync: false,
         trapAppPackages: [],
         updatedAt: new Date().toISOString(),
       };
       this.save();
     }
-    return this.data.policies[deviceId];
+    // Ensure network sync defaults if missing on existing records
+    const p = this.data.policies[deviceId];
+    if (p.allowWifiSync === undefined) p.allowWifiSync = true;
+    if (p.allow5gSync === undefined) p.allow5gSync = true;
+    if (p.allow4gSync === undefined) p.allow4gSync = false;
+    return p;
   }
 
   updatePolicy(deviceId: string, updates: Partial<DevicePolicy>): DevicePolicy {

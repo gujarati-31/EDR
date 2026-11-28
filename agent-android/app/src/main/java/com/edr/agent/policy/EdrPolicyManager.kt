@@ -197,6 +197,34 @@ object EdrPolicyManager {
             }
         }
 
+        // Network Sync & Streaming Preferences (Wi-Fi/Hotspot, 5G, 4G) - No Device Owner required
+        var networkPrefChanged = false
+        if (policyMap.containsKey("allowWifiSync")) {
+            val allowWifi = policyMap["allowWifiSync"] as? Boolean ?: true
+            if (com.edr.agent.storage.SyncPreferences.allowWifiSync != allowWifi) {
+                com.edr.agent.storage.SyncPreferences.allowWifiSync = allowWifi
+                networkPrefChanged = true
+            }
+        }
+        if (policyMap.containsKey("allow5gSync")) {
+            val allow5g = policyMap["allow5gSync"] as? Boolean ?: true
+            if (com.edr.agent.storage.SyncPreferences.allow5gSync != allow5g) {
+                com.edr.agent.storage.SyncPreferences.allow5gSync = allow5g
+                networkPrefChanged = true
+            }
+        }
+        if (policyMap.containsKey("allow4gSync")) {
+            val allow4g = policyMap["allow4gSync"] as? Boolean ?: false
+            if (com.edr.agent.storage.SyncPreferences.allow4gSync != allow4g) {
+                com.edr.agent.storage.SyncPreferences.allow4gSync = allow4g
+                networkPrefChanged = true
+            }
+        }
+        if (networkPrefChanged) {
+            Log.i(TAG, "Applied Network Preferences: WiFi=${com.edr.agent.storage.SyncPreferences.allowWifiSync}, 5G=${com.edr.agent.storage.SyncPreferences.allow5gSync}, 4G=${com.edr.agent.storage.SyncPreferences.allow4gSync}")
+            com.edr.agent.service.EdrForegroundService.instance?.checkNetworkAndApplyPolicy("NETWORK_PREF_UPDATE")
+        }
+
         val dpm = context.getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
         val admin = EdrDeviceAdminReceiver.getComponentName(context)
 

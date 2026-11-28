@@ -10,6 +10,9 @@ import {
   Clock,
   CheckCircle2,
   Sliders,
+  Wifi,
+  Zap,
+  Radio,
 } from 'lucide-react';
 import { DevicePolicy } from '../types';
 import { api } from '../services/api';
@@ -138,6 +141,143 @@ export const PolicySwitchboard: React.FC<PolicySwitchboardProps> = ({
             <span>{msg}</span>
           </div>
         )}
+      </div>
+
+      {/* Network Preferences (Wi-Fi / Hotspot, 5G, 4G) */}
+      <div className="mb-6 p-4 rounded-xl bg-slate-900/80 border border-cyan-500/30 shadow-[0_0_15px_rgba(6,182,212,0.08)]">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 mb-3 pb-2.5 border-b border-slate-800">
+          <div className="flex items-center gap-2">
+            <Radio className="w-4 h-4 text-cyan-400" />
+            <h3 className="text-xs font-mono font-bold text-white tracking-wider uppercase">
+              Network Preferences (Live Stream &amp; Media Uploads)
+            </h3>
+          </div>
+          <p className="text-[10px] font-mono text-slate-400">
+            📡 EDR Command WebSocket stays connected on all networks (~5 KB/hr)
+          </p>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          {/* Wi-Fi / Hotspot */}
+          <div className={`p-3.5 rounded-xl border transition-all flex items-start justify-between gap-3 ${
+            policy.allowWifiSync !== false
+              ? 'bg-slate-950/90 border-cyan-500/40 shadow-[0_0_12px_rgba(6,182,212,0.1)]'
+              : 'bg-slate-950/40 border-slate-800/80'
+          }`}>
+            <div className="flex items-start space-x-2.5">
+              <div className="p-2 rounded-lg bg-slate-900 border border-slate-800 text-cyan-400">
+                <Wifi className="w-4 h-4" />
+              </div>
+              <div>
+                <h4 className="text-xs font-semibold text-white flex items-center gap-1.5">
+                  Wi-Fi / Hotspot
+                  {policy.allowWifiSync !== false && (
+                    <span className="text-[9px] font-mono px-1 py-0.2 rounded bg-cyan-950 text-cyan-400 border border-cyan-800 font-bold">
+                      ACTIVE
+                    </span>
+                  )}
+                </h4>
+                <p className="text-[11px] text-slate-400 mt-0.5">
+                  Allow live stream &amp; media uploads when connected to Wi-Fi or Hotspot.
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              disabled={updatingKey === 'allowWifiSync'}
+              onClick={() => handleToggle('allowWifiSync', policy.allowWifiSync !== false)}
+              className={`relative inline-flex h-5 w-10 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                policy.allowWifiSync !== false ? 'bg-cyan-500' : 'bg-slate-800'
+              } ${updatingKey === 'allowWifiSync' ? 'opacity-50 cursor-wait' : ''}`}
+            >
+              <span
+                className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-slate-950 border border-slate-700 shadow ring-0 transition duration-200 ease-in-out ${
+                  policy.allowWifiSync !== false ? 'translate-x-5 bg-white border-white' : 'translate-x-0'
+                }`}
+              />
+            </button>
+          </div>
+
+          {/* 5G Mobile Data */}
+          <div className={`p-3.5 rounded-xl border transition-all flex items-start justify-between gap-3 ${
+            policy.allow5gSync !== false
+              ? 'bg-slate-950/90 border-emerald-500/40 shadow-[0_0_12px_rgba(16,185,129,0.1)]'
+              : 'bg-slate-950/40 border-slate-800/80'
+          }`}>
+            <div className="flex items-start space-x-2.5">
+              <div className="p-2 rounded-lg bg-slate-900 border border-slate-800 text-emerald-400">
+                <Zap className="w-4 h-4" />
+              </div>
+              <div>
+                <h4 className="text-xs font-semibold text-white flex items-center gap-1.5">
+                  5G Mobile Data
+                  {policy.allow5gSync !== false && (
+                    <span className="text-[9px] font-mono px-1 py-0.2 rounded bg-emerald-950 text-emerald-400 border border-emerald-800 font-bold">
+                      ACTIVE
+                    </span>
+                  )}
+                </h4>
+                <p className="text-[11px] text-slate-400 mt-0.5">
+                  Allow fast live streaming and cloud evidence uploads over 5G NR.
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              disabled={updatingKey === 'allow5gSync'}
+              onClick={() => handleToggle('allow5gSync', policy.allow5gSync !== false)}
+              className={`relative inline-flex h-5 w-10 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                policy.allow5gSync !== false ? 'bg-emerald-500' : 'bg-slate-800'
+              } ${updatingKey === 'allow5gSync' ? 'opacity-50 cursor-wait' : ''}`}
+            >
+              <span
+                className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-slate-950 border border-slate-700 shadow ring-0 transition duration-200 ease-in-out ${
+                  policy.allow5gSync !== false ? 'translate-x-5 bg-white border-white' : 'translate-x-0'
+                }`}
+              />
+            </button>
+          </div>
+
+          {/* 4G / 4G+ Mobile Data */}
+          <div className={`p-3.5 rounded-xl border transition-all flex items-start justify-between gap-3 ${
+            !!policy.allow4gSync
+              ? 'bg-slate-950/90 border-amber-500/40 shadow-[0_0_12px_rgba(245,158,11,0.1)]'
+              : 'bg-slate-950/40 border-slate-800/80'
+          }`}>
+            <div className="flex items-start space-x-2.5">
+              <div className="p-2 rounded-lg bg-slate-900 border border-slate-800 text-amber-400">
+                <Radio className="w-4 h-4" />
+              </div>
+              <div>
+                <h4 className="text-xs font-semibold text-white flex items-center gap-1.5">
+                  4G / 4G+ Mobile Data
+                  {!!policy.allow4gSync && (
+                    <span className="text-[9px] font-mono px-1 py-0.2 rounded bg-amber-950 text-amber-400 border border-amber-800 font-bold">
+                      ACTIVE
+                    </span>
+                  )}
+                </h4>
+                <p className="text-[11px] text-slate-400 mt-0.5">
+                  Allow live stream &amp; uploads on 4G. (When OFF, media is encrypted locally).
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              disabled={updatingKey === 'allow4gSync'}
+              onClick={() => handleToggle('allow4gSync', !!policy.allow4gSync)}
+              className={`relative inline-flex h-5 w-10 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                !!policy.allow4gSync ? 'bg-amber-500' : 'bg-slate-800'
+              } ${updatingKey === 'allow4gSync' ? 'opacity-50 cursor-wait' : ''}`}
+            >
+              <span
+                className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-slate-950 border border-slate-700 shadow ring-0 transition duration-200 ease-in-out ${
+                  !!policy.allow4gSync ? 'translate-x-5 bg-white border-white' : 'translate-x-0'
+                }`}
+              />
+            </button>
+          </div>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">

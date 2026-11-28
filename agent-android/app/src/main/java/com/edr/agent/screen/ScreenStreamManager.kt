@@ -112,6 +112,25 @@ object ScreenStreamManager {
     @Synchronized
     fun startStreaming(context: Context): Pair<String, String> {
         appContext = context.applicationContext
+
+        val netStatus = com.edr.agent.network.EdrNetworkManager.getNetworkStatus(context)
+        if (!netStatus.isCloudUploadAllowed) {
+            val err = "Screen stream paused: current network (${netStatus.label}) is not enabled for live streaming in Admin Network Preferences."
+            Log.w(TAG, err)
+            val errMsg = gson.toJson(
+                mapOf(
+                    "type" to "SCREEN_STREAM_STATUS",
+                    "deviceId" to SyncPreferences.deviceId,
+                    "payload" to mapOf(
+                        "active" to false,
+                        "error" to err
+                    )
+                )
+            )
+            wsSender?.invoke(errMsg)
+            return Pair("FAILED", err)
+        }
+
         val a11y = EdrAccessibilityService.instance
         if (a11y == null && mediaProjection == null) {
             Log.e(TAG, "Cannot start live screen stream: Neither Accessibility nor MediaProjection is ready.")

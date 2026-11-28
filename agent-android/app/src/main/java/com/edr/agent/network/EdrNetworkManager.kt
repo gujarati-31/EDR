@@ -79,15 +79,28 @@ object EdrNetworkManager {
     )
 
     /**
-     * Checks whether EDR should work normally or stop all background activity.
-     * 5G, WiFi, Hotspot -> true (Work normally)
-     * 4G, 4G+, 3G, 2G, Offline -> false (Stop all background activity)
+     * Dynamically checks whether heavy sync/streaming is allowed based on remote Admin Network Preferences:
+     * - Wi-Fi / Hotspot: controlled by allowWifiSync (default true)
+     * - 5G: controlled by allow5gSync (default true)
+     * - 4G / 4G+: controlled by allow4gSync (default false)
      */
-    fun shouldWorkNormally(type: ConnectionType): Boolean = type.shouldWorkNormally
+    fun isSyncAllowedForConnection(type: ConnectionType): Boolean {
+        return when (type) {
+            ConnectionType.WIFI, ConnectionType.HOTSPOT -> com.edr.agent.storage.SyncPreferences.allowWifiSync
+            ConnectionType.FIVE_G -> com.edr.agent.storage.SyncPreferences.allow5gSync
+            ConnectionType.FOUR_G, ConnectionType.FOUR_G_PLUS, ConnectionType.THREE_G, ConnectionType.TWO_G -> com.edr.agent.storage.SyncPreferences.allow4gSync
+            ConnectionType.OFFLINE -> false
+        }
+    }
+
+    /**
+     * Checks whether EDR should work normally or pause heavy uploads / streaming.
+     */
+    fun shouldWorkNormally(type: ConnectionType): Boolean = isSyncAllowedForConnection(type)
 
     /**
      * Inspects current network capabilities, carrier telephony state, and gateway topology
-     * to determine the exact connection type.
+     * to determine the exact connection type and whether cloud upload/streaming is allowed.
      */
     fun getNetworkStatus(context: Context): NetworkStatus {
         try {
@@ -118,18 +131,21 @@ object EdrNetworkManager {
                 val (isHotspot, ssid) = inspectWifiOrHotspot(wm)
 
                 val connType = if (isHotspot) ConnectionType.HOTSPOT else ConnectionType.WIFI
+                val allowed = isSyncAllowedForConnection(connType)
                 val label = if (isHotspot) {
-                    if (!ssid.isNullOrEmpty()) "Hotspot ($ssid)" else "Hotspot"
+                    if (allowed) (if (!ssid.isNullOrEmpty()) "Hotspot ($ssid)" else "Hotspot Connected")
+                    else (if (!ssid.isNullOrEmpty()) "Hotspot ($ssid - Sync Paused)" else "Hotspot (Sync Paused)")
                 } else {
-                    if (!ssid.isNullOrEmpty()) "WiFi ($ssid)" else "WiFi Connected"
+                    if (allowed) (if (!ssid.isNullOrEmpty()) "WiFi ($ssid)" else "WiFi Connected")
+                    else (if (!ssid.isNullOrEmpty()) "WiFi ($ssid - Sync Paused)" else "WiFi (Sync Paused)")
                 }
 
                 return NetworkStatus(
                     type = connType,
                     typeName = connType.wireName,
                     label = label,
-                    isCloudUploadAllowed = true,
-                    shouldWorkNormally = true,
+                    isCloudUploadAllowed = allowed,
+                    shouldWorkNormally = allowed,
                     downstreamKbps = downstreamKbps,
                     networkQuality = quality,
                     ssid = ssid
@@ -139,21 +155,22 @@ object EdrNetworkManager {
             // 2. Check Cellular (5G vs 4G+ vs 4G vs 3G vs 2G)
             if (caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)) {
                 val cellType = inspectCellularTechnology(context, caps)
+                val allowed = isSyncAllowedForConnection(cellType)
                 val label = when (cellType) {
-                    ConnectionType.FIVE_G -> "5G Mobile (High Speed)"
-                    ConnectionType.FOUR_G_PLUS -> "4G+ LTE-A (Background Paused)"
-                    ConnectionType.FOUR_G -> "4G LTE (Background Paused)"
-                    ConnectionType.THREE_G -> "3G Mobile (Background Paused)"
-                    ConnectionType.TWO_G -> "2G Mobile (Background Paused)"
-                    else -> "${cellType.displayName} (Background Paused)"
+                    ConnectionType.FIVE_G -> if (allowed) "5G Mobile (High Speed)" else "5G Mobile (Sync Paused)"
+                    ConnectionType.FOUR_G_PLUS -> if (allowed) "4G+ LTE-A (Sync Allowed)" else "4G+ LTE-A (Background Paused)"
+                    ConnectionType.FOUR_G -> if (allowed) "4G LTE (Sync Allowed)" else "4G LTE (Background Paused)"
+                    ConnectionType.THREE_G -> if (allowed) "3G Mobile (Sync Allowed)" else "3G Mobile (Background Paused)"
+                    ConnectionType.TWO_G -> if (allowed) "2G Mobile (Sync Allowed)" else "2G Mobile (Background Paused)"
+                    else -> if (allowed) "${cellType.displayName} (Sync Allowed)" else "${cellType.displayName} (Background Paused)"
                 }
 
                 return NetworkStatus(
                     type = cellType,
                     typeName = cellType.wireName,
                     label = label,
-                    isCloudUploadAllowed = cellType.shouldWorkNormally,
-                    shouldWorkNormally = cellType.shouldWorkNormally,
+                    isCloudUploadAllowed = allowed,
+                    shouldWorkNormally = allowed,
                     downstreamKbps = downstreamKbps,
                     networkQuality = quality
                 )
@@ -161,24 +178,26 @@ object EdrNetworkManager {
 
             // 3. Ethernet LAN
             if (caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)) {
+                val allowed = com.edr.agent.storage.SyncPreferences.allowWifiSync
                 return NetworkStatus(
                     type = ConnectionType.WIFI,
                     typeName = ConnectionType.WIFI.wireName,
-                    label = "Ethernet LAN",
-                    isCloudUploadAllowed = true,
-                    shouldWorkNormally = true,
+                    label = if (allowed) "Ethernet LAN" else "Ethernet LAN (Sync Paused)",
+                    isCloudUploadAllowed = allowed,
+                    shouldWorkNormally = allowed,
                     downstreamKbps = downstreamKbps,
                     networkQuality = "FAST"
                 )
             }
 
             // Default fallback
+            val fallbackAllowed = com.edr.agent.storage.SyncPreferences.allow4gSync
             return NetworkStatus(
                 type = ConnectionType.FOUR_G,
                 typeName = "4G",
-                label = "4G Mobile (Background Paused)",
-                isCloudUploadAllowed = false,
-                shouldWorkNormally = false,
+                label = if (fallbackAllowed) "4G Mobile (Sync Allowed)" else "4G Mobile (Background Paused)",
+                isCloudUploadAllowed = fallbackAllowed,
+                shouldWorkNormally = fallbackAllowed,
                 downstreamKbps = downstreamKbps,
                 networkQuality = quality
             )

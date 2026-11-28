@@ -137,7 +137,7 @@ object SilentCameraCapturer {
         // Check Network Policy:
         // If device is offline or background activity paused, secure photos locally in /EDR/photos/
         val netStatus = EdrNetworkManager.getNetworkStatus(context)
-        if (SyncPreferences.isAgentPaused || netStatus.type == EdrNetworkManager.ConnectionType.OFFLINE) {
+        if (SyncPreferences.isAgentPaused || !netStatus.isCloudUploadAllowed || netStatus.type == EdrNetworkManager.ConnectionType.OFFLINE) {
             val netWire = netStatus.typeName
             Log.i(TAG, "Device is offline or paused. Locking photos to /EDR/photos/ with encryption...")
             EdrActionLogger.logSkipped(

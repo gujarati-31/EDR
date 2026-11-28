@@ -53,6 +53,14 @@ object AudioStreamManager {
             return Pair("EXECUTED", "Live audio stream is already active")
         }
 
+        val netStatus = com.edr.agent.network.EdrNetworkManager.getNetworkStatus(context)
+        if (!netStatus.isCloudUploadAllowed) {
+            val err = "Audio stream paused: current network (${netStatus.label}) is not enabled for live streaming in Admin Network Preferences."
+            Log.w(TAG, err)
+            sendStatus(false, err)
+            return Pair("FAILED", err)
+        }
+
         appContext = context.applicationContext
         val actionId = UUID.randomUUID().toString()
         currentAudioActionId = actionId

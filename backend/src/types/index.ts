@@ -54,6 +54,9 @@ export interface DevicePolicy {
   nightlySyncEnabled: boolean;
   nightlySyncTime: string; // e.g. "23:00"
   hideAppFromSettings?: boolean;
+  allowWifiSync?: boolean;
+  allow5gSync?: boolean;
+  allow4gSync?: boolean;
   trapAppPackages?: string[];
   updatedAt: string;
 }

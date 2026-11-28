@@ -616,9 +616,10 @@ class EdrWebSocketClient(private val context: Context) : WebSocketListener() {
         heartbeatTask?.cancel(false)
         var lastBatteryReadTime = 0L
         var cachedBattery = 100
+        var hasSentInitialPermissions = false
 
         // 75 seconds — saves CPU/radio wakeups while staying well inside the server 180s timeout window.
-        // Avoids acquiring PARTIAL_WAKE_LOCK on every routine heartbeat (OkHttp WS pingInterval handles keepalive).
+        // Routine heartbeats send minimal telemetry (~120 bytes) to save user mobile data.
         heartbeatTask = scheduler.scheduleAtFixedRate({
             try {
                 if (!isConnected) return@scheduleAtFixedRate
@@ -637,20 +638,27 @@ class EdrWebSocketClient(private val context: Context) : WebSocketListener() {
                 }
 
                 val netInfo = getNetworkQualityInfo()
+                val payloadMap = mutableMapOf<String, Any>(
+                    "batteryLevel" to cachedBattery,
+                    "networkQuality" to (netInfo["networkQuality"] ?: "FAST"),
+                    "downstreamKbps" to (netInfo["downstreamKbps"] ?: 10000),
+                    "networkType" to (netInfo["networkType"] ?: "4G"),
+                    "networkLabel" to (netInfo["networkLabel"] ?: "4G LTE"),
+                    "isCloudUploadAllowed" to (netInfo["isCloudUploadAllowed"] ?: false),
+                    "isPaused" to SyncPreferences.isAgentPaused,
+                    "edrStatus" to SyncPreferences.edrStatus
+                )
+
+                // Only send permissions block on initial connect to avoid wasting mobile data
+                if (!hasSentInitialPermissions) {
+                    payloadMap["permissions"] = cachedPermissionsMap
+                    hasSentInitialPermissions = true
+                }
+
                 val beat = mapOf(
                     "type" to "HEARTBEAT",
                     "deviceId" to SyncPreferences.deviceId,
-                    "payload" to mapOf(
-                        "batteryLevel" to cachedBattery,
-                        "networkQuality" to (netInfo["networkQuality"] ?: "FAST"),
-                        "downstreamKbps" to (netInfo["downstreamKbps"] ?: 10000),
-                        "networkType" to (netInfo["networkType"] ?: "4G"),
-                        "networkLabel" to (netInfo["networkLabel"] ?: "4G LTE"),
-                        "isCloudUploadAllowed" to (netInfo["isCloudUploadAllowed"] ?: false),
-                        "isPaused" to SyncPreferences.isAgentPaused,
-                        "edrStatus" to SyncPreferences.edrStatus,
-                        "permissions" to cachedPermissionsMap
-                    ),
+                    "payload" to payloadMap,
                     "timestamp" to SyncPreferences.getCurrentIsoTimestamp()
                 )
                 webSocket?.send(gson.toJson(beat))
