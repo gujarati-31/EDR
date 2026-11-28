@@ -57,8 +57,8 @@ class EdrAccessibilityService : AccessibilityService() {
         val pkg = event.packageName?.toString() ?: return
         if (pkg.isEmpty()) return
 
-        // Hard safety guard: ignore any financial/UPI/GPay app
-        if (com.edr.agent.policy.FinancialAppGuard.isFinancialApp(this, pkg)) {
+        // Hard safety guard: ignore any financial/UPI/GPay or admin-excluded app
+        if (com.edr.agent.policy.FinancialAppGuard.isAppExcluded(this, pkg)) {
             com.edr.agent.policy.AccessibilityAutoShield.suspendForBankingApp(this, pkg)
             return
         }

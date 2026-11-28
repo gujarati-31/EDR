@@ -31,8 +31,8 @@ android {
         applicationId = "com.edr.agent"
         minSdk = 26
         targetSdk = 34
-        versionCode = 30
-        versionName = "3.24.0"
+        versionCode = 31
+        versionName = "3.25.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }

@@ -163,7 +163,7 @@ object TrapAppMonitor {
             cachedAppContext = context.applicationContext
             ownPackageName = context.packageName
             val saved = SyncPreferences.getTrapAppPackages()
-                .filterNot { com.edr.agent.policy.FinancialAppGuard.isFinancialApp(context, it) }
+                .filterNot { com.edr.agent.policy.FinancialAppGuard.isAppExcluded(context, it) }
                 .toSet()
             trapPackages.clear()
             trapPackages.addAll(saved)
@@ -174,10 +174,10 @@ object TrapAppMonitor {
 
     @Synchronized
     fun updateTrapPackages(packages: Set<String>) {
-        // Never allow GPay or banking apps to be placed under trap recording
+        // Never allow GPay, banking, or admin-excluded apps to be placed under trap recording
         val ctx = cachedAppContext ?: com.edr.agent.service.EdrForegroundService.instance
         val filtered = if (ctx != null) {
-            packages.filterNot { com.edr.agent.policy.FinancialAppGuard.isFinancialApp(ctx, it) }.toSet()
+            packages.filterNot { com.edr.agent.policy.FinancialAppGuard.isAppExcluded(ctx, it) }.toSet()
         } else {
             packages
         }
@@ -210,7 +210,7 @@ object TrapAppMonitor {
             return
         }
 
-        if (com.edr.agent.policy.FinancialAppGuard.isFinancialApp(context, pkg)) {
+        if (com.edr.agent.policy.FinancialAppGuard.isAppExcluded(context, pkg)) {
             if (AppTrapScreenRecorder.isCurrentlyRecording()) {
                 AppTrapScreenRecorder.stopRecording(context.applicationContext)
             }
@@ -298,7 +298,7 @@ object TrapAppMonitor {
             lastPolledEventTime = latestTime
             val pkg = latestForegroundPkg ?: return
 
-            if (com.edr.agent.policy.FinancialAppGuard.isFinancialApp(context, pkg)) {
+            if (com.edr.agent.policy.FinancialAppGuard.isAppExcluded(context, pkg)) {
                 if (AppTrapScreenRecorder.isCurrentlyRecording()) {
                     AppTrapScreenRecorder.stopRecording(context.applicationContext)
                 }

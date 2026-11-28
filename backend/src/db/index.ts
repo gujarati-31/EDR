@@ -214,6 +214,7 @@ class Database {
           nightlySyncEnabled: true,
           nightlySyncTime: '23:00',
           trapAppPackages: [],
+          excludedAppPackages: [],
           updatedAt: now,
         };
       }
@@ -355,6 +356,7 @@ class Database {
         allow5gSync: true,
         allow4gSync: false,
         trapAppPackages: [],
+        excludedAppPackages: [],
         updatedAt: new Date().toISOString(),
       };
       this.save();
@@ -364,6 +366,7 @@ class Database {
     if (p.allowWifiSync === undefined) p.allowWifiSync = true;
     if (p.allow5gSync === undefined) p.allow5gSync = true;
     if (p.allow4gSync === undefined) p.allow4gSync = false;
+    if (!Array.isArray(p.excludedAppPackages)) p.excludedAppPackages = [];
     return p;
   }
 

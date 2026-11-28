@@ -13,6 +13,7 @@ import {
   Wifi,
   Zap,
   Radio,
+  ShieldOff,
 } from 'lucide-react';
 import { DevicePolicy } from '../types';
 import { api } from '../services/api';
@@ -329,6 +330,26 @@ export const PolicySwitchboard: React.FC<PolicySwitchboardProps> = ({
             </div>
           );
         })}
+      </div>
+
+      {/* Privacy App Exclusions Policy Summary */}
+      <div className="p-4 rounded-xl bg-slate-900/60 border border-slate-800 flex items-center justify-between gap-4">
+        <div className="flex items-center space-x-3">
+          <div className="p-2.5 rounded-xl bg-amber-500/20 text-amber-400 border border-amber-500/30">
+            <ShieldOff className="w-5 h-5" />
+          </div>
+          <div>
+            <h4 className="text-sm font-semibold text-white flex items-center gap-2">
+              <span>Privacy App Exclusions (GPay / Banking & Custom)</span>
+              <span className="text-[9px] font-mono font-bold px-1.5 py-0.2 rounded bg-amber-950 text-amber-400 border border-amber-800">
+                {(policy.excludedAppPackages?.length || 0)} CUSTOM EXCLUDED
+              </span>
+            </h4>
+            <p className="text-xs text-slate-400 mt-0.5">
+              Google Pay & Banking applications are permanently excluded by default in code. Additional apps can be selected from the installed applications list under App Manager.
+            </p>
+          </div>
+        </div>
       </div>
     </div>
   );

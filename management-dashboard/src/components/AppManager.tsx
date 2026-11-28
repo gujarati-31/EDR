@@ -6,6 +6,7 @@ import {
   RefreshCw,
   AlertCircle,
   ShieldCheck,
+  ShieldOff,
   Smartphone,
   Film,
   X,
@@ -15,6 +16,41 @@ import {
 import { InstalledApp } from '../types';
 import { api } from '../services/api';
 import { AppLogo } from './AppLogo';
+
+const STATIC_BANKING_PACKAGES = new Set([
+  'com.google.android.apps.nbu.paisa.user',
+  'com.google.android.apps.walletnfcrel',
+  'com.phonepe.app',
+  'com.phonepe.app.business',
+  'net.one97.paytm',
+  'com.paytm.merchants',
+  'in.org.npci.upiapp',
+  'com.sbi.lotusintouch',
+  'com.msf.kbank.mobile',
+  'com.snapwork.hdfc',
+  'com.csam.icici.bank.imobile',
+  'com.axis.mobile',
+  'com.bankofbaroda.mconnect',
+  'com.rblbank.mobank',
+  'com.fedmobile',
+  'com.canarabank.mobility',
+  'com.infrasoft.uboi',
+  'com.idfcfirstbank.optimus',
+  'com.indusind.indusmobile',
+  'com.kotak.bank',
+]);
+
+const isDefaultProtectedApp = (pkg: string, name: string = '') => {
+  if (STATIC_BANKING_PACKAGES.has(pkg)) return true;
+  const lowerPkg = (pkg || '').toLowerCase();
+  const lowerName = (name || '').toLowerCase();
+  const keywords = [
+    'paisa', 'gpay', 'phonepe', 'paytm', 'bhim', 'yono', 'imobile',
+    'netbanking', 'bobworld', 'payzapp', 'kotak', 'hdfc', 'icici',
+    'axisbank', 'idfcfirst', 'indusind', 'canarabank', 'yesbank', 'npci'
+  ];
+  return keywords.some(k => lowerPkg.includes(k) || lowerName.includes(k));
+};
 
 interface AppManagerProps {
   deviceId: string;
@@ -33,7 +69,9 @@ export const AppManager: React.FC<AppManagerProps> = ({
 }) => {
   const [apps, setApps] = useState<InstalledApp[]>([]);
   const [trapAppPackages, setTrapAppPackages] = useState<string[]>(policy?.trapAppPackages || []);
+  const [excludedAppPackages, setExcludedAppPackages] = useState<string[]>(policy?.excludedAppPackages || []);
   const [savingTrapPackage, setSavingTrapPackage] = useState<string | null>(null);
+  const [savingExcludedPackage, setSavingExcludedPackage] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [isSyncingApps, setIsSyncingApps] = useState(false);
   const [search, setSearch] = useState('');
@@ -45,6 +83,9 @@ export const AppManager: React.FC<AppManagerProps> = ({
     if (policy && Array.isArray(policy.trapAppPackages)) {
       setTrapAppPackages(policy.trapAppPackages);
     }
+    if (policy && Array.isArray(policy.excludedAppPackages)) {
+      setExcludedAppPackages(policy.excludedAppPackages);
+    }
   }, [policy]);
 
   const loadData = async () => {
@@ -55,8 +96,13 @@ export const AppManager: React.FC<AppManagerProps> = ({
         api.getPolicy(deviceId).catch(() => null),
       ]);
       setApps(appsData);
-      if (policyData && Array.isArray(policyData.trapAppPackages)) {
-        setTrapAppPackages(policyData.trapAppPackages);
+      if (policyData) {
+        if (Array.isArray(policyData.trapAppPackages)) {
+          setTrapAppPackages(policyData.trapAppPackages);
+        }
+        if (Array.isArray(policyData.excludedAppPackages)) {
+          setExcludedAppPackages(policyData.excludedAppPackages);
+        }
         if (onPolicyUpdated) onPolicyUpdated(policyData);
       }
     } catch (err) {
@@ -141,6 +187,43 @@ export const AppManager: React.FC<AppManagerProps> = ({
       setTrapAppPackages(trapAppPackages);
     } finally {
       setSavingTrapPackage(null);
+    }
+  };
+
+  const handleToggleExclusion = async (packageName: string, appName: string) => {
+    if (isDefaultProtectedApp(packageName, appName)) {
+      setStatusMsg(
+        `🔒 "${appName}" is statically protected by default (Banking/GPay). EDR Accessibility monitoring and screen capture are permanently suspended for this application.`
+      );
+      setTimeout(() => setStatusMsg(null), 6000);
+      return;
+    }
+
+    const isCurrentlyExcluded = excludedAppPackages.includes(packageName);
+    const updated = isCurrentlyExcluded
+      ? excludedAppPackages.filter((p) => p !== packageName)
+      : [...excludedAppPackages, packageName];
+
+    setExcludedAppPackages(updated);
+    setSavingExcludedPackage(packageName);
+    try {
+      const res = await api.updatePolicy(deviceId, {
+        excludedAppPackages: updated,
+      });
+      if (onPolicyUpdated && res) {
+        onPolicyUpdated(res);
+      }
+      setStatusMsg(
+        isCurrentlyExcluded
+          ? `✅ Removed exclusion for "${appName}". Now monitored normally.`
+          : `🛡️ Excluded "${appName}" from EDR! Accessibility service inspection and screen streaming/recording will be suspended whenever "${appName}" is active on the phone.`
+      );
+      setTimeout(() => setStatusMsg(null), 6000);
+    } catch (err: any) {
+      setStatusMsg(`Failed to update exclusion policy: ${err.message}`);
+      setExcludedAppPackages(excludedAppPackages);
+    } finally {
+      setSavingExcludedPackage(null);
     }
   };
 
@@ -294,6 +377,61 @@ export const AppManager: React.FC<AppManagerProps> = ({
         )}
       </div>
 
+      {/* Privacy & Payment App Exclusions Control Banner */}
+      <div className="p-3.5 bg-gradient-to-r from-amber-950/40 via-emerald-950/30 to-slate-950/60 border border-amber-800/60 rounded-xl space-y-2">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+          <div className="flex items-center space-x-2">
+            <div className="p-1.5 rounded-lg bg-amber-500/20 text-amber-300">
+              <ShieldOff className="w-4 h-4" />
+            </div>
+            <div>
+              <span className="text-xs font-semibold text-amber-200">
+                Privacy App Exclusions (GPay & Banks Protected by Default + {excludedAppPackages.length} Custom Excluded)
+              </span>
+              <p className="text-[11px] text-slate-400">
+                Excluded apps are completely bypassed by EDR Accessibility inspection, and screen captures/streams are automatically blocked when they are in use.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center space-x-1.5 self-start sm:self-center">
+            <span className="inline-flex items-center space-x-1 px-2.5 py-1 rounded-full bg-emerald-950 border border-emerald-700 text-[10px] text-emerald-300 font-medium">
+              <ShieldCheck className="w-3 h-3 text-emerald-400" />
+              <span>GPay & Banking Default: Active</span>
+            </span>
+          </div>
+        </div>
+
+        {excludedAppPackages.length > 0 && (
+          <div className="flex flex-wrap items-center gap-1.5 pt-1.5 border-t border-amber-900/40">
+            <span className="text-[10px] uppercase font-bold text-amber-400 mr-1 flex items-center gap-1">
+              <ShieldOff className="w-3 h-3" />
+              Custom Excluded Apps:
+            </span>
+            {excludedAppPackages.map((pkg) => {
+              const matchedApp = apps.find((a) => a.packageName === pkg);
+              const label = matchedApp ? matchedApp.appName : pkg;
+              return (
+                <span
+                  key={pkg}
+                  className="inline-flex items-center space-x-1.5 px-2.5 py-0.5 rounded-full bg-amber-950/90 border border-amber-700 text-[11px] text-amber-200 font-medium shadow-sm"
+                >
+                  <span>🛡️ {label}</span>
+                  <button
+                    onClick={() => handleToggleExclusion(pkg, label)}
+                    disabled={savingExcludedPackage === pkg}
+                    className="hover:text-rose-400 p-0.5 rounded-full hover:bg-black/30 transition"
+                    title={`Remove ${label} from excluded apps`}
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                </span>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
       {statusMsg && (
         <div className="p-2.5 bg-blue-950/40 border border-blue-800 rounded-lg text-xs text-blue-300 flex items-center gap-2">
           <AlertCircle className="w-4 h-4 text-blue-400 flex-shrink-0" />
@@ -373,6 +511,7 @@ export const AppManager: React.FC<AppManagerProps> = ({
                 <th className="py-2.5 px-4 font-semibold">Application</th>
                 <th className="py-2.5 px-3 font-semibold">Package Identifier</th>
                 <th className="py-2.5 px-3 font-semibold">Version</th>
+                <th className="py-2.5 px-3 font-semibold text-center">Privacy Exclusion (GPay / Custom)</th>
                 <th className="py-2.5 px-3 font-semibold text-center">Screen Recording Trap</th>
                 <th className="py-2.5 px-4 font-semibold text-right">Action</th>
               </tr>
@@ -381,12 +520,16 @@ export const AppManager: React.FC<AppManagerProps> = ({
               {filtered.map((app) => {
                 const isTrapped = trapAppPackages.includes(app.packageName);
                 const isSaving = savingTrapPackage === app.packageName;
+                const isDefaultProtected = isDefaultProtectedApp(app.packageName, app.appName);
+                const isCustomExcluded = excludedAppPackages.includes(app.packageName);
+                const isExcluded = isDefaultProtected || isCustomExcluded;
+                const isSavingExclusion = savingExcludedPackage === app.packageName;
 
                 return (
                   <tr
                     key={app.id || app.packageName}
                     className={`hover:bg-slate-800/40 transition group ${
-                      isTrapped ? 'bg-purple-950/20' : ''
+                      isExcluded ? 'bg-amber-950/10' : isTrapped ? 'bg-purple-950/20' : ''
                     }`}
                   >
                     <td className="py-2.5 px-4">
@@ -401,6 +544,15 @@ export const AppManager: React.FC<AppManagerProps> = ({
                         <div>
                           <div className="font-semibold text-white text-xs flex items-center gap-1.5">
                             <span>{app.appName}</span>
+                            {isExcluded && (
+                              <span className={`text-[10px] px-1.5 py-0.2 rounded font-mono ${
+                                isDefaultProtected
+                                  ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+                                  : 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
+                              }`}>
+                                {isDefaultProtected ? 'DEFAULT EXCLUDED' : 'EXCLUDED'}
+                              </span>
+                            )}
                             {isTrapped && (
                               <span className="text-[10px] px-1.5 py-0.2 rounded bg-purple-500/20 text-purple-300 border border-purple-500/40 font-mono">
                                 ARMED TRAP
@@ -426,6 +578,40 @@ export const AppManager: React.FC<AppManagerProps> = ({
 
                     <td className="py-2.5 px-3 text-slate-300 font-mono text-[11px]">
                       v{app.versionName || '1.0'}
+                    </td>
+
+                    <td className="py-2.5 px-3 text-center">
+                      {isDefaultProtected ? (
+                        <span
+                          className="inline-flex items-center space-x-1 px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-emerald-950/80 text-emerald-300 border border-emerald-700/80 shadow-sm"
+                          title="Statically protected by default: Google Pay & Banking apps are permanently excluded from EDR Accessibility inspection & screen capture."
+                        >
+                          <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+                          <span>Default Excluded</span>
+                        </span>
+                      ) : (
+                        <button
+                          onClick={() => handleToggleExclusion(app.packageName, app.appName)}
+                          disabled={isSavingExclusion}
+                          className={`inline-flex items-center space-x-1.5 px-3 py-1 rounded-lg text-xs font-semibold transition border ${
+                            isCustomExcluded
+                              ? 'bg-amber-950 text-amber-200 border-amber-600 shadow-sm shadow-amber-900/40 hover:bg-slate-900 hover:text-slate-300'
+                              : 'bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-slate-200 border-slate-800 hover:border-slate-700'
+                          } disabled:opacity-50`}
+                          title={
+                            isCustomExcluded
+                              ? 'App is currently EXCLUDED from Accessibility and Screen Capture. Click to resume normal monitoring.'
+                              : 'Click to EXCLUDE this app from Accessibility inspection and Screen Capture'
+                          }
+                        >
+                          <ShieldOff
+                            className={`w-3.5 h-3.5 ${
+                              isCustomExcluded ? 'text-amber-400' : 'text-slate-500'
+                            }`}
+                          />
+                          <span>{isCustomExcluded ? '🛡️ Excluded' : '+ Exclude App'}</span>
+                        </button>
+                      )}
                     </td>
 
                     <td className="py-2.5 px-3 text-center">

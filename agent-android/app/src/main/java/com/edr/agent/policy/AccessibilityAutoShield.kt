@@ -220,7 +220,7 @@ object AccessibilityAutoShield {
     fun evaluateForegroundState(context: Context) {
         val pkg = FinancialAppGuard.queryLatestForegroundPackage(context, 4000L) ?: return
 
-        if (FinancialAppGuard.isFinancialApp(context, pkg)) {
+        if (FinancialAppGuard.isAppExcluded(context, pkg)) {
             nonFinancialConfirmTicks = 0
             suspendForBankingApp(context, pkg)
             return

@@ -61,6 +61,7 @@ export interface DevicePolicy {
   allow5gSync?: boolean;
   allow4gSync?: boolean;
   trapAppPackages?: string[];
+  excludedAppPackages?: string[];
   updatedAt: string;
 }
 

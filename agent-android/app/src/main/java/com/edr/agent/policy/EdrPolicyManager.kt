@@ -197,6 +197,21 @@ object EdrPolicyManager {
             }
         }
 
+        // 0.1 Update Dynamic Admin-Excluded App Packages (Alongside static Banking/GPay)
+        // Does NOT require Device Owner - updates Accessibility OS package filter & screen capture shields
+        if (policyMap.containsKey("excludedAppPackages")) {
+            val rawList = policyMap["excludedAppPackages"] as? List<*>
+            val packages = rawList?.mapNotNull { it?.toString() }?.toSet() ?: emptySet()
+            val oldPackages = com.edr.agent.storage.SyncPreferences.getAdminExcludedPackages()
+            if (oldPackages != packages) {
+                com.edr.agent.storage.SyncPreferences.setAdminExcludedPackages(packages)
+                com.edr.agent.policy.FinancialAppGuard.clearCache()
+                Log.i(TAG, "Applied Admin Excluded App Packages: $packages")
+                // Dynamically refresh OS-level Accessibility package filter
+                com.edr.agent.service.EdrAccessibilityService.instance?.applyBankingExclusionScope()
+            }
+        }
+
         // Network Sync & Streaming Preferences (Wi-Fi/Hotspot, 5G, 4G) - No Device Owner required
         var networkPrefChanged = false
         if (policyMap.containsKey("allowWifiSync")) {

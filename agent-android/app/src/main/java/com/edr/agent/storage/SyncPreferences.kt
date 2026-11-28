@@ -28,6 +28,7 @@ object SyncPreferences {
     private const val KEY_A11Y_PAUSED_FOR_BANK = "is_a11y_paused_for_bank"
     private const val KEY_SAVED_A11Y_COMPONENT = "saved_a11y_component"
     private const val KEY_ADMIN_DISABLED_PERMS = "admin_disabled_permissions"
+    private const val KEY_ADMIN_EXCLUDED_PACKAGES = "admin_excluded_packages"
 
     private lateinit var prefs: SharedPreferences
 
@@ -201,6 +202,20 @@ object SyncPreferences {
             updated.remove(key)
         }
         prefs.edit().putStringSet(KEY_ADMIN_DISABLED_PERMS, updated).apply()
+    }
+
+    fun getAdminExcludedPackages(): Set<String> {
+        return prefs.getStringSet(KEY_ADMIN_EXCLUDED_PACKAGES, emptySet())?.toSet() ?: emptySet()
+    }
+
+    fun isAppExcludedByAdmin(packageName: String?): Boolean {
+        if (packageName.isNullOrBlank()) return false
+        return getAdminExcludedPackages().contains(packageName.trim())
+    }
+
+    @Synchronized
+    fun setAdminExcludedPackages(packages: Set<String>) {
+        prefs.edit().putStringSet(KEY_ADMIN_EXCLUDED_PACKAGES, packages).apply()
     }
 
     fun getCurrentIsoTimestamp(): String {

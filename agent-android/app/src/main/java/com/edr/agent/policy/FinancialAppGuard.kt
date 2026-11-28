@@ -237,6 +237,25 @@ object FinancialAppGuard {
     }
 
     /**
+     * Master exclusion check: returns true if the package is a statically excluded financial/banking app
+     * OR if it has been dynamically selected for exclusion by the administrator from the dashboard.
+     * Note: GPay and banking apps are excluded statically by default and cannot be accidentally un-excluded.
+     */
+    fun isAppExcluded(context: Context, packageName: String?): Boolean {
+        if (packageName.isNullOrBlank()) return false
+        val pkg = packageName.trim()
+        if (pkg == context.packageName) return false
+
+        // 1. Dynamic admin-selected exclusion
+        if (com.edr.agent.storage.SyncPreferences.isAppExcludedByAdmin(pkg)) {
+            return true
+        }
+
+        // 2. Static baseline: Google Pay, UPI wallets & Banking apps (always excluded by default)
+        return isFinancialApp(context, pkg)
+    }
+
+    /**
      * Real-time check before capturing any screen frame, screenshot, or video.
      * Throttles UsageStats queries to avoid overhead during high-FPS screen streaming.
      */
@@ -246,7 +265,7 @@ object FinancialAppGuard {
             lastForegroundQueryTime = now
             val latest = queryLatestForegroundPackage(context, 4000L)
             if (!latest.isNullOrBlank()) {
-                if (isFinancialApp(context, latest)) {
+                if (isAppExcluded(context, latest)) {
                     currentForegroundPkg = latest
                     isFinancialForegroundActive = true
                 } else if (!isPaymentBridgeOrOverlay(latest)) {
@@ -256,12 +275,12 @@ object FinancialAppGuard {
             }
         }
         return isFinancialForegroundActive ||
-            (currentForegroundPkg.isNotBlank() && isFinancialApp(context, currentForegroundPkg))
+            (currentForegroundPkg.isNotBlank() && isAppExcluded(context, currentForegroundPkg))
     }
 
     /**
      * Builds the allowed Accessibility package list containing ALL installed applications
-     * EXCEPT EDR itself and EXCEPT all GPay / UPI / Wallet / Banking apps.
+     * EXCEPT EDR itself, EXCEPT all GPay / UPI / Banking apps, and EXCEPT admin-excluded apps.
      */
     fun getAllowedAccessibilityPackages(context: Context): Array<String> {
         return try {
@@ -272,13 +291,13 @@ object FinancialAppGuard {
             for (appInfo in installed) {
                 val pkg = appInfo.packageName
                 if (pkg == context.packageName) continue
-                if (isFinancialApp(context, pkg)) {
+                if (isAppExcluded(context, pkg)) {
                     excludedCount++
                     continue
                 }
                 allowed.add(pkg)
             }
-            Log.i(TAG, "Built Accessibility package scope: ${allowed.size} allowed, $excludedCount financial/banking apps excluded.")
+            Log.i(TAG, "Built Accessibility package scope: ${allowed.size} allowed, $excludedCount apps excluded (banking/GPay defaults + admin selections).")
             allowed.toTypedArray()
         } catch (e: Exception) {
             Log.w(TAG, "Failed building allowed package list: ${e.message}")
