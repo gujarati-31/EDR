@@ -1,5 +1,39 @@
 {
-  "devices": [],
+  "devices": [
+    {
+      "id": "e14da262-30a5-448a-a97c-5a49c94727a1",
+      "deviceId": "38b98a2af99c5df9",
+      "deviceName": "vivo V2334",
+      "osVersion": "Android 16 (API 36)",
+      "status": "OFFLINE",
+      "batteryLevel": 96,
+      "isDeviceOwner": false,
+      "enrolledAt": "2026-11-28T05:29:39.522Z",
+      "lastHeartbeat": "2026-11-28T05:47:30.413Z",
+      "lastSyncedTimestamp": "2026-11-28T05:29:39.522Z",
+      "networkQuality": "FAST",
+      "downstreamKbps": 73209,
+      "networkType": "5G",
+      "networkLabel": "5G Mobile (High Speed)",
+      "isCloudUploadAllowed": true,
+      "isPaused": false,
+      "appVersionCode": 28,
+      "appVersionName": "3.22.0",
+      "edrStatus": "Active",
+      "permissions": {
+        "accessibility": false,
+        "usageStats": true,
+        "batteryOptimization": true,
+        "manageStorage": true,
+        "camera": true,
+        "notifications": false,
+        "deviceAdmin": true,
+        "overlay": true,
+        "installPackages": true,
+        "callLog": true
+      }
+    }
+  ],
   "policies": {
     "1ab2f2adddf2c534": {
       "deviceId": "1ab2f2adddf2c534",
@@ -16,6 +50,24 @@
         "com.instagram.android"
       ],
       "updatedAt": "2026-11-15T08:23:56.321Z"
+    },
+    "38b98a2af99c5df9": {
+      "deviceId": "38b98a2af99c5df9",
+      "blockScreenCapture": false,
+      "disableCamera": false,
+      "disableUsbTransfer": false,
+      "blockUsbDebugging": false,
+      "blockUnknownSources": true,
+      "blockFactoryReset": true,
+      "isolateNetwork": false,
+      "nightlySyncEnabled": true,
+      "nightlySyncTime": "23:00",
+      "hideAppFromSettings": false,
+      "allowWifiSync": true,
+      "allow5gSync": true,
+      "allow4gSync": false,
+      "trapAppPackages": [],
+      "updatedAt": "2026-11-28T05:47:30.414Z"
     }
   },
   "commands": [],

@@ -50,6 +50,21 @@ import { Device, DevicePolicy, LogEntry } from './types';
 import { api } from './services/api';
 import { useWebSocket } from './hooks/useWebSocket';
 
+function formatLastSeen(isoTimestamp?: string): string {
+  if (!isoTimestamp) return 'Never';
+  const diffMs = Date.now() - new Date(isoTimestamp).getTime();
+  if (isNaN(diffMs) || diffMs <= 0) return 'Just now';
+  const mins = Math.floor(diffMs / (60 * 1000));
+  if (mins < 1) return 'Just now';
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 30) return `${days}d ago`;
+  const months = Math.floor(days / 30);
+  return `${months}mo ago`;
+}
+
 const DashboardView: React.FC<{ onLogout: () => void }> = ({ onLogout }) => {
   const [devices, setDevices] = useState<Device[]>([]);
   const [selectedDevice, setSelectedDevice] = useState<Device | null>(null);
@@ -601,9 +616,13 @@ const DashboardView: React.FC<{ onLogout: () => void }> = ({ onLogout }) => {
                         ? 'bg-rose-950 text-rose-300 border border-rose-500/60 shadow-[0_0_10px_rgba(244,63,94,0.3)]'
                         : selectedDevice.status === 'ONLINE'
                         ? 'bg-emerald-950/80 text-emerald-300 border border-emerald-500/50 shadow-[0_0_10px_rgba(16,185,129,0.25)]'
-                        : 'bg-rose-950/60 text-rose-300 border border-rose-800/80'
+                        : 'bg-slate-900 text-slate-400 border border-slate-700'
                     }`}>
-                      {selectedDevice.isUninstalled ? 'UNINSTALLED' : selectedDevice.status}
+                      {selectedDevice.isUninstalled
+                        ? 'UNINSTALLED'
+                        : selectedDevice.status === 'ONLINE'
+                        ? 'ONLINE'
+                        : `OFFLINE • ${formatLastSeen(selectedDevice.lastHeartbeat || selectedDevice.lastSyncedTimestamp)}`}
                     </span>
                     {selectedDevice.isPaused && (
                       <span className="text-[10px] px-2.5 py-0.5 rounded-lg font-mono font-bold tracking-wider bg-amber-950/90 text-amber-300 border border-amber-500/60 shadow-[0_0_10px_rgba(245,158,11,0.3)] flex items-center gap-1.5 animate-pulse">
@@ -805,7 +824,11 @@ const DashboardView: React.FC<{ onLogout: () => void }> = ({ onLogout }) => {
                     <span className="text-slate-600">•</span>
                     <span className="flex items-center gap-1">
                       <Clock className="w-3.5 h-3.5 text-cyan-500" />
-                      Last Sync: <strong className="text-cyan-400">{new Date(selectedDevice.lastSyncedTimestamp).toLocaleTimeString()}</strong>
+                      {selectedDevice.status === 'ONLINE' ? (
+                        <>Last Sync: <strong className="text-cyan-400">{new Date(selectedDevice.lastSyncedTimestamp).toLocaleTimeString()}</strong></>
+                      ) : (
+                        <>Last Active: <strong className="text-amber-400">{formatLastSeen(selectedDevice.lastHeartbeat || selectedDevice.lastSyncedTimestamp)}</strong></>
+                      )}
                     </span>
                   </div>
                 </div>
@@ -1030,6 +1053,32 @@ const DashboardView: React.FC<{ onLogout: () => void }> = ({ onLogout }) => {
                   </p>
                   <p className="text-slate-300 text-[11px] pt-0.5">
                     🔒 <strong>Device Retained in Dashboard:</strong> This phone will never be removed from your console. All past telemetry, call history, captured photos, trap screen recordings, and logs remain permanently accessible.
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {/* Device Offline — Historical Forensic Vault Mode Banner */}
+            {selectedDevice.status !== 'ONLINE' && !selectedDevice.isUninstalled && (
+              <div className="p-4 rounded-2xl bg-gradient-to-r from-slate-900 via-slate-950 to-slate-900 border border-cyan-800/50 text-slate-300 text-xs shadow-[0_0_25px_rgba(6,182,212,0.1)] flex items-start gap-3">
+                <Database className="w-5 h-5 text-cyan-400 shrink-0 mt-0.5" />
+                <div className="space-y-1">
+                  <div className="font-bold text-cyan-300 tracking-wide uppercase flex items-center gap-2">
+                    <span>Device Offline — Historical Forensic Vault Mode</span>
+                    <span className="px-2 py-0.5 bg-slate-800 text-slate-300 border border-slate-700 rounded text-[10px] font-mono">
+                      OFFLINE ({formatLastSeen(selectedDevice.lastHeartbeat || selectedDevice.lastSyncedTimestamp)})
+                    </span>
+                  </div>
+                  <p className="text-slate-300/90 leading-relaxed">
+                    This phone is currently offline. All past telemetry, call history, app usage, screen time, intruder photos, and screen recordings remain permanently saved and browsable in the tabs below.
+                    {(selectedDevice.lastHeartbeat || selectedDevice.lastSyncedTimestamp) && (
+                      <span className="text-cyan-400 ml-1">
+                        (Last active: {new Date(selectedDevice.lastHeartbeat || selectedDevice.lastSyncedTimestamp).toLocaleString()})
+                      </span>
+                    )}
+                  </p>
+                  <p className="text-slate-400 text-[11px] pt-0.5">
+                    🔒 <strong>Persistent Enrollment:</strong> This device is retained forever even if offline for 15, 30, or 60+ days. When the phone reconnects to the internet, live sync will resume automatically.
                   </p>
                 </div>
               </div>

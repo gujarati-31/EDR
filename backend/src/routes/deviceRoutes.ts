@@ -76,15 +76,10 @@ async function checkDeviceInternetAndWake(
     try {
       const { stdout: pkgCheck } = await execAsync(`"${adb}" -s ${adbSerial} shell pm path com.edr.agent`);
       if (!pkgCheck.includes('package:')) {
-        db.markDeviceUninstalled(deviceId, 'EDR Agent app is not installed on the phone');
-        const updated = db.getDeviceById(deviceId);
-        if (updated) {
-          gateway.broadcastToDashboards('DEVICE_UPDATED', updated);
-        }
         return {
           success: false,
           errorType: 'APP_NOT_INSTALLED',
-          message: 'EDR Agent app is NOT installed on the phone. The device remains permanently preserved in the dashboard.',
+          message: 'EDR Agent app is not detected over current USB ADB connection. Device remains permanently preserved in the dashboard.',
         };
       }
     } catch (err) {}

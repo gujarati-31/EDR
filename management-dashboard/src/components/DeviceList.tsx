@@ -16,6 +16,21 @@ import {
 } from 'lucide-react';
 import { Device } from '../types';
 
+function formatLastSeen(isoTimestamp?: string): string {
+  if (!isoTimestamp) return 'Never';
+  const diffMs = Date.now() - new Date(isoTimestamp).getTime();
+  if (isNaN(diffMs) || diffMs <= 0) return 'Just now';
+  const mins = Math.floor(diffMs / (60 * 1000));
+  if (mins < 1) return 'Just now';
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 30) return `${days}d ago`;
+  const months = Math.floor(days / 30);
+  return `${months}mo ago`;
+}
+
 interface DeviceListProps {
   devices: Device[];
   selectedDeviceId: string | null;
@@ -251,7 +266,7 @@ export const DeviceList: React.FC<DeviceListProps> = ({
                         </div>
                       )}
                       <div className="text-[10px] text-slate-400 font-mono truncate">
-                        {device.osVersion} • {device.deviceId.substring(0, 8)}...
+                        {device.osVersion} • {device.deviceId.substring(0, 8)}... • {!isOnline ? `Active ${formatLastSeen(device.lastHeartbeat)}` : 'Live Now'}
                       </div>
                     </div>
                   </div>
@@ -277,7 +292,7 @@ export const DeviceList: React.FC<DeviceListProps> = ({
                           : 'bg-slate-950 text-slate-500 border border-slate-800'
                       }`}
                     >
-                      {device.isUninstalled ? 'UNINSTALLED' : isOnline ? (isDirectLive ? 'ONLINE' : 'SYNCING') : 'OFFLINE'}
+                      {device.isUninstalled ? 'UNINSTALLED' : isOnline ? (isDirectLive ? 'ONLINE' : 'SYNCING') : `OFFLINE • ${formatLastSeen(device.lastHeartbeat)}`}
                     </span>
 
                     {/* EDR Status Badge (Active vs Paused) */}
@@ -355,8 +370,8 @@ export const DeviceList: React.FC<DeviceListProps> = ({
                       }
                       if (!isOnline || net === 'OFFLINE') {
                         return (
-                          <span className="px-1.5 py-0.5 rounded text-[9px] font-mono font-bold bg-slate-900 text-slate-400 border border-slate-700" title="Offline / Internet OFF">
-                            OFFLINE
+                          <span className="px-1.5 py-0.5 rounded text-[9px] font-mono font-bold bg-slate-900 text-slate-400 border border-slate-700" title={`Offline / Last seen ${formatLastSeen(device.lastHeartbeat)}`}>
+                            OFFLINE ({formatLastSeen(device.lastHeartbeat)})
                           </span>
                         );
                       }

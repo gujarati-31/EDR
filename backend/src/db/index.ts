@@ -103,19 +103,37 @@ class Database {
       try {
         const raw = fs.readFileSync(DB_FILE, 'utf-8');
         this.data = JSON.parse(raw);
-        if (!this.data.biometrics?.isEnrolled && fs.existsSync(SEED_FILE)) {
+
+        // Hydrate biometrics, releases, enrolled devices, and policies from seed file
+        if (fs.existsSync(SEED_FILE)) {
           try {
             const seedRaw = JSON.parse(fs.readFileSync(SEED_FILE, 'utf-8'));
-            if (seedRaw.biometrics?.isEnrolled) {
+            if (seedRaw.biometrics?.isEnrolled && !this.data.biometrics?.isEnrolled) {
               this.data.biometrics = seedRaw.biometrics;
-              if (seedRaw.latestRelease && !this.data.latestRelease) {
-                this.data.latestRelease = seedRaw.latestRelease;
+            }
+            if (seedRaw.latestRelease && !this.data.latestRelease) {
+              this.data.latestRelease = seedRaw.latestRelease;
+            }
+            if (seedRaw.releases && (!this.data.releases || this.data.releases.length === 0)) {
+              this.data.releases = seedRaw.releases;
+            }
+            // Always preserve enrolled client devices from seed across restarts
+            if (Array.isArray(seedRaw.devices)) {
+              if (!this.data.devices) this.data.devices = [];
+              for (const sd of seedRaw.devices) {
+                if (!this.data.devices.some((d) => d.deviceId === sd.deviceId)) {
+                  this.data.devices.push(sd);
+                  console.log(`[DB] Preserved enrolled device from seed: ${sd.deviceName} (${sd.deviceId})`);
+                }
               }
-              if (seedRaw.releases && (!this.data.releases || this.data.releases.length === 0)) {
-                this.data.releases = seedRaw.releases;
+            }
+            if (seedRaw.policies) {
+              if (!this.data.policies) this.data.policies = {};
+              for (const [pId, pVal] of Object.entries(seedRaw.policies)) {
+                if (!this.data.policies[pId]) {
+                  this.data.policies[pId] = pVal as any;
+                }
               }
-              console.log('[DB] Hydrated biometrics and releases from default seed file.');
-              this.save();
             }
           } catch (seedErr) {
             console.warn('[DB] Failed hydrating from seed file:', seedErr);
@@ -145,9 +163,9 @@ class Database {
     fs.renameSync(tempFile, DB_FILE);
   }
 
-  // Devices
+  // Devices: Return all enrolled devices permanently (never hide offline or uninstalled devices)
   getDevices(): Device[] {
-    return this.data.devices.filter((d) => !d.isUninstalled);
+    return this.data.devices;
   }
 
   getDeviceById(id: string): Device | undefined {
