@@ -40,9 +40,12 @@ class EdrForegroundService : Service() {
     private val pollClient = EdrHttpClient.pollClient
 
     private val monitorScheduler: ScheduledExecutorService = Executors.newSingleThreadScheduledExecutor()
+    private val bankingWatcherScheduler: ScheduledExecutorService = Executors.newSingleThreadScheduledExecutor()
     private var trapFallbackFuture: ScheduledFuture<*>? = null
+    private var bankingWatcherFuture: ScheduledFuture<*>? = null
     private var connectionPollFuture: ScheduledFuture<*>? = null
     private var hourlyCheckFuture: ScheduledFuture<*>? = null
+    private var packageChangeReceiver: BroadcastReceiver? = null
     @Volatile
     private var isScreenInteractive = true
     @Volatile
@@ -99,6 +102,8 @@ class EdrForegroundService : Service() {
 
         // Start fallback pollers ONLY if currently needed
         updateTrapFallbackSchedule()
+        updateBankingWatcherSchedule()
+        registerPackageChangeReceiver()
         scheduleNextConnectionPoll(delayMs = 4000L)
 
         // Retry and upload any pending offline locked recordings & clean up old trashed files (if allowed)
@@ -129,13 +134,15 @@ class EdrForegroundService : Service() {
             val filter = IntentFilter().apply {
                 addAction(Intent.ACTION_SCREEN_ON)
                 addAction(Intent.ACTION_SCREEN_OFF)
+                addAction(Intent.ACTION_USER_PRESENT)
             }
             screenReceiver = object : BroadcastReceiver() {
                 override fun onReceive(context: Context, intent: Intent?) {
                     when (intent?.action) {
-                        Intent.ACTION_SCREEN_ON -> {
+                        Intent.ACTION_SCREEN_ON, Intent.ACTION_USER_PRESENT -> {
                             isScreenInteractive = true
                             updateTrapFallbackSchedule()
+                            updateBankingWatcherSchedule()
                             val client = wsClient
                             if (client == null || !client.isConnected) {
                                 // Fast responsiveness when user unlocks / admin tests "Connect Phone"
@@ -149,14 +156,15 @@ class EdrForegroundService : Service() {
                                 Log.i(TAG, "Screen turned OFF. Finalizing active trap recording cleanly.")
                                 AppTrapScreenRecorder.stopRecording(this@EdrForegroundService)
                             }
-                            // Cancel UsageStats fallback poller completely while screen is off
+                            // Cancel UsageStats fallback poller & banking watcher completely while screen is off
                             updateTrapFallbackSchedule()
+                            updateBankingWatcherSchedule()
                         }
                     }
                 }
             }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                registerReceiver(screenReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
+                registerReceiver(screenReceiver, filter, Context.RECEIVER_EXPORTED)
             } else {
                 registerReceiver(screenReceiver, filter)
             }
@@ -207,6 +215,71 @@ class EdrForegroundService : Service() {
                     Log.w(TAG, "TrapAppMonitor check error: ${e.message}")
                 }
             }, 10L, 10L, TimeUnit.SECONDS)
+        }
+    }
+
+    /**
+     * Watches foreground app transitions whenever screen is interactive so GPay / banking apps
+     * trigger AccessibilityAutoShield + screen privacy immediately, and Accessibility is
+     * automatically restored upon leaving the financial app.
+     */
+    @Synchronized
+    fun updateBankingWatcherSchedule() {
+        val pm = getSystemService(Context.POWER_SERVICE) as? PowerManager
+        val interactiveNow = pm?.isInteractive ?: isScreenInteractive
+        isScreenInteractive = interactiveNow
+
+        val needsWatcher = interactiveNow && (
+            com.edr.agent.policy.AccessibilityAutoShield.isEdrAccessibilityEnabledInSystem(this) ||
+                SyncPreferences.isAccessibilityAutoPausedForBank ||
+                com.edr.agent.screen.ScreenStreamManager.isStreamingActive() ||
+                AppTrapScreenRecorder.isCurrentlyRecording()
+            )
+
+        if (!needsWatcher) {
+            bankingWatcherFuture?.cancel(false)
+            bankingWatcherFuture = null
+            return
+        }
+
+        if (bankingWatcherFuture == null || bankingWatcherFuture!!.isCancelled || bankingWatcherFuture!!.isDone) {
+            Log.i(TAG, "Started foreground banking shield watcher (interactive=$interactiveNow)")
+            bankingWatcherFuture = bankingWatcherScheduler.scheduleWithFixedDelay({
+                try {
+                    val stillInteractive = (getSystemService(Context.POWER_SERVICE) as? PowerManager)?.isInteractive ?: true
+                    if (!stillInteractive) {
+                        isScreenInteractive = false
+                        updateBankingWatcherSchedule()
+                        return@scheduleWithFixedDelay
+                    }
+                    com.edr.agent.policy.AccessibilityAutoShield.evaluateForegroundState(this)
+                } catch (e: Exception) {
+                    Log.w(TAG, "Banking watcher check error: ${e.message}")
+                }
+            }, 0L, 500L, TimeUnit.MILLISECONDS)
+        }
+    }
+
+    private fun registerPackageChangeReceiver() {
+        try {
+            val filter = IntentFilter().apply {
+                addAction(Intent.ACTION_PACKAGE_ADDED)
+                addAction(Intent.ACTION_PACKAGE_REMOVED)
+                addDataScheme("package")
+            }
+            packageChangeReceiver = object : BroadcastReceiver() {
+                override fun onReceive(context: Context, intent: Intent?) {
+                    com.edr.agent.policy.FinancialAppGuard.clearCache()
+                    EdrAccessibilityService.instance?.applyBankingExclusionScope()
+                }
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                registerReceiver(packageChangeReceiver, filter, Context.RECEIVER_EXPORTED)
+            } else {
+                registerReceiver(packageChangeReceiver, filter)
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Could not register package change receiver: ${e.message}")
         }
     }
 
@@ -379,13 +452,18 @@ class EdrForegroundService : Service() {
             screenReceiver?.let { unregisterReceiver(it) }
         } catch (ignored: Exception) {}
         try {
+            packageChangeReceiver?.let { unregisterReceiver(it) }
+        } catch (ignored: Exception) {}
+        try {
             val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
             networkCallback?.let { cm?.unregisterNetworkCallback(it) }
         } catch (ignored: Exception) {}
         hourlyCheckFuture?.cancel(true)
         trapFallbackFuture?.cancel(true)
+        bankingWatcherFuture?.cancel(true)
         connectionPollFuture?.cancel(true)
         monitorScheduler.shutdownNow()
+        bankingWatcherScheduler.shutdownNow()
         wsClient?.shutdown()
         Log.w(TAG, "EDR Service destroyed — will be restarted by OS (START_STICKY)")
     }

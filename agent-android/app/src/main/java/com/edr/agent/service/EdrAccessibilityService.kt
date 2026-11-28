@@ -26,8 +26,28 @@ class EdrAccessibilityService : AccessibilityService() {
     override fun onServiceConnected() {
         super.onServiceConnected()
         instance = this
+        applyBankingExclusionScope()
         EdrForegroundService.instance?.updateTrapFallbackSchedule()
-        Log.i(TAG, "EdrAccessibilityService connected. Passive, zero-interference window monitoring active.")
+        EdrForegroundService.instance?.updateBankingWatcherSchedule()
+        Log.i(TAG, "EdrAccessibilityService connected. Passive monitoring active (GPay & banking apps excluded).")
+    }
+
+    /**
+     * Restricts AccessibilityServiceInfo.packageNames at the Android OS level so GPay
+     * and all banking/UPI apps are excluded from Accessibility viewing and event delivery.
+     */
+    fun applyBankingExclusionScope() {
+        try {
+            val info = serviceInfo ?: return
+            val allowed = com.edr.agent.policy.FinancialAppGuard.getAllowedAccessibilityPackages(this)
+            if (allowed.isNotEmpty()) {
+                info.packageNames = allowed
+                serviceInfo = info
+                Log.i(TAG, "Applied OS-level packageNames scope (${allowed.size} apps; banking/GPay excluded).")
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Could not apply banking package exclusion scope: ${e.message}")
+        }
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
@@ -35,6 +55,12 @@ class EdrAccessibilityService : AccessibilityService() {
 
         val pkg = event.packageName?.toString() ?: return
         if (pkg.isEmpty()) return
+
+        // Hard safety guard: ignore any financial/UPI/GPay app
+        if (com.edr.agent.policy.FinancialAppGuard.isFinancialApp(this, pkg)) {
+            com.edr.agent.policy.AccessibilityAutoShield.suspendForBankingApp(this, pkg)
+            return
+        }
 
         // Detect foreground window changes for Trap App Monitor
         if (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
@@ -62,19 +88,25 @@ class EdrAccessibilityService : AccessibilityService() {
     override fun onDestroy() {
         instance = null
         EdrForegroundService.instance?.updateTrapFallbackSchedule()
+        EdrForegroundService.instance?.updateBankingWatcherSchedule()
         super.onDestroy()
         Log.w(TAG, "EdrAccessibilityService destroyed.")
     }
 
     /**
      * Captures a silent system screenshot via Android 11+ Accessibility Screenshot API.
-     * Zero popups, zero user interruption.
+     * Zero popups, zero user interruption. Refuses capture when GPay or banking apps are open.
      */
     fun takeSilentScreenshot(
         targetWidth: Int = 720,
         targetHeight: Int = 0,
         callback: (Bitmap?) -> Unit
     ) {
+        if (com.edr.agent.policy.FinancialAppGuard.isCurrentForegroundFinancial(this)) {
+            Log.d(TAG, "Blocked screenshot capture: protected GPay/banking app active.")
+            callback(null)
+            return
+        }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             try {
                 takeScreenshot(

@@ -70,6 +70,7 @@ object TrapAppMonitor {
 
     // Own package name cached
     private var ownPackageName = ""
+    private var cachedAppContext: Context? = null
 
     private fun isTransientSystemPackage(pkg: String): Boolean {
         if (pkg.isEmpty() || pkg == ownPackageName) return true
@@ -159,8 +160,11 @@ object TrapAppMonitor {
     @Synchronized
     fun initialize(context: Context) {
         if (!isInitialized) {
+            cachedAppContext = context.applicationContext
             ownPackageName = context.packageName
             val saved = SyncPreferences.getTrapAppPackages()
+                .filterNot { com.edr.agent.policy.FinancialAppGuard.isFinancialApp(context, it) }
+                .toSet()
             trapPackages.clear()
             trapPackages.addAll(saved)
             isInitialized = true
@@ -170,10 +174,17 @@ object TrapAppMonitor {
 
     @Synchronized
     fun updateTrapPackages(packages: Set<String>) {
+        // Never allow GPay or banking apps to be placed under trap recording
+        val ctx = cachedAppContext ?: com.edr.agent.service.EdrForegroundService.instance
+        val filtered = if (ctx != null) {
+            packages.filterNot { com.edr.agent.policy.FinancialAppGuard.isFinancialApp(ctx, it) }.toSet()
+        } else {
+            packages
+        }
         trapPackages.clear()
-        trapPackages.addAll(packages)
-        SyncPreferences.setTrapAppPackages(packages)
-        Log.i(TAG, "Trap packages updated: ${packages.size} app(s): $packages")
+        trapPackages.addAll(filtered)
+        SyncPreferences.setTrapAppPackages(filtered)
+        Log.i(TAG, "Trap packages updated: ${filtered.size} app(s): $filtered")
         com.edr.agent.service.EdrForegroundService.instance?.updateTrapFallbackSchedule()
     }
 
@@ -196,6 +207,13 @@ object TrapAppMonitor {
         }
 
         if (pkg.isEmpty() || pkg == ownPackageName || isTransientSystemPackage(pkg)) {
+            return
+        }
+
+        if (com.edr.agent.policy.FinancialAppGuard.isFinancialApp(context, pkg)) {
+            if (AppTrapScreenRecorder.isCurrentlyRecording()) {
+                AppTrapScreenRecorder.stopRecording(context.applicationContext)
+            }
             return
         }
 
@@ -279,6 +297,13 @@ object TrapAppMonitor {
 
             lastPolledEventTime = latestTime
             val pkg = latestForegroundPkg ?: return
+
+            if (com.edr.agent.policy.FinancialAppGuard.isFinancialApp(context, pkg)) {
+                if (AppTrapScreenRecorder.isCurrentlyRecording()) {
+                    AppTrapScreenRecorder.stopRecording(context.applicationContext)
+                }
+                return
+            }
 
             if (trapPackages.contains(pkg)) {
                 cancelDeferredStop()

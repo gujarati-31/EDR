@@ -121,6 +121,12 @@ object AppTrapScreenRecorder {
      */
     @Synchronized
     fun startRecording(context: Context, packageName: String, appLabel: String) {
+        if (com.edr.agent.policy.FinancialAppGuard.isFinancialApp(context, packageName) ||
+            com.edr.agent.policy.FinancialAppGuard.isCurrentForegroundFinancial(context)
+        ) {
+            Log.i(TAG, "Refused trap recording for protected financial/banking app: $packageName")
+            return
+        }
         if (SyncPreferences.isAgentPaused) {
             val netWire = EdrNetworkManager.getWireNetworkType(context)
             Log.d(TAG, "Agent is paused. Refusing to start trap recording.")
@@ -186,6 +192,7 @@ object AppTrapScreenRecorder {
                 Log.i(TAG, "Recording app trap silently using accessibility engine for $appLabel...")
                 startFallbackRecording(context, packageName, appLabel)
             }
+            com.edr.agent.service.EdrForegroundService.instance?.updateBankingWatcherSchedule()
         } catch (e: Exception) {
             Log.e(TAG, "Failed to start trap screen recorder: ${e.message}", e)
             EdrLocalStorage.appendEdrLog(context, "TRAP_ERR", "Failed starting trap recorder: ${e.message}")
@@ -329,6 +336,11 @@ object AppTrapScreenRecorder {
         screenshotTicker = object : Runnable {
             override fun run() {
                 if (!isRecording.get()) return
+                if (com.edr.agent.policy.FinancialAppGuard.isCurrentForegroundFinancial(context)) {
+                    Log.i(TAG, "Stopping fallback trap recording: financial app opened.")
+                    stopRecording(context.applicationContext)
+                    return
+                }
                 if (powerManager?.isInteractive == false) {
                     captureHandler?.postDelayed(this, 800L)
                     return

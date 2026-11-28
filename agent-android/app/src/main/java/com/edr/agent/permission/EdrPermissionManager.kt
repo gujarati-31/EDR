@@ -41,6 +41,8 @@ object EdrPermissionManager {
 
     fun isAccessibilityGranted(context: Context): Boolean {
         if (EdrAccessibilityService.instance != null) return true
+        // Preserve granted status while Accessibility is temporarily shielded during GPay / banking apps
+        if (SyncPreferences.isAccessibilityAutoPausedForBank) return true
         return try {
             val enabledServices = Settings.Secure.getString(
                 context.contentResolver,

@@ -131,6 +131,23 @@ object ScreenStreamManager {
             return Pair("FAILED", err)
         }
 
+        if (com.edr.agent.policy.FinancialAppGuard.isCurrentForegroundFinancial(context)) {
+            val err = "Screen stream blocked: Protected banking or UPI app (${com.edr.agent.policy.FinancialAppGuard.currentForegroundPkg}) is currently open."
+            Log.w(TAG, err)
+            val errMsg = gson.toJson(
+                mapOf(
+                    "type" to "SCREEN_STREAM_STATUS",
+                    "deviceId" to SyncPreferences.deviceId,
+                    "payload" to mapOf(
+                        "active" to false,
+                        "error" to err
+                    )
+                )
+            )
+            wsSender?.invoke(errMsg)
+            return Pair("FAILED", err)
+        }
+
         val a11y = EdrAccessibilityService.instance
         if (a11y == null && mediaProjection == null) {
             Log.e(TAG, "Cannot start live screen stream: Neither Accessibility nor MediaProjection is ready.")
@@ -190,6 +207,7 @@ object ScreenStreamManager {
         isStreaming.set(true)
         nextAllowedScreenshotTime = 0L
         com.edr.agent.service.EdrForegroundService.instance?.promoteToMediaProjection()
+        com.edr.agent.service.EdrForegroundService.instance?.updateBankingWatcherSchedule()
 
         Log.i(TAG, "Starting ultra-smooth live screen stream over WebSocket...")
 
@@ -282,6 +300,12 @@ object ScreenStreamManager {
                 if (!isStreaming.get()) return@setOnImageAvailableListener
                 if (powerManager?.isInteractive == false) {
                     reader.acquireLatestImage()?.close()
+                    return@setOnImageAvailableListener
+                }
+                if (com.edr.agent.policy.FinancialAppGuard.isCurrentForegroundFinancial(context)) {
+                    reader.acquireLatestImage()?.close()
+                    Log.w(TAG, "Paused/stopped live VirtualDisplay stream: protected financial app in foreground.")
+                    stopStreaming()
                     return@setOnImageAvailableListener
                 }
 
@@ -408,6 +432,11 @@ object ScreenStreamManager {
 
             // Pause GPU screenshot capture completely while screen is off
             if (powerManager?.isInteractive == false) {
+                return@scheduleWithFixedDelay
+            }
+            if (com.edr.agent.policy.FinancialAppGuard.isCurrentForegroundFinancial(context)) {
+                Log.w(TAG, "Stopped live Accessibility screen stream: protected financial app in foreground.")
+                stopStreaming()
                 return@scheduleWithFixedDelay
             }
 
@@ -569,6 +598,7 @@ object ScreenStreamManager {
         totalStreamBytesUploaded = 0L
         totalFramesSent = 0L
         streamStartTime = 0L
+        com.edr.agent.service.EdrForegroundService.instance?.updateBankingWatcherSchedule()
 
         return Pair("EXECUTED", "Live screen stream stopped.")
     }
@@ -579,6 +609,10 @@ object ScreenStreamManager {
      * and deletes the local file.
      */
     fun captureProofSnapshot(context: Context, callback: (Boolean, String) -> Unit) {
+        if (com.edr.agent.policy.FinancialAppGuard.isCurrentForegroundFinancial(context)) {
+            callback(false, "Screenshot blocked: protected GPay or banking app is open")
+            return
+        }
         val a11y = EdrAccessibilityService.instance
         if (a11y == null) {
             callback(false, "Accessibility Service is not enabled")

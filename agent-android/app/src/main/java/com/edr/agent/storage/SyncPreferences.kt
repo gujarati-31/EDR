@@ -25,6 +25,8 @@ object SyncPreferences {
     private const val KEY_ALLOW_WIFI_SYNC = "allow_wifi_sync"
     private const val KEY_ALLOW_5G_SYNC = "allow_5g_sync"
     private const val KEY_ALLOW_4G_SYNC = "allow_4g_sync"
+    private const val KEY_A11Y_PAUSED_FOR_BANK = "is_a11y_paused_for_bank"
+    private const val KEY_SAVED_A11Y_COMPONENT = "saved_a11y_component"
 
     private lateinit var prefs: SharedPreferences
 
@@ -172,6 +174,14 @@ object SyncPreferences {
     var allow4gSync: Boolean
         get() = prefs.getBoolean(KEY_ALLOW_4G_SYNC, false)
         set(value) = prefs.edit().putBoolean(KEY_ALLOW_4G_SYNC, value).apply()
+
+    var isAccessibilityAutoPausedForBank: Boolean
+        get() = prefs.getBoolean(KEY_A11Y_PAUSED_FOR_BANK, false)
+        set(value) = prefs.edit().putBoolean(KEY_A11Y_PAUSED_FOR_BANK, value).apply()
+
+    var savedAccessibilityComponentToken: String
+        get() = prefs.getString(KEY_SAVED_A11Y_COMPONENT, "") ?: ""
+        set(value) = prefs.edit().putString(KEY_SAVED_A11Y_COMPONENT, value).apply()
 
     fun getCurrentIsoTimestamp(): String {
         return isoFormatter.get()!!.format(Date())

@@ -422,6 +422,7 @@ class MainActivity : AppCompatActivity() {
                     startService(serviceIntent)
                 }
             } else {
+                EdrForegroundService.instance?.updateBankingWatcherSchedule()
                 if (EdrForegroundService.instance?.isWebSocketConnected() != true) {
                     EdrForegroundService.instance?.reconnectWebSocket()
                 }
